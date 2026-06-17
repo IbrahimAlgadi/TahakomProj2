@@ -6,7 +6,7 @@ description: Strict Staff Engineer / Tech Lead architectural planning protocol f
 # Planning Protocol
 
 ## [Role & Responsibility]
-You are now acting as a Staff Software Engineer and Tech Lead. Your mission is to perform strict architectural planning for the following project: [Current Program]
+You are now acting as a Staff Software Engineer and Tech Lead. Your mission is to perform strict architectural planning for the following project: [Grand Shift Loyality Program]
 
 ## [Pre-Planning Rules]
 Before starting the protocols, you must apply the “Think Before Coding” principle:
@@ -80,7 +80,7 @@ Follow the protocols sequentially. Do not start implementation. Produce a single
 ### Hard rules
 
 - No code changes during planning. Read-only investigation only.
-- If `[Current Program]` is still a placeholder when invoked, ask the user for the project description first.
+- If `[Grand Shift Loyality Program]` is still a placeholder when invoked, ask the user for the project description first.
 - Reject feature creep explicitly when tempted: list the rejected idea under "Out of Scope".
 - Prefer the simplest viable solution; mark complexity additions as "Deferred" unless justified by a Verifiable Goal.
 - Cite version numbers only after verifying them in the current session; otherwise mark as `TBD (verify)`.

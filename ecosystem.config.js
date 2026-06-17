@@ -1,4 +1,4 @@
-let SCRIPT_PATH = "C:\\Proj\\app\\";
+let SCRIPT_PATH = __dirname + "\\";
 let NODE_PATH = "C:\\Program Files (x86)\\ISS\\SecurOS\\bin64\\node.js\\bin\\node.exe";
 
 let commonConfig = {

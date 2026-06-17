@@ -24,6 +24,7 @@ certs/
 *.tmp
 *.orig
 *.drawio.bkp
+.$*.bkp
 package-lock.json.*
 
 # Downloaded tooling & installers (not source)

@@ -1,7 +1,7 @@
 {
   "storage": {
-    "directory": "I:\\export",
-    "maxCapacity": 1000,
+    "directory": "C:\\export",
+    "maxCapacity": 10,
     "retentionPolicy": "fifo",
     "siteId": "HQ1232"
   },
