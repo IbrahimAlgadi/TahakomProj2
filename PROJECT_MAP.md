@@ -269,7 +269,7 @@ services/
 
 | Base path | File | Key tables / WS events |
 |---|---|---|
-| `/` (pages + `/api/config`, `/files/*`, `/transfer/*`) | routes/mainControlRoutes.js | files, transfer_job, transfer_job_log; WS: startStorageTransfer |
+| `/` (pages + `/api/config`, `/files/*`, `/transfer/*`) | routes/mainControlRoutes.js | files, transfer_job, transfer_job_log; WS: startStorageTransfer. `/files/data` uses a single-pass `GROUP BY LEFT(tid, LENGTH(tid)-LENGTH(cam_id::text)), plate_num, site_id, date_folder, time_folder` — no CTE/self-join. |
 | `/auto-transfer` | routes/autoTransferRoutes.js | transfer_queue_job, transfer_queue; WS: handleAutoTransfer |
 | `/ftp-transfer` | routes/ftpTransferRoutes.js | ftp_image_transfer_queue_*; WS: handleFtpTransfer |
 | `/manual-transfer` | routes/manualTransferRoutes.js | files, transfer_job, transfer_job_log |
@@ -349,3 +349,4 @@ services/
 | T-3 | Inline JSONB retry log on `files` | `files.export_retry_log_object` | Low — bloat risk at high plate-volume; consider extracting to a dedicated `export_retry_log` table |
 | T-4 | `transfer_job` / `transfer_job_log` (legacy manual flow) | `routes/mainControlRoutes.js`, `manualTransferRoutes.js` | Low — assess whether this flow is still used or fully superseded by `transfer_queue_job` |
 | T-5 | No automated tests for SecurOS scripts | `securos-scripts/` | Low — not possible without the SecurOS runtime injection; consider a mock harness |
+| ~~T-6~~ | ~~`/files/data` used a CTE + self-JOIN on `SUBSTRING(tid,1,LENGTH(tid)-1)` — cross-plate file aggregation bug + perf~~ | ~~`routes/mainControlRoutes.js`~~ | **Fixed** (Jun 2026) — replaced with single-pass GROUP BY on event_tid + plate_num; countQuery also aligned |

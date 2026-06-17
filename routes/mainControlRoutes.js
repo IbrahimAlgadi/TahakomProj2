@@ -75,23 +75,39 @@ function createMainControlRouter({ logger, pool, readConfig, writeConfig, EXPORT
                 AND deleted = false
             `;
             const havingClause = showMissing ? 'HAVING bool_or(file_size = 0)' : '';
+            // Single-pass aggregation keyed on (event_tid, plate_num, site_id, date_folder, time_folder).
+            // event_tid = LEFT(tid, LENGTH(tid) - LENGTH(cam_id::text)) strips the actual cam_id (any number
+            // of digits) from the composite tid, so each SecurOS plate-read is one row and multi-digit
+            // camera IDs don't leave a spurious digit in the key.
+            const eventTidExpr = `LEFT(tid, LENGTH(tid) - LENGTH(COALESCE(cam_id::text, '')))`;
             const dataQuery = `
-                WITH grouped_files AS (
-                    SELECT SUBSTRING(tid, 1, LENGTH(tid)-1) as base_tid, plate_num, site_id, date_folder, time_folder, MIN(date) as date, MIN(time) as time
-                    FROM files WHERE ${whereConditions}
-                    GROUP BY SUBSTRING(tid, 1, LENGTH(tid)-1), plate_num, site_id, date_folder, time_folder
-                    ${havingClause}
-                    ORDER BY MIN(date) DESC, MIN(time) DESC
-                    LIMIT $4 OFFSET $5
-                )
-                SELECT gf.*, array_agg(f.tid) AS tid, array_agg(f.file_path) AS file_paths, array_agg(f.file_size) AS file_sizes, array_agg(f.file_name) AS file_names, array_agg(f.deleted) AS deletions, array_agg(f.is_auto_transferred) AS auto_transfers, array_agg(f.is_ftp_transferred) AS ftp_transfers
-                FROM grouped_files gf JOIN files f ON SUBSTRING(f.tid, 1, LENGTH(f.tid)-1) = gf.base_tid
-                GROUP BY gf.base_tid, gf.plate_num, gf.site_id, gf.date_folder, gf.time_folder, gf.date, gf.time
-                ORDER BY gf.date DESC, gf.time DESC
+                SELECT
+                    array_agg(tid)                 AS tid,
+                    plate_num, site_id,
+                    date_folder, time_folder,
+                    MIN(date)                      AS date,
+                    MIN(time)                      AS time,
+                    array_agg(file_path)           AS file_paths,
+                    array_agg(file_size)           AS file_sizes,
+                    array_agg(file_name)           AS file_names,
+                    array_agg(deleted)             AS deletions,
+                    array_agg(is_auto_transferred) AS auto_transfers,
+                    array_agg(is_ftp_transferred)  AS ftp_transfers
+                FROM files
+                WHERE ${whereConditions}
+                GROUP BY ${eventTidExpr}, plate_num, site_id, date_folder, time_folder
+                ${havingClause}
+                ORDER BY MIN(date) DESC, MIN(time) DESC
+                LIMIT $4 OFFSET $5
             `;
             const countQuery = `
-                SELECT COUNT(DISTINCT SUBSTRING(tid, 1, LENGTH(tid)-1)) as total
-                FROM files WHERE ${whereConditions} ${showMissing ? 'AND file_size = 0' : ''}
+                SELECT COUNT(*) AS total FROM (
+                    SELECT 1
+                    FROM files
+                    WHERE ${whereConditions}
+                    GROUP BY ${eventTidExpr}, plate_num, site_id, date_folder, time_folder
+                    ${havingClause}
+                ) t
             `;
     
             const [dataResult, countResult] = await Promise.all([

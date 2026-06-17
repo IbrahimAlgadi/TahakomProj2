@@ -37,10 +37,10 @@ A comprehensive, paginated table that lists all captured file records.
     -   `Site ID`
     -   `Date`
     -   `Time`
-    -   `File Paths`
+    -   `File Paths` — each filename is shown as a truncated clickable link. Clicking any link opens a full-screen Bootstrap 5 image lightbox. If the row has multiple images, left/right arrows let you cycle through all of them. Files with `size = 0` (not yet exported to disk) are shown as grey text with no link.
     -   `File Sizes`
     -   `File Count`
-    -   `Download`: A button to download the files for that record.
+    -   `Download`: A button to download all available files for that record.
 
 ## 4. Storage Settings Modal
 
@@ -68,7 +68,8 @@ A detailed modal for configuring all aspects of file storage and management.
 1.  **View Files**: On page load, the table displays the most recent files.
 2.  **Monitor Storage**: Check the "Storage Overview" card to see how much space is being used.
 3.  **Filter Files**: Use the filter section to find specific files by date, time, or license plate.
-4.  **Download Files**: Click the download button in any row to get the associated files.
+4.  **View Images**: Click any filename in the "File Paths" column to open it in a full-screen lightbox. Use the arrow buttons (or keyboard ← →) to browse all images for that detection.
+5.  **Download Files**: Click the download button in any row to get all available files for that record.
 5.  **Configure Settings**:
     -   Click the "Configure" button to open the settings modal.
     -   Adjust the storage directory, encryption, path structure, and retention policies as needed.
