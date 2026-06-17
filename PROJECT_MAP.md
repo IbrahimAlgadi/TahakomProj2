@@ -329,6 +329,17 @@ services/
 | `autoVideoTransferMicroservice` | `archived/autoVideoTransferMicroservice.js` | Replaced by `refactored_autoVideoTransferEDAMicroservice.js` |
 | `autoVideoTransferEDAMicroservice` | `archived/autoVideoTransferEDAMicroservice.js` | Replaced by the refactored variant |
 | `FileVideoTransferRedisService` | `archived/FileVideoTransferRedisService.js` | Archived — not referenced anywhere active |
+| Legacy docs (`docs/`, `development-guides/`, `user-stories/`) | `archived/legacy-docs/` | **Consolidated 2026-06-17** — unique content folded into `product/`; redundant/legacy files moved to `archived/legacy-docs/`; original folders removed. See `product/README.md` for full index. |
+
+### Documentation Reconciliation Follow-ups
+
+These archived files contain detail that should eventually be verified and lifted into `product/technical/services.md` (tracked here, not yet done):
+
+| # | Item | Archived file | Action required |
+|---|---|---|---|
+| D-1 | `monitorISSMediaFilesOptimizedMicroservice` env vars, Redis keys, and SQL patterns may be more complete in legacy doc than in `services.md` | `archived/legacy-docs/ISS_MEDIA_INDEXING_SERVICE.md` | Cross-check env vars and Redis keys against live code; update `product/technical/services.md` with anything missing |
+| D-2 | `job-function.md` captured scheduler intent (38-file phases, status branches) as an unfinished draft | `archived/legacy-docs/job-function.md` | Reconcile against `refactored_autoVideoTransferEDAMicroservice.js` actual behavior; document confirmed logic in `services.md` |
+| D-3 | `sow.md` may contain QA/timeline tables not copied into the PRD | `archived/legacy-docs/sow.md` | Scan for QA criteria or delivery timelines not already in `product/prd/PRD-tahakom-data-transfer.md`; lift if useful |
 
 ### Open Items (require user action)
 

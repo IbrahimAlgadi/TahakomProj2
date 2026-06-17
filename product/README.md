@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-17
+Last updated: 2026-06-17 (docs consolidated)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
@@ -27,6 +27,54 @@ This folder is the **single source of truth** for product decisions, requirement
 | Architecture | [technical/architecture.md](technical/architecture.md) | Full architectural design — two-boundary model, event-driven capture, transfer pipeline, encryption, logging, deployment |
 | Services | [technical/services.md](technical/services.md) | Per-service reference — trigger, DB reads/writes, key logic, log paths |
 | DB Schema | [technical/database/schema.md](technical/database/schema.md) | All PostgreSQL tables, columns, indexes, functions, key query patterns |
+| File Accumulation | [technical/file-accumulation-approach.md](technical/file-accumulation-approach.md) | 38-file-per-camera buffer algorithm and job phase logging for `video_converted_buffer` |
+
+### Technical — Diagrams
+
+| Document | Path | Purpose |
+|---|---|---|
+| Diagrams Index | [technical/diagrams/README.md](technical/diagrams/README.md) | Index of per-service activity diagrams and shared patterns |
+| Diagrams Overview | [technical/diagrams/diagrams.md](technical/diagrams/diagrams.md) | Mermaid system/service architecture and file-transfer flow diagrams |
+| Auto USB Video Flow | [technical/diagrams/refactored_autoVideoTransferEDAMicroservice-activity.md](technical/diagrams/refactored_autoVideoTransferEDAMicroservice-activity.md) | Detailed activity diagram: USB video transfer (job mgmt, scheduling, encryption) |
+| Auto FTP Video Flow | [technical/diagrams/autoFtpVideoTransferService-activity.md](technical/diagrams/autoFtpVideoTransferService-activity.md) | Detailed activity diagram: FTP video transfer (scheduling, monitoring, buffer loops) |
+| Auto FTP Image Flow | [technical/diagrams/autoFTPImageTransferService-activity.md](technical/diagrams/autoFTPImageTransferService-activity.md) | Detailed activity diagram: FTP image transfer (batch-50, FTP readiness, retries) |
+| File Transfer Modes | [technical/diagrams/File transfer Modes.drawio](technical/diagrams/File%20transfer%20Modes.drawio) | Editable Draw.io diagram for VMS storage indexing workflow |
+
+### Technical — Developer Guides
+
+| Document | Path | Purpose |
+|---|---|---|
+| Backend Architecture | [technical/development-guides/backend-frontend-architecture-guide.json](technical/development-guides/backend-frontend-architecture-guide.json) | System architecture for devs: microservices, ports, responsibilities, communication patterns |
+| Backend Running | [technical/development-guides/backend-running-guide.json](technical/development-guides/backend-running-guide.json) | Ops runbook: prerequisites, env vars, PM2 `ecosystem.config.js`, startup order, troubleshooting |
+| Backend API Dev | [technical/development-guides/backend-api-development-guide.json](technical/development-guides/backend-api-development-guide.json) | API dev standards + full endpoint catalog with request/response examples |
+| Features Implementation | [technical/development-guides/features-implementation-guide.json](technical/development-guides/features-implementation-guide.json) | Feature-to-code map: auto/manual transfer, dashboard, devices — DB queries, Redis keys, routes |
+| Redis Usage | [technical/development-guides/redis-usage-guide.json](technical/development-guides/redis-usage-guide.json) | ioredis setup, `redisKeyStore.js` keys, queues/pub-sub per feature |
+| Node.js Version | [technical/development-guides/nodejs-version-guide.json](technical/development-guides/nodejs-version-guide.json) | Node.js v12.18.3 compatibility: allowed/forbidden ES features and safe alternatives |
+| Frontend Scripts | [technical/development-guides/frontend-script-guide.json](technical/development-guides/frontend-script-guide.json) | Frontend JS patterns: Fetch/WebSocket, ECharts, Bootstrap helpers |
+| Frontend Theme | [technical/development-guides/frontend-theme-development-guide.json](technical/development-guides/frontend-theme-development-guide.json) | Nunjucks layout hierarchy, Bootstrap 5, Font Awesome, ECharts, responsive layout |
+| Frontend–Backend API | [technical/development-guides/frontend-backend-api-calling-guide.json](technical/development-guides/frontend-backend-api-calling-guide.json) | Client–server contract: HTTP/WebSocket protocols, message formats, error handling |
+
+### Ops Runbooks
+
+| Document | Path | Purpose |
+|---|---|---|
+| Environment Setup | [ops/environment-setup.md](ops/environment-setup.md) | `.env` variables, `setup-env.js`, `utils/envConfig.js` — onboarding guide |
+| DB Migration Runbook | [ops/database-migration-runbook.md](ops/database-migration-runbook.md) | Steps to run `DatabaseMigration.js`, table order, rollback, verification |
+| FTP Transfer Runbook | [ops/ftp-video-transfer-runbook.md](ops/ftp-video-transfer-runbook.md) | FTP video setup, shared vs FTP-specific components, monitoring SQL, troubleshooting |
+
+### PRD Sources
+
+| Document | Path | Purpose |
+|---|---|---|
+| SOW June 2025 | [prd/sources/sow-2025-06-10.md](prd/sources/sow-2025-06-10.md) | Formal client scope document (dated 2025-06-10) — contractual traceability source upstream of the PRD |
+
+### Backlog — SOW Stories
+
+| Document | Path | Purpose |
+|---|---|---|
+| SOW Backlog | [prd/backlog/sow-stories/](prd/backlog/sow-stories/) | Broad SOW-level user stories (`ST00xx`) — 8 written, 92 planned — covering full Tahakom Traffic Enforcement System scope |
+| SOW Stories Plan | [prd/backlog/sow-stories/USER_STORIES_PLAN.md](prd/backlog/sow-stories/USER_STORIES_PLAN.md) | Master plan for ~100 stories (ST0001–ST0100) |
+| SOW Stories Progress | [prd/backlog/sow-stories/USER_STORIES_PROGRESS.md](prd/backlog/sow-stories/USER_STORIES_PROGRESS.md) | Status tracker for written vs pending SOW stories |
 
 ### Decisions
 
@@ -84,11 +132,19 @@ These files provide the minimum context required for any task:
 |---|---|---|
 | PRD + problem framing | When evaluating feature requests or writing user stories | `product/prd/PRD-tahakom-data-transfer.md` |
 | User stories / backlog | When planning a sprint, writing acceptance criteria, or estimating | `product/prd/backlog/epics-and-stories.md` |
+| SOW backlog | When checking SOW compliance or tracing a requirement to an ST00xx story | `product/prd/backlog/sow-stories/USER_STORIES_PLAN.md` |
+| SOW contractual source | When verifying requirement provenance against the original client scope | `product/prd/sources/sow-2025-06-10.md` |
 | Roadmap | When prioritizing work or scoping a milestone | `product/roadmap/roadmap.md` |
 | Architecture details | When designing a new service or modifying a complex interaction | `product/technical/architecture.md` |
 | Service reference | When modifying a specific PM2 service or SecurOS script | `product/technical/services.md` |
 | DB schema | When writing SQL, migration changes, or MCP queries | `product/technical/database/schema.md` |
+| File accumulation algorithm | When working on `video_converted_buffer`, job phases, or the 38-file batch rule | `product/technical/file-accumulation-approach.md` |
 | Specific ADR | When a decision is being revisited or a related decision is being made | `product/decisions/0001–0005.md` |
+| Per-service activity diagrams | When tracing the detailed flow of USB video, FTP video, or FTP image transfer | `product/technical/diagrams/*-activity.md` |
+| Developer how-to guides | When setting up the dev environment, understanding frontend/backend patterns, or extending the API | `product/technical/development-guides/` |
+| Environment setup | When onboarding a new developer or troubleshooting missing `.env` values | `product/ops/environment-setup.md` |
+| DB migration runbook | When running or rolling back a schema migration | `product/ops/database-migration-runbook.md` |
+| FTP transfer runbook | When configuring or troubleshooting FTP video transfer | `product/ops/ftp-video-transfer-runbook.md` |
 | SecurOS log registry | When tailing SecurOS logs or editing a SecurOS script | `.cursor/skills/securos-log-registry/SKILL.md` |
 | Ecosystem config | When adding a service, changing restart policy, or checking log paths | `ecosystem.config.js` |
 | Migration script | When modifying the database schema | `scripts/migration/DatabaseMigration.js` |
@@ -98,7 +154,8 @@ These files provide the minimum context required for any task:
 | Excluded | Why |
 |---|---|
 | `data_transfer_v2/public/vendors/` | Third-party vendor bundles; never modify; too large to load |
-| `archived/` | Legacy services; superseded by current architecture; load only if investigating historical context |
+| `archived/` | Legacy services and docs; superseded by current architecture; load only if investigating historical context |
+| `archived/legacy-docs/` | Superseded documentation (pre-PRD drafts, stale service docs, scratch notes); use `product/` instead |
 | `node_modules/` | Never load |
 | `package-lock.json` | Use `package.json` for dependency versions |
 | Individual log files | Use `securos-log-registry` skill for targeted log tailing; never bulk-load all logs |

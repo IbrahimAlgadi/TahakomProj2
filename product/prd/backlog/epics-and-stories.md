@@ -8,6 +8,27 @@ Last updated: 2026-06-17
 
 ---
 
+## Backlog Sources
+
+This file (`epics-and-stories.md`) is the **focused, roadmap-linked engineering backlog** for the Data Transfer System. It uses the `E#-S#` ID scheme (11 stories across 5 epics, tied to milestones M1–M5).
+
+A **broader SOW-level backlog** covering the full Tahakom Traffic Enforcement System (ANPR capture, RBAC, remote ops, VPC, etc.) lives in [`sow-stories/`](sow-stories/). That corpus uses `ST00xx` IDs (8 stories written, 92 planned per `USER_STORIES_PLAN.md`).
+
+**Thematic mapping between the two:**
+
+| SOW story | Topic | `E#-S#` overlap |
+|---|---|---|
+| ST0012 / ST0013 (USB transfer) | Manual/auto USB transfer | Already as-built — covered in PRD FR-2/FR-3, architecture, services; not in epics backlog |
+| ST0014 (FTP transfer) | FTP/SFTP remote transfer | Closest match: E3-S1 (configure FTP credentials), E3-S2 (FTP dashboard card) |
+| ST0026 (encryption) | AES/RSA encryption config | Covered in PRD FR-6 + architecture; not in epics backlog |
+| ST0036 (traffic dashboard) | Real-time dashboard | Partial: E1-S1/S2 (KPI cards), E4-S1/S2 (reporting) — not full traffic analytics |
+| ST0051 (remote ops center) | Centralized multi-site ops | Not covered in this backlog |
+| ST0001–ST0003 (ANPR) | Capture pipeline | SecurOS boundary — documented in services.md; outside transfer backlog scope |
+
+The two backlogs are **not duplicates** and serve different audiences. Use `sow-stories/` for SOW compliance tracing; use this file for sprint planning and incremental delivery.
+
+---
+
 ## Epic E1 — Observability Hardening (Roadmap M1)
 
 **Hypothesis**: If operators can see capture health and transfer status on the dashboard without SSH access, they will detect and resolve incidents 80% faster.
