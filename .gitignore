@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+
+# Environment / secrets
+.env
+
+# Cursor (track custom skills/rules, ignore local machine config)
+.cursor/*
+!.cursor/skills/
+!.cursor/rules/
+
+# IDE
+.idea/
+
+# Logs & runtime
+logs/
+
+# Certificates / keys
+certs/
+
+# Editor & backup files
+*~
+*.bak
+*.tmp
+*.orig
+*.drawio.bkp
+package-lock.json.*
+
+# Downloaded tooling & installers (not source)
+bfg-*.jar
+to-be-installed/
+nssm-2.24/
+
+# Local PostgreSQL config copy
+optimized_psql.con
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Video processing working dirs
+mp4_conversion/
+temp_video_processing/*

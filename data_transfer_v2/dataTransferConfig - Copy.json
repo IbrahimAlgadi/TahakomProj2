@@ -1,0 +1,50 @@
+{
+  "storage": {
+    "directory": "C:\\export",
+    "maxCapacity": 20,
+    "retentionPolicy": "fifo",
+    "siteId": "HQ1232"
+  },
+  "encryption": {
+    "enabled": true,
+    "algorithm": "aes-256-cbc",
+    "keyManagement": "certificate",
+    "encryptMetadata": true
+  },
+  "pathStructure": {
+    "components": [
+      "SITE_ID",
+      "DATE",
+      "TIME"
+    ],
+    "formats": {
+      "DATE": "MM_DD_YYYY",
+      "TIME": "HH_mm_ss"
+    }
+  },
+  "autoTransfer": {
+    "drive": "F",
+    "encryption": {
+      "enabled": false
+    },
+    "isActive": false,
+    "transferMode": "specific",
+    "dataType": "both",
+    "schedule": {
+      "type": "continuous"
+    }
+  },
+  "ftpTransfer": {
+    "protocol": "ftp",
+    "host": "",
+    "port": 21,
+    "username": "",
+    "password": "",
+    "remoteDirectory": ""
+  },
+  "certificates": {
+    "directory": "certs",
+    "publicKeyFilename": "public_key.pem",
+    "privateKeyFilename": "private_key.pem"
+  }
+}

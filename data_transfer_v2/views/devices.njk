@@ -1,0 +1,346 @@
+{% extends './layout/layout.njk' %}
+
+{% block content %}
+    <div class="container-fluid">
+        <!-- Header Section -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Connected Devices</h1>
+            <button class="btn btn-outline-primary" id="refreshDevices">
+                <i class="fas fa-sync-alt me-2"></i>Refresh
+            </button>
+        </div>
+
+        <!-- Connected Devices Grid -->
+        <div class="row" id="devicesGrid">
+            <!-- Device cards will be dynamically inserted here -->
+        </div>
+
+        <!-- No Devices Connected Message -->
+        <div id="noDevicesMessage" class="text-center py-5 d-none">
+            <i class="fas fa-usb fa-3x text-muted mb-3"></i>
+            <h3 class="text-muted">No Devices Connected</h3>
+            <p class="text-muted">Connect a USB drive or external storage device to view its information.</p>
+        </div>
+
+        <!-- Device History -->
+        <div class="card mt-4">
+            <div class="card-header bg-transparent border-0">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-history me-2"></i>Device Connection History
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table" id="deviceHistoryTable">
+                        <thead>
+                            <tr>
+                                <th>Device</th>
+                                <th>Label</th>
+                                <th>Type</th>
+                                <th>Connected At</th>
+                                <th>Disconnected At</th>
+                                <th>Duration</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- History rows will be dynamically inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                <div class="d-flex justify-content-between align-items-center mt-4">
+                    <div class="d-flex align-items-center">
+                        <span class="me-2">Show</span>
+                        <select class="form-select form-select-sm" id="entriesPerPage" style="width: auto;">
+                            <option>10</option>
+                            <option>25</option>
+                            <option selected>50</option>
+                            <option>100</option>
+                        </select>
+                        <span class="ms-2">entries</span>
+                    </div>
+
+                    <nav aria-label="Table navigation">
+                        <ul class="pagination pagination-sm mb-0" id="historyPagination">
+                            <!-- Pagination will be dynamically inserted here -->
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="notificationToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <i class="fas fa-info-circle me-2"></i>
+                <strong class="me-auto" id="toastTitle">Notification</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body" id="toastMessage"></div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block script %}
+    <script>
+        $('.devices').addClass('active');
+    </script>
+
+    <script>
+        const DEVICES_SERVICE_URL = 'http://localhost:8454';
+        const WS_URL = 'ws://localhost:8454';
+        let ws = null;
+
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatDateTime(dateTimeStr) {
+            if (!dateTimeStr) return 'N/A';
+            try {
+                const date = new Date(dateTimeStr);
+                return date.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+            } catch (e) {
+                console.error('Error formatting date:', e);
+                return dateTimeStr;
+            }
+        }
+
+        function formatDuration(minutes) {
+            if (!minutes) return '0 min';
+            
+            // Round to 2 decimal places
+            minutes = Math.round(minutes * 100) / 100;
+            
+            if (minutes < 60) {
+                return `${minutes} min`;
+            }
+            const hours = Math.floor(minutes / 60);
+            const remainingMinutes = Math.round((minutes % 60) * 100) / 100;
+            return `${hours}h ${remainingMinutes}m`;
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('notificationToast');
+            const toastTitle = document.getElementById('toastTitle');
+            const toastBody = document.getElementById('toastBody');
+
+            toast.className = `toast align-items-center text-white bg-${type} border-0`;
+            toastTitle.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+            toastBody.textContent = message;
+
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+
+        function createDeviceCard(device) {
+            const isConnected = device.isconnected === 'connected';
+            return `
+                <div class="col-lg-4 col-md-6 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-hdd me-2"></i>${device.label || 'Unnamed Drive'}
+                            </h5>
+                            <span class="badge ${isConnected ? 'bg-success' : 'bg-danger'}">
+                                ${device.isconnected}
+                            </span>
+                        </div>
+                        <div class="card-body">
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="text-muted">Storage Usage</span>
+                                    <span class="fw-medium">
+                                        ${device.usedspace} GB / ${device.totalspace} GB
+                                    </span>
+                                </div>
+                                <div class="progress">
+                                    <div class="progress-bar ${getProgressBarClass(device.usedpercentage)}" 
+                                         style="width: ${device.usedpercentage}%"
+                                         role="progressbar" 
+                                         aria-valuenow="${device.usedpercentage}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="100">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="row g-3 mb-4">
+                                <div class="col-6">
+                                    <div class="p-3 bg-light rounded">
+                                        <div class="text-muted small">Available Space</div>
+                                        <div class="fw-bold">${device.remainingspace} GB</div>
+                                    </div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="p-3 bg-light rounded">
+                                        <div class="text-muted small">Used Space</div>
+                                        <div class="fw-bold">${device.usedspace} GB</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="device-info">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="text-muted">Drive Letter:</span>
+                                    <span class="fw-medium">${device.drive}</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="text-muted">File System:</span>
+                                    <span class="fw-medium">${device.type}</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="text-muted">Read/Write:</span>
+                                    <span class="fw-medium">${device.readwrite ? 'Yes' : 'No'}</span>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <span class="text-muted">Last Updated:</span>
+                                    <span class="fw-medium">${formatDateTime(device.lastupdated)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function getProgressBarClass(percentage) {
+            if (percentage >= 90) return 'bg-danger';
+            if (percentage >= 70) return 'bg-warning';
+            return 'bg-success';
+        }
+
+        function updateDevicesGrid(devices) {
+            const grid = document.getElementById('devicesGrid');
+            const noDevicesMessage = document.getElementById('noDevicesMessage');
+
+            if (!devices || devices.length === 0) {
+                grid.innerHTML = '';
+                noDevicesMessage.classList.remove('d-none');
+                return;
+            }
+
+            noDevicesMessage.classList.add('d-none');
+            grid.innerHTML = devices.map(device => createDeviceCard(device)).join('');
+        }
+
+        function updateDeviceHistory(history) {
+            const tbody = document.querySelector('#deviceHistoryTable tbody');
+            tbody.innerHTML = history.map(entry => {
+                const isConnected = entry.isconnected === 'connected';
+                return `
+                    <tr>
+                        <td>${entry.drive}</td>
+                        <td>${entry.label || 'Unnamed Drive'}</td>
+                        <td>${entry.type}</td>
+                        <td>${formatDateTime(entry.connectedat)}</td>
+                        <td>${entry.disconnectedat ? formatDateTime(entry.disconnectedat) : '-'}</td>
+                        <td>${formatDuration(entry.duration)}</td>
+                        <td>
+                            <span class="badge ${isConnected ? 'bg-success' : 'bg-danger'}">
+                                ${entry.isconnected}
+                            </span>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function connectWebsocket() {
+            ws = new WebSocket(WS_URL);
+
+            ws.addEventListener('open', (event) => {
+                console.log('WebSocket connection opened:', event);
+                ws.send(JSON.stringify({action: 'subscribe', event: 'devices'}));
+            });
+
+            ws.addEventListener('message', (event) => {
+                const data = JSON.parse(event.data);
+                if (data.event === "devices") {
+                    console.log("data.devices: ", data.devices);
+                    updateDevicesGrid(data.devices);
+                } else if (data.event === "deviceHistory") {
+                    console.log("data.history: ", data.history);
+                    updateDeviceHistory(data.history);
+                }
+            });
+
+            ws.addEventListener('close', (event) => {
+                console.log('WebSocket connection closed:', event);
+                setTimeout(connectWebsocket, 5000);
+            });
+
+            ws.addEventListener('error', (error) => {
+                console.error('WebSocket error:', error);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initial load of devices
+            fetch(`${DEVICES_SERVICE_URL}/devices`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateDevicesGrid(data.devices);
+                    } else {
+                        showToast('Failed to load devices', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading devices:', error);
+                    showToast('Failed to load devices', 'error');
+                });
+
+            // Load device history
+            fetch(`${DEVICES_SERVICE_URL}/devices/history`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateDeviceHistory(data.history);
+                    } else {
+                        showToast('Failed to load device history', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading device history:', error);
+                    showToast('Failed to load device history', 'error');
+                });
+
+            // Refresh button handler
+            document.getElementById('refreshDevices').addEventListener('click', function() {
+                fetch(`${DEVICES_SERVICE_URL}/devices/refresh`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            updateDevicesGrid(data.devices);
+                            showToast('Devices refreshed successfully', 'success');
+                        } else {
+                            showToast('Failed to refresh devices', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error refreshing devices:', error);
+                        showToast('Failed to refresh devices', 'error');
+                    });
+            });
+
+            // Connect WebSocket
+            connectWebsocket();
+        });
+    </script>
+{% endblock %} 

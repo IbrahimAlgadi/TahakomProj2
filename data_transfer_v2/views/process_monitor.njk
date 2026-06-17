@@ -1,0 +1,386 @@
+{% extends './layout/layout.njk' %}
+
+{% block content %}
+    <div class="container-fluid">
+        <!-- Header Section -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Process Monitor</h1>
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-primary" id="refreshProcesses">
+                    <i class="fas fa-sync-alt me-2"></i>Refresh
+                </button>
+                <div class="btn-group">
+                    <button class="btn btn-outline-secondary active" data-sort="name">Name</button>
+                    <button class="btn btn-outline-secondary" data-sort="cpu">CPU</button>
+                    <button class="btn btn-outline-secondary" data-sort="memory">Memory</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Process Grid -->
+        <div class="row" id="processGrid">
+            <!-- Process cards will be dynamically inserted here -->
+        </div>
+
+        <!-- Process Details Modal -->
+        <div class="modal fade" id="processDetailsModal" tabindex="-1">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">Process Details</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="row mb-4">
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h6 class="card-subtitle mb-2 text-muted">CPU Usage</h6>
+                                        <div class="d-flex align-items-center">
+                                            <div class="progress flex-grow-1 me-3">
+                                                <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                            </div>
+                                            <span class="cpu-usage">0%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h6 class="card-subtitle mb-2 text-muted">Memory Usage</h6>
+                                        <div class="d-flex align-items-center">
+                                            <div class="progress flex-grow-1 me-3">
+                                                <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                            </div>
+                                            <span class="memory-usage">0%</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header bg-transparent">
+                                <h6 class="mb-0">Process Information</h6>
+                            </div>
+                            <div class="card-body">
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <p><strong>Process Name:</strong> <span class="process-name"></span></p>
+                                        <p><strong>Main PID:</strong> <span class="main-pid"></span></p>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <p><strong>Total PIDs:</strong> <span class="total-pids"></span></p>
+                                        <p><strong>Last Updated:</strong> <span class="last-updated"></span></p>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card mt-4">
+                            <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
+                                <h6 class="mb-0">Child Processes</h6>
+                                <div class="input-group" style="width: 200px;">
+                                    <span class="input-group-text">
+                                        <i class="fas fa-search"></i>
+                                    </span>
+                                    <input type="text" class="form-control form-control-sm" id="pidSearch" placeholder="Search PIDs...">
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="table-responsive">
+                                    <table class="table table-sm">
+                                        <thead>
+                                            <tr>
+                                                <th>PID</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="pid-list">
+                                            <!-- PIDs will be dynamically inserted here -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Toast Container -->
+        <div class="toast-container position-fixed bottom-0 end-0 p-3">
+            <div id="notificationToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                <div class="toast-header">
+                    <i class="fas fa-info-circle me-2"></i>
+                    <strong class="me-auto" id="toastTitle">Notification</strong>
+                    <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+                </div>
+                <div class="toast-body" id="toastMessage"></div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block script %}
+    <script>
+        $('.process-monitor').addClass('active');
+    </script>
+
+    <script>
+        const PROCESS_MONITOR_URL = 'http://localhost:8454';
+        const WEBSOCKET_URL = 'ws://localhost:8454';
+
+        let ws = null;
+        let currentSort = 'name';
+        let sortDirection = 'asc';
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('notificationToast');
+            const toastTitle = document.getElementById('toastTitle');
+            const toastBody = document.getElementById('toastBody');
+
+            toast.className = `toast align-items-center text-white bg-${type} border-0`;
+            toastTitle.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+            toastBody.textContent = message;
+
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+
+        function getResourceClass(value) {
+            const numValue = parseFloat(value);
+            if (numValue >= 80) return 'bg-danger';
+            if (numValue >= 50) return 'bg-warning';
+            return 'bg-success';
+        }
+
+        function createProcessCard(process) {
+            const cpuClass = getResourceClass(process.cpuUsage);
+            const memClass = getResourceClass(process.memoryUsage);
+            
+            return `
+                <div class="col-lg-4 col-md-6 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center">
+                            <h5 class="card-title mb-0">
+                                <i class="fas fa-microchip me-2"></i>${process.name}
+                            </h5>
+                            <span class="badge bg-primary">PID: ${process.mainPid}</span>
+                        </div>
+                        <div class="card-body">
+                            <!-- CPU Usage -->
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="text-muted">CPU Usage</span>
+                                    <span class="fw-medium">${process.cpuUsage}%</span>
+                                </div>
+                                <div class="progress">
+                                    <div class="progress-bar ${cpuClass}" 
+                                         style="width: ${process.cpuUsage}%"
+                                         role="progressbar" 
+                                         aria-valuenow="${process.cpuUsage}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="100">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Memory Usage -->
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="text-muted">Memory Usage</span>
+                                    <span class="fw-medium">${process.memoryUsage}%</span>
+                                </div>
+                                <div class="progress">
+                                    <div class="progress-bar ${memClass}" 
+                                         style="width: ${process.memoryUsage}%"
+                                         role="progressbar" 
+                                         aria-valuenow="${process.memoryUsage}" 
+                                         aria-valuemin="0" 
+                                         aria-valuemax="100">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Process Info -->
+                            <div class="process-info">
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="text-muted">Child Processes:</span>
+                                    <span class="fw-medium">${process.allPids.length}</span>
+                                </div>
+                            </div>
+
+                            <!-- View Details Button -->
+                            <button class="btn btn-outline-primary w-100 mt-3" 
+                                    onclick="showProcessDetails('${process.name}', ${JSON.stringify(process).replace(/'/g, "\\'")})">
+                                <i class="fas fa-info-circle me-2"></i>View Details
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function showProcessDetails(name, process) {
+            const modal = new bootstrap.Modal(document.getElementById('processDetailsModal'));
+            
+            // Update modal content
+            document.querySelector('.process-name').textContent = name;
+            document.querySelector('.main-pid').textContent = process.mainPid;
+            document.querySelector('.total-pids').textContent = process.allPids.length;
+            document.querySelector('.last-updated').textContent = new Date().toLocaleString();
+            
+            // Update progress bars
+            const cpuProgress = document.querySelector('.cpu-usage').parentElement.querySelector('.progress-bar');
+            const memProgress = document.querySelector('.memory-usage').parentElement.querySelector('.progress-bar');
+            
+            cpuProgress.style.width = `${process.cpuUsage}%`;
+            cpuProgress.className = `progress-bar ${getResourceClass(process.cpuUsage)}`;
+            document.querySelector('.cpu-usage').textContent = `${process.cpuUsage}%`;
+            
+            memProgress.style.width = `${process.memoryUsage}%`;
+            memProgress.className = `progress-bar ${getResourceClass(process.memoryUsage)}`;
+            document.querySelector('.memory-usage').textContent = `${process.memoryUsage}%`;
+            
+            // Update PID list
+            const pidList = document.querySelector('.pid-list');
+            pidList.innerHTML = process.allPids.map(pid => `
+                <tr>
+                    <td>${pid}</td>
+                    <td>
+                        <span class="badge ${pid === process.mainPid ? 'bg-primary' : 'bg-secondary'}">
+                            ${pid === process.mainPid ? 'Main' : 'Child'}
+                        </span>
+                    </td>
+                </tr>
+            `).join('');
+            
+            modal.show();
+        }
+
+        function updateProcessGrid(processes) {
+            const grid = document.getElementById('processGrid');
+            
+            // Sort processes
+            processes.sort((a, b) => {
+                let comparison = 0;
+                switch(currentSort) {
+                    case 'name':
+                        comparison = a.name.localeCompare(b.name);
+                        break;
+                    case 'cpu':
+                        comparison = parseFloat(a.cpuUsage) - parseFloat(b.cpuUsage);
+                        break;
+                    case 'memory':
+                        comparison = parseFloat(a.memoryUsage) - parseFloat(b.memoryUsage);
+                        break;
+                }
+                return sortDirection === 'asc' ? comparison : -comparison;
+            });
+            
+            grid.innerHTML = processes.map(process => createProcessCard(process)).join('');
+        }
+
+        function connectWebsocket() {
+            ws = new WebSocket(WEBSOCKET_URL);
+
+            ws.addEventListener('open', (event) => {
+                console.log('WebSocket connection opened:', event);
+                ws.send(JSON.stringify({action: 'subscribe', event: 'processes'}));
+            });
+
+            ws.addEventListener('message', (event) => {
+                const data = JSON.parse(event.data);
+                if (data.event === "processes") {
+                    updateProcessGrid(data.processes);
+                }
+            });
+
+            ws.addEventListener('close', (event) => {
+                console.log('WebSocket connection closed:', event);
+                setTimeout(connectWebsocket, 5000);
+            });
+
+            ws.addEventListener('error', (error) => {
+                console.error('WebSocket error:', error);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initial load of processes
+            fetch(`${PROCESS_MONITOR_URL}/processes`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateProcessGrid(data.processes);
+                    } else {
+                        showToast('Failed to load processes', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading processes:', error);
+                    showToast('Failed to load processes', 'error');
+                });
+
+            // Refresh button handler
+            document.getElementById('refreshProcesses').addEventListener('click', function() {
+                fetch(`${PROCESS_MONITOR_URL}/processes/refresh`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            updateProcessGrid(data.processes);
+                            showToast('Processes refreshed successfully', 'success');
+                        } else {
+                            showToast('Failed to refresh processes', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error refreshing processes:', error);
+                        showToast('Failed to refresh processes', 'error');
+                    });
+            });
+
+            // Sort buttons handler
+            document.querySelectorAll('.btn-group .btn').forEach(button => {
+                button.addEventListener('click', function() {
+                    const sort = this.dataset.sort;
+                    if (currentSort === sort) {
+                        sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
+                    } else {
+                        currentSort = sort;
+                        sortDirection = 'asc';
+                    }
+                    
+                    // Update button states
+                    document.querySelectorAll('.btn-group .btn').forEach(btn => btn.classList.remove('active'));
+                    this.classList.add('active');
+                    
+                    // Refresh the grid with new sort
+                    fetch(`${PROCESS_MONITOR_URL}/processes`)
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                updateProcessGrid(data.processes);
+                            }
+                        });
+                });
+            });
+
+            // PID search handler
+            document.getElementById('pidSearch').addEventListener('input', function(e) {
+                const searchTerm = e.target.value.toLowerCase();
+                const rows = document.querySelectorAll('.pid-list tr');
+                
+                rows.forEach(row => {
+                    const pid = row.querySelector('td:first-child').textContent;
+                    row.style.display = pid.includes(searchTerm) ? '' : 'none';
+                });
+            });
+
+            // Connect WebSocket
+            connectWebsocket();
+        });
+    </script>
+{% endblock %} 

@@ -1,0 +1,448 @@
+{
+  "title": "Features Implementation Guide",
+  "version": "1.0.0",
+  "description": "Comprehensive guide to feature implementation in the Tahakom Data Transfer System",
+  
+  "features_overview": {
+    "core_features": [
+      "Automatic File Transfer",
+      "Manual File Transfer", 
+      "Dashboard & Reporting",
+      "Device Management",
+      "Process Monitoring",
+      "File Management",
+      "Configuration Management",
+      "Real-time Updates"
+    ],
+    "architecture_pattern": "Microservices with shared state via Redis",
+    "communication": "REST APIs + WebSocket for real-time updates"
+  },
+
+  "automatic_transfer_feature": {
+    "description": "Automatically transfer files to connected USB drives when configured conditions are met",
+    
+    "backend_implementation": {
+      "main_service": "FileTransferRedisService.js",
+      "api_routes": "routes/autoTransferRoutes.js", 
+      "configuration": "ConfigStateServiceRedis.js",
+      "drive_monitoring": "DriveStateServiceRedis.js",
+      
+      "workflow": {
+        "1": "Monitor drive connection status via DriveStateServiceRedis",
+        "2": "Check auto-transfer configuration via ConfigStateServiceRedis",
+        "3": "Query database for files to transfer via startAutoTransferProcess()",
+        "4": "Queue files for transfer via Redis queue system",
+        "5": "Process queue in FileTransferRedisService",
+        "6": "Send status updates via WebSocket"
+      },
+      
+      "database_queries": {
+        "get_files_to_transfer": "SELECT files grouped by plate_num, site_id, date_folder, time_folder WHERE not auto_transferred",
+        "update_transfer_status": "UPDATE files SET is_auto_transferred = true WHERE id IN (...)"
+      },
+      
+      "redis_patterns": {
+        "queues": ["image_file_transfer_queue", "image_file_transfer_result_queue"],
+        "state_keys": ["CONNECTED_DRIVE_STATE", "CONFIG_STATE_KEY"],
+        "pubsub": ["CONNECTED_DRIVE_STATE_update", "CONFIG_STATE_KEY_update"]
+      }
+    },
+    
+    "frontend_implementation": {
+      "page": "data_transfer_v2/views/auto_transfer.njk",
+      "api_endpoints": [
+        "GET /auto-transfer/config",
+        "POST /auto-transfer/test-drive",
+        "POST /auto-transfer/save-config", 
+        "POST /auto-transfer/toggle"
+      ],
+      "websocket_events": ["handleAutoTransfer"],
+      "ui_components": [
+        "Drive selection dropdown",
+        "Encryption configuration",
+        "Transfer status display",
+        "Real-time progress updates"
+      ]
+    },
+    
+    "configuration_options": {
+      "drive_selection": "Target drive letter (E:, F:, etc.)",
+      "encryption": {
+        "enabled": "boolean",
+        "algorithm": "aes-256|aes-128|chacha20",
+        "keyManagement": "manual|certificate|kms",
+        "encryptMetadata": "boolean"
+      },
+      "transfer_control": {
+        "isActive": "boolean",
+        "stopPercentage": "number (95% default)"
+      }
+    }
+  },
+
+  "manual_transfer_feature": {
+    "description": "User-initiated file transfer with date/time range selection",
+    
+    "backend_implementation": {
+      "api_routes": "routes/manualTransferRoutes.js",
+      "background_service": "startManualFileTransferProcess() in manualTransferRoutes.js",
+      "job_management": "transfer_job and transfer_job_log tables",
+      
+      "workflow": {
+        "1": "User creates transfer job with date range and USB path",
+        "2": "System queries files in date range and creates job record",
+        "3": "Background process monitors job status via config",
+        "4": "Files copied in batches with progress tracking",
+        "5": "Job status updated in database and config",
+        "6": "Real-time updates sent via WebSocket"
+      },
+      
+      "database_operations": {
+        "create_job": "INSERT INTO transfer_job (start_date, end_date, usb_path, status)",
+        "create_file_records": "INSERT INTO transfer_job_log (file_id, transfer_job_id, transferred)",
+        "update_progress": "UPDATE transfer_job_log SET transferred = true WHERE id = ?",
+        "job_control": "UPDATE transfer_job SET status = ? WHERE id = ?"
+      }
+    },
+    
+    "frontend_implementation": {
+      "page": "data_transfer_v2/views/manual_usb.njk",
+      "api_endpoints": [
+        "GET /manual-transfer/drives",
+        "POST /manual-transfer/create",
+        "POST /manual-transfer/control",
+        "GET /manual-transfer/history"
+      ],
+      "features": [
+        "Date/time range picker",
+        "USB drive selection",
+        "Transfer progress tracking",
+        "Job control (pause/resume/cancel)",
+        "Transfer history"
+      ]
+    }
+  },
+
+  "dashboard_reporting_feature": {
+    "description": "Statistical dashboard with charts and data export capabilities",
+    
+    "backend_implementation": {
+      "api_routes": "routes/dashboardRoutes.js",
+      "data_aggregation": "SQL queries with GROUP BY and time-based filtering",
+      "export_formats": ["JSON", "XML", "PDF"],
+      
+      "sql_queries": {
+        "hourly_view": "GROUP BY TO_CHAR(time, 'HH12 AM'), date",
+        "daily_view": "GROUP BY date",
+        "monthly_view": "GROUP BY TO_CHAR(date, 'YYYY-MM')",
+        "yearly_view": "GROUP BY TO_CHAR(date, 'YYYY')"
+      },
+      
+      "metrics_calculated": [
+        "total_vehicles_count",
+        "total_files_count", 
+        "success_produced_count",
+        "failed_produce_count",
+        "failed_produced_percentage",
+        "total_file_size_in_gb"
+      ]
+    },
+    
+    "frontend_implementation": {
+      "page": "data_transfer_v2/views/dashboard.njk",
+      "chart_library": "Apache ECharts",
+      "chart_types": ["Line", "Bar", "Pie", "Area"],
+      "filters": [
+        "Date range selection",
+        "Camera filter",
+        "Vehicle type filter",
+        "Time period view (hourly/daily/monthly/yearly)"
+      ],
+      "export_options": [
+        "PDF reports",
+        "JSON data export",
+        "XML data export",
+        "Daily operation reports"
+      ]
+    }
+  },
+
+  "device_management_feature": {
+    "description": "Monitor and manage connected external storage devices",
+    
+    "backend_implementation": {
+      "monitoring_service": "monitorConnectedExternalDrivesMicroservice.js",
+      "api_routes": "routes/connectedDevicesRoutes.js",
+      "database_tracking": "device_connections table",
+      
+      "monitoring_workflow": {
+        "1": "Periodic scan of connected drives using systeminformation",
+        "2": "Detect new connections and disconnections",
+        "3": "Store connection events in database",
+        "4": "Update Redis state with current drive information",
+        "5": "Publish updates via Redis pub/sub",
+        "6": "Send WebSocket updates to connected clients"
+      },
+      
+      "drive_information_collected": [
+        "Drive letter",
+        "Label/name",
+        "Total space",
+        "Used space",
+        "Remaining space",
+        "File system type",
+        "Read/write status",
+        "Connection timestamp"
+      ]
+    },
+    
+    "frontend_implementation": {
+      "page": "data_transfer_v2/views/devices.njk",
+      "real_time_updates": "WebSocket connection for live device status",
+      "ui_components": [
+        "Device cards with space usage",
+        "Connection history table",
+        "Refresh controls",
+        "Device status indicators"
+      ]
+    }
+  },
+
+  "process_monitoring_feature": {
+    "description": "Monitor system processes and service health",
+    
+    "backend_implementation": {
+      "monitoring_service": "monitorSpecialProcessesMicroservice.js",
+      "api_routes": "routes/processMonitorRoutes.js",
+      "data_collection": "systeminformation library for process data",
+      
+      "monitored_processes": [
+        "DashboardReportingBackend",
+        "ConfigStateServiceRedis",
+        "DriveStateServiceRedis",
+        "FileTransferRedisService",
+        "monitorConnectedExternalDrivesMicroservice"
+      ],
+      
+      "process_metrics": [
+        "Process ID",
+        "CPU usage",
+        "Memory usage",
+        "Uptime",
+        "Status (running/stopped)",
+        "Restart count"
+      ]
+    },
+    
+    "frontend_implementation": {
+      "page": "data_transfer_v2/views/process_monitor.njk", 
+      "real_time_updates": "WebSocket for live process status",
+      "ui_features": [
+        "Process status cards",
+        "Resource usage indicators",
+        "Alert notifications",
+        "Manual refresh controls"
+      ]
+    }
+  },
+
+  "file_management_feature": {
+    "description": "Browse, search, and manage exported files with storage overview",
+    
+    "backend_implementation": {
+      "api_routes": "routes/mainControlRoutes.js",
+      "database_queries": "Complex pagination and filtering on files table",
+      "storage_monitoring": "File system size calculation and monitoring",
+      
+      "file_operations": {
+        "listing": "Paginated file listing with search and date filtering",
+        "grouping": "Group files by base TID for related file display",
+        "filtering": "Date range, plate number, missing files filtering",
+        "storage_stats": "Calculate total used space and remaining capacity"
+      }
+    },
+    
+    "frontend_implementation": {
+      "page": "data_transfer_v2/views/index.njk",
+      "table_features": [
+        "DataTables integration",
+        "Server-side pagination",
+        "Search functionality",
+        "Date range filtering",
+        "Export options"
+      ],
+      "storage_visualization": [
+        "Usage progress bar",
+        "Capacity metrics",
+        "Storage history chart",
+        "Configuration modal"
+      ]
+    }
+  },
+
+  "configuration_management_feature": {
+    "description": "System-wide configuration with persistence and real-time updates",
+    
+    "backend_implementation": {
+      "main_service": "ConfigStateServiceRedis.js",
+      "persistence": "JSON file storage with Redis caching",
+      "api_endpoints": "GET/POST /api/config in mainControlRoutes.js",
+      
+      "configuration_areas": {
+        "storage": {
+          "directory": "Export directory path",
+          "maxCapacity": "Maximum storage capacity in GB",
+          "retentionPolicy": "File retention policy",
+          "siteId": "Site identifier"
+        },
+        "encryption": {
+          "enabled": "Encryption enabled flag",
+          "algorithm": "Encryption algorithm",
+          "keyManagement": "Key management method",
+          "encryptMetadata": "Metadata encryption flag"
+        },
+        "autoTransfer": {
+          "drive": "Target drive letter",
+          "isActive": "Auto transfer enabled",
+          "stopPercentage": "Stop threshold percentage"
+        }
+      },
+      
+      "synchronization": {
+        "file_persistence": "JSON configuration file",
+        "redis_caching": "CONFIG_STATE_KEY in Redis",
+        "change_notification": "Redis pub/sub for config updates",
+        "cross_service_sync": "All services monitor config changes"
+      }
+    },
+    
+    "frontend_implementation": {
+      "configuration_ui": "Settings modal in index.njk",
+      "real_time_sync": "Configuration changes immediately reflected",
+      "ui_components": [
+        "Storage configuration",
+        "Encryption settings",
+        "Path structure configuration",
+        "Retention policy settings"
+      ]
+    }
+  },
+
+  "real_time_updates_feature": {
+    "description": "WebSocket-based real-time updates for all system components",
+    
+    "backend_implementation": {
+      "websocket_server": "WebSocket server in DashboardReportingBackend.js",
+      "event_distribution": "emitEventToClients() function for broadcasting",
+      "subscription_model": "Client subscription to specific event types",
+      
+      "event_types": {
+        "handleAutoTransfer": "Auto transfer status updates",
+        "devices": "Connected device updates",
+        "deviceHistory": "Device connection history",
+        "processes": "Process monitoring updates",
+        "manualTransferConfig": "Manual transfer status",
+        "startStorageTransfer": "Storage transfer progress"
+      },
+      
+      "message_format": {
+        "event": "event_type",
+        "data": "event_data",
+        "timestamp": "ISO_timestamp"
+      }
+    },
+    
+    "frontend_implementation": {
+      "connection_management": "Auto-reconnecting WebSocket connections",
+      "event_handling": "Page-specific event handlers",
+      "ui_updates": "Real-time UI updates based on events",
+      
+      "connection_pattern": {
+        "1": "Connect to ws://localhost:8454",
+        "2": "Send subscription message for specific events",
+        "3": "Handle incoming messages and update UI",
+        "4": "Auto-reconnect on connection loss"
+      }
+    }
+  },
+
+  "encryption_feature": {
+    "description": "File encryption capabilities for secure data transfer",
+    
+    "backend_implementation": {
+      "encryption_service": "utils/encryptionService.js",
+      "algorithms_supported": ["AES-256", "AES-128", "ChaCha20"],
+      "key_management": ["Manual", "Certificate-based", "Key Management Service"],
+      
+      "encryption_functions": [
+        "generateAESKey()",
+        "encryptFileAES(inputPath, outputPath, key, iv)",
+        "decryptFileAES(inputPath, outputPath, key, iv)",
+        "encryptWithRSAPublicKey(data, publicKeyPath)",
+        "decryptWithRSAPrivateKey(encryptedData, privateKeyPath)"
+      ]
+    },
+    
+    "integration_points": {
+      "auto_transfer": "Optional encryption during automatic transfer",
+      "manual_transfer": "Configurable encryption for manual transfers", 
+      "configuration": "Global encryption settings in system config"
+    }
+  },
+
+  "cross_cutting_concerns": {
+    "error_handling": {
+      "pattern": "Try-catch blocks with consistent error responses",
+      "logging": "Centralized logging with winston or similar",
+      "user_feedback": "Toast notifications and error messages"
+    },
+    
+    "state_management": {
+      "redis_state": "Centralized state in Redis for inter-service communication",
+      "database_persistence": "PostgreSQL for persistent data storage",
+      "configuration_sync": "Real-time configuration synchronization"
+    },
+    
+    "performance_optimization": {
+      "database_indexing": "Proper indexes on frequently queried columns",
+      "pagination": "Server-side pagination for large datasets",
+      "caching": "Redis caching for frequently accessed data",
+      "batch_processing": "File transfer in batches to prevent memory issues"
+    },
+    
+    "security_considerations": {
+      "input_validation": "Validate all user inputs",
+      "file_path_security": "Prevent directory traversal attacks",
+      "error_information": "Don't expose sensitive information in errors",
+      "encryption_at_rest": "Optional file encryption for sensitive data"
+    }
+  },
+
+  "testing_strategies": {
+    "unit_testing": {
+      "backend_services": "Test individual service functions",
+      "api_endpoints": "Test route handlers and responses",
+      "utility_functions": "Test encryption, configuration utilities"
+    },
+    
+    "integration_testing": {
+      "database_operations": "Test database queries and transactions",
+      "redis_operations": "Test state management and pub/sub",
+      "file_operations": "Test file transfer and encryption"
+    },
+    
+    "end_to_end_testing": {
+      "user_workflows": "Test complete user scenarios",
+      "websocket_communication": "Test real-time updates",
+      "error_scenarios": "Test error handling and recovery"
+    }
+  },
+
+  "deployment_considerations": {
+    "service_dependencies": "Proper startup order defined in ecosystem.config.js",
+    "data_migration": "Database migration scripts for schema updates",
+    "configuration_management": "Environment-specific configuration files",
+    "monitoring": "Health checks and service monitoring via PM2",
+    "backup_procedures": "Database and configuration backup strategies"
+  }
+} 

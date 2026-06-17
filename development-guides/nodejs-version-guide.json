@@ -1,0 +1,308 @@
+{
+  "title": "Node.js v12.18.3 Development Reference Guide",
+  "version": "1.0.0",
+  "description": "Reference guide for enforcing Node.js v12.18.3 development standards in the Tahakom Data Transfer System",
+  "purpose": "Use this guide as a reference when developing, reviewing, or suggesting code changes. All development must be compatible with Node.js v12.18.3.",
+  
+  "nodejs_environment": {
+    "version": "12.18.3",
+    "release_date": "2020-06-02",
+    "lts_name": "Erbium",
+    "v8_engine": "7.8.279.23",
+    "npm_version": "6.14.6",
+    "openssl_version": "1.1.1g"
+  },
+
+  "javascript_features_available": {
+    "es2019_features": [
+      "Array.prototype.flat()",
+      "Array.prototype.flatMap()",
+      "Object.fromEntries()",
+      "String.prototype.trimStart()",
+      "String.prototype.trimEnd()",
+      "Optional catch binding",
+      "JSON.stringify() improvements",
+      "Symbol.prototype.description"
+    ],
+    "es2018_features": [
+      "Async iterators",
+      "Rest/Spread properties",
+      "Promise.prototype.finally()",
+      "RegExp lookbehind assertions",
+      "RegExp named capture groups",
+      "s (dotAll) flag for regular expressions"
+    ],
+    "es2017_features": [
+      "async/await",
+      "Object.values()",
+      "Object.entries()",
+      "String padding (padStart/padEnd)",
+      "Object.getOwnPropertyDescriptors()",
+      "Shared memory and atomics"
+    ],
+    "experimental_features": [
+      "ES Modules (use --experimental-modules flag)",
+      "Worker threads (use --experimental-worker flag)",
+      "Private class fields (experimental syntax)"
+    ]
+  },
+
+  "javascript_features_not_available": {
+    "avoid_these_es2020_plus": [
+      "Nullish coalescing operator (??)",
+      "Optional chaining (?.)",
+      "BigInt literal syntax (123n)",
+      "Promise.allSettled()",
+      "String.prototype.matchAll()",
+      "import.meta",
+      "Dynamic import() - use require() instead"
+    ],
+    "use_alternatives": {
+      "nullish_coalescing": "Use: value !== null && value !== undefined ? value : defaultValue",
+      "optional_chaining": "Use: obj && obj.prop && obj.prop.subprop",
+      "bigint": "Use: BigInt(123) instead of 123n",
+      "dynamic_imports": "Use: require() for dynamic loading"
+    }
+  },
+
+  "project_dependencies": {
+    "core_frameworks": {
+      "express": "^4.18.2",
+      "nunjucks": "^3.2.4",
+      "body-parser": "^1.20.3",
+      "cors": "^2.8.5"
+    },
+    "database_redis": {
+      "ioredis": "^5.6.1",
+      "pg": "^8.16.2"
+    },
+    "utilities": {
+      "lodash": "^4.17.20",
+      "moment": "^2.30.1",
+      "moment-timezone": "^0.5.48",
+      "uuid": "^9.0.1",
+      "axios": "^1.9.0"
+    },
+    "file_system": {
+      "fs-extra": "^11.3.0",
+      "chokidar": "^3.6.0",
+      "get-folder-size": "^2.0.1"
+    },
+    "logging_monitoring": {
+      "winston": "^3.17.0",
+      "winston-daily-rotate-file": "^5.0.0",
+      "systeminformation": "^5.22.11"
+    },
+    "networking": {
+      "ws": "^8.18.2",
+      "https": "^1.0.0"
+    },
+    "development_tools": {
+      "dotenv": "^16.5.0",
+      "p-limit": "^3.1.0",
+      "content-type": "^1.0.5",
+      "form-data": "^4.0.2"
+    },
+    "windows_specific": {
+      "node-windows": "^1.0.0-beta.8"
+    },
+    "data_processing": {
+      "nedb": "^1.8.0",
+      "pdfkit": "^0.12.3",
+      "xml-js": "^1.6.11"
+    },
+    "built_in_modules": {
+      "crypto": "Built-in Node.js module - do not install as dependency",
+      "path": "Built-in Node.js module",
+      "fs": "Built-in Node.js module", 
+      "os": "Built-in Node.js module",
+      "process": "Built-in global object"
+    }
+  },
+
+  "development_patterns": {
+    "module_system": {
+      "default": "CommonJS (require/module.exports)",
+      "syntax": {
+        "import": "const express = require('express');",
+        "export": "module.exports = { function1, function2 };",
+        "export_single": "module.exports = MyClass;"
+      },
+      "es_modules": "Experimental - requires --experimental-modules flag"
+    },
+    "async_programming": {
+      "preferred": "async/await pattern",
+      "examples": {
+        "async_function": "async function getData() { const result = await fetch(url); return result.json(); }",
+        "error_handling": "try { await asyncFunction(); } catch (error) { console.error(error); }",
+        "parallel_execution": "const [result1, result2] = await Promise.all([fetch1(), fetch2()]);"
+      }
+    },
+    "error_handling": {
+      "synchronous": "try/catch blocks",
+      "asynchronous": "async/await with try/catch",
+      "promises": ".catch() method or try/catch with await",
+      "process_level": "process.on('uncaughtException') and process.on('unhandledRejection')"
+    }
+  },
+
+  "coding_standards": {
+    "variable_declarations": {
+      "prefer": "const and let",
+      "avoid": "var (function-scoped)",
+      "examples": {
+        "const": "const config = require('./config');",
+        "let": "let counter = 0;",
+        "destructuring": "const { name, age } = user;"
+      }
+    },
+    "function_definitions": {
+      "arrow_functions": "const add = (a, b) => a + b;",
+      "regular_functions": "function processData(data) { return data.map(item => item.id); }",
+      "async_functions": "async function fetchData() { return await api.getData(); }"
+    },
+    "object_operations": {
+      "spread_operator": "const newObj = { ...oldObj, newProp: 'value' };",
+      "destructuring": "const { prop1, prop2 } = object;",
+      "property_shorthand": "const obj = { name, age }; // instead of { name: name, age: age }"
+    },
+    "array_operations": {
+      "spread_operator": "const newArray = [...oldArray, newItem];",
+      "destructuring": "const [first, second, ...rest] = array;",
+      "methods": "map(), filter(), reduce(), find(), some(), every()"
+    }
+  },
+
+  "performance_guidelines": {
+    "memory_management": {
+      "heap_size": "Default ~1.4GB, use --max-old-space-size=4096 if needed",
+      "garbage_collection": "Automatic, monitor with process.memoryUsage()",
+      "memory_leaks": "Avoid global variables, clean up event listeners"
+    },
+    "event_loop": {
+      "non_blocking": "Use async operations instead of sync versions",
+      "examples": {
+        "good": "fs.readFile() instead of fs.readFileSync()",
+        "good": "setTimeout() instead of blocking loops"
+      }
+    },
+    "cpu_intensive": {
+      "worker_threads": "Available with --experimental-worker flag",
+      "cluster_module": "Use cluster module for CPU-intensive tasks",
+      "process_nextTick": "Use setImmediate() for I/O callbacks"
+    }
+  },
+
+  "debugging_development": {
+    "built_in_tools": {
+      "debugger": "node --inspect app.js",
+      "profiler": "node --prof app.js",
+      "trace_warnings": "node --trace-warnings app.js"
+    },
+    "logging": {
+      "console": "console.log(), console.error(), console.warn()",
+      "winston": "Use winston for structured logging",
+      "debug_module": "Use debug package for development logging"
+    },
+    "process_information": {
+      "version": "process.version",
+      "platform": "process.platform", 
+      "memory": "process.memoryUsage()",
+      "cpu": "process.cpuUsage()",
+      "uptime": "process.uptime()"
+    }
+  },
+
+  "file_operations": {
+    "fs_module": {
+      "async": "fs.readFile(), fs.writeFile(), fs.mkdir()",
+      "promises": "fs.promises.readFile(), fs.promises.writeFile()",
+      "streams": "fs.createReadStream(), fs.createWriteStream()"
+    },
+    "fs_extra": {
+      "enhanced": "fs.copy(), fs.ensureDir(), fs.remove()",
+      "json": "fs.readJson(), fs.writeJson()",
+      "async_support": "All methods return promises"
+    },
+    "path_module": {
+      "join": "path.join(__dirname, 'file.txt')",
+      "resolve": "path.resolve('./relative/path')",
+      "dirname": "__dirname and __filename globals"
+    }
+  },
+
+  "networking_http": {
+    "express_patterns": {
+      "middleware": "app.use(express.json()), app.use(cors())",
+      "routing": "app.get('/path', (req, res) => { res.json(data); })",
+      "error_handling": "app.use((err, req, res, next) => { res.status(500).json({error: err.message}); })"
+    },
+    "websockets": {
+      "ws_library": "const WebSocket = require('ws');",
+      "server": "const wss = new WebSocket.Server({ port: 8080 });",
+      "client": "const ws = new WebSocket('ws://localhost:8080');"
+    },
+    "http_requests": {
+      "axios": "const response = await axios.get(url);",
+      "built_in": "const https = require('https'); (for simple requests)"
+    }
+  },
+
+  "database_patterns": {
+    "postgresql": {
+      "pg_library": "const { Pool } = require('pg');",
+      "connection": "const pool = new Pool({ host, database, user, password });",
+      "queries": "const result = await pool.query('SELECT * FROM table WHERE id = $1', [id]);"
+    },
+    "redis": {
+      "ioredis": "const Redis = require('ioredis');",
+      "connection": "const redis = new Redis({ host, port, password });",
+      "operations": "await redis.set('key', 'value'); const value = await redis.get('key');"
+    },
+    "nedb": {
+      "embedded": "const Datastore = require('nedb');",
+      "usage": "const db = new Datastore({ filename: 'data.db', autoload: true });"
+    }
+  },
+
+  "testing_development": {
+    "unit_testing": {
+      "built_in": "Use assert module for simple tests",
+      "external": "Consider mocha, jest, or tap for comprehensive testing"
+    },
+    "environment": {
+      "node_env": "process.env.NODE_ENV",
+      "dotenv": "require('dotenv').config(); for environment variables"
+    }
+  },
+
+  "production_deployment": {
+    "pm2_configuration": {
+      "basic": "pm2 start app.js --name 'app-name'",
+      "cluster": "pm2 start app.js -i max",
+      "memory": "pm2 start app.js --max-memory-restart 1G"
+    },
+    "process_management": {
+      "graceful_shutdown": "process.on('SIGTERM', cleanup); process.on('SIGINT', cleanup);",
+      "error_handling": "process.on('uncaughtException', handler);"
+    }
+  },
+
+  "development_commands": {
+    "node_execution": [
+      "node app.js",
+      "node --inspect app.js (debugging)",
+      "node --max-old-space-size=4096 app.js (increase memory)"
+    ],
+    "npm_commands": [
+      "npm install (install dependencies)",
+      "npm run script-name (run package.json script)",
+      "npm ls (list installed packages)"
+    ],
+    "development_flags": [
+      "--trace-warnings (show warning stack traces)",
+      "--enable-source-maps (enable source map support)",
+      "--experimental-modules (enable ES modules)"
+    ]
+  }
+} 

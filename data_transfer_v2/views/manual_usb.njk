@@ -1,0 +1,961 @@
+{% extends './layout/layout.njk' %}
+
+{% block content %}
+
+    <div class="container-fluid">
+        <!-- Page Header -->
+        <div class="mb-4">
+            <h1 class="h3">Manual USB Transfer</h1>
+        </div>
+
+        <div class="row">
+            <!-- Create Transfer Job Card -->
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-plus-circle me-2"></i>Create Transfer Job
+                                </h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="createTransferForm">
+                            <!-- Drive Selection -->
+                            <div class="mb-3">
+                                <label class="form-label">Select USB Drive</label>
+                                <select class="form-select" id="driveSelect" required>
+                                    <option value="">Choose drive letter</option>
+                                </select>
+                            </div>
+
+                            <!-- Date Range -->
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Start Date & Time</label>
+                                    <input type="datetime-local" class="form-control" id="startDateTime" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">End Date & Time</label>
+                                    <input type="datetime-local" class="form-control" id="endDateTime" required>
+                                </div>
+                            </div>
+
+                            <!-- Data Type Selection -->
+                            <div class="form-group mb-4">
+                                <label class="form-label">Data to Transfer</label>
+                                
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="dataType" 
+                                        id="imagesOnly"
+                                        value="images"
+                                    >
+                                    <label class="form-check-label" for="imagesOnly">
+                                        <i class="fas fa-image me-2 text-primary"></i><strong>Images Only</strong> - Transfer image files (.jpg, .jpeg)
+                                    </label>
+                                </div>
+
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="dataType"
+                                        id="videosOnly"
+                                        value="videos"
+                                    >
+                                    <label class="form-check-label" for="videosOnly">
+                                        <i class="fas fa-video me-2 text-success"></i><strong>Videos Only</strong> - Transfer video files (.mp4)
+                                    </label>
+                                </div>
+
+                                <div class="form-check mb-3">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="dataType"
+                                        id="bothTypes"
+                                        value="both"
+                                        checked
+                                    >
+                                    <label class="form-check-label" for="bothTypes">
+                                        <i class="fas fa-file-alt me-2 text-info"></i><strong>Both Images & Videos</strong> - Transfer all media files
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Encryption Settings -->
+                            <div class="mb-3">
+                                <label class="form-label">File Encryption</label>
+
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="encryptionType" 
+                                        id="noEncryption"
+                                        checked
+                                    >
+                                    <label class="form-check-label" for="noEncryption">
+                                        Disable encryption
+                                    </label>
+                                </div>
+
+                                <div class="form-check mb-3">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="encryptionType"
+                                        id="useEncryption"
+                                    >
+                                    <label class="form-check-label" for="useEncryption">
+                                        Enable encryption
+                                    </label>
+                                </div>
+
+                                <div class="alert alert-info" id="encryptionInfo">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Encryption Settings:</strong> Centrally managed from <a href="/" class="alert-link">All Files page</a>. 
+                                    Current settings will be applied automatically when encryption is enabled.
+                                </div>
+                            </div>
+
+                            <button 
+                                type="button" 
+                                id="showSummaryBtn"
+                                class="btn btn-secondary w-100 mb-3">
+                                <i class="fas fa-calculator me-2"></i>Show Transfer Summary
+                            </button>
+
+                            <!-- Transfer Summary -->
+                            <div class="summary-box mb-4">
+                                <h6 class="mb-3">Transfer Summary</h6>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="summary-item">Files to Transfer:</span>
+                                    <span class="summary-value" id="filesToTransfer">-</span>
+                                </div>
+                                <div class="d-flex justify-content-between mb-2">
+                                    <span class="summary-item">Total Size:</span>
+                                    <span class="summary-value" id="totalSize">-</span>
+                                </div>
+                                <div class="d-flex justify-content-between">
+                                    <span class="summary-item">Destination:</span>
+                                    <span class="summary-value" id="destinationPath">-</span>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary w-100" id="createTransferBtn" disabled>
+                                <i class="fas fa-plus me-2"></i>Create Transfer Job
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Transfer Jobs Card -->
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-tasks me-2"></i>Active Transfer Jobs
+                                </h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="activeTransfers">
+                            <!-- Active jobs will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transfer History -->
+        <div class="card">
+            <div class="card-header bg-transparent border-0">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-history me-2"></i>Transfer History
+                        </h5>
+            </div>
+            <div class="card-body">
+                <!-- Filters -->
+                <div class="row mb-4">
+                    <div class="col-md-8">
+                        <div class="btn-group">
+                            <button class="btn btn-outline-secondary active">All</button>
+                            <button class="btn btn-outline-secondary">Completed</button>
+                            <button class="btn btn-outline-secondary">Failed</button>
+                            <button class="btn btn-outline-secondary">Cancelled</button>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-flex gap-2">
+                            <input type="text" class="form-control" placeholder="Search..." id="searchInput">
+                            <button class="btn btn-primary" id="filterBtn">Filter</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Table -->
+                <div class="table-responsive">
+                    <table class="table" id="transferHistoryTable">
+                        <thead>
+                            <tr>
+                                <th>Job ID</th>
+                                <th>Date</th>
+                                <th>Drive</th>
+                                <th>Files</th>
+                                <th>Size</th>
+                                <th>Duration</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <!-- Table rows will be inserted here -->
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Pagination -->
+                <div class="d-flex justify-content-between align-items-center mt-4">
+                    <div class="d-flex align-items-center">
+                        <span class="me-2">Show</span>
+                        <select class="form-select form-select-sm" id="entriesPerPage" style="width: auto;">
+                            <option>10</option>
+                            <option>25</option>
+                            <option selected>50</option>
+                            <option>100</option>
+                        </select>
+                        <span class="ms-2">entries</span>
+                    </div>
+
+                    <nav aria-label="Table navigation">
+                        <ul class="pagination pagination-sm mb-0">
+                            <!-- Pagination links will be inserted here -->
+                        </ul>
+                    </nav>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="notificationToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <i class="fas fa-info-circle me-2"></i>
+                <strong class="me-auto" id="toastTitle">Notification</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body" id="toastBody"></div>
+        </div>
+    </div>
+    
+{% endblock %}
+
+{% block script %}
+    <script>
+        $('.manual-usb').addClass('active');
+    </script>
+
+    <script>
+        const MANUAL_TRANSFER_SERVICE_URL = 'http://localhost:8454';
+        const WS_URL = 'ws://localhost:8454';
+        let ws = null;
+        let currentJobId = null;
+
+        // Utility functions
+        function formatBytes(bytes) {
+            if (!bytes || bytes === 0) 
+                return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function formatDateTime(dateTimeStr) {
+            if (!dateTimeStr) 
+                return 'N/A';
+            try {
+                const date = new Date(dateTimeStr);
+                return date.toLocaleString('en-US', {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    hour12: false
+                });
+            } catch (e) {
+                console.error('Error formatting date:', e);
+                return dateTimeStr;
+            }
+        }
+
+        function getStatusBadgeClass(status) {
+            const statusClasses = {
+                'completed': 'bg-success',
+                'failed': 'bg-danger',
+                'cancelled': 'bg-warning',
+                'pending': 'bg-info',
+                'in_progress': 'bg-primary',
+                'paused': 'bg-secondary'
+            };
+            return statusClasses[status] || 'bg-secondary';
+        }
+
+        function connectWebsocket() {
+            socket = new WebSocket(WS_URL);
+
+            socket.addEventListener('open', (event) => {
+                console.log('WebSocket connection opened:', event);
+                socket.send(JSON.stringify({action: 'subscribe', event: 'realtimeDashboard'}));
+            });
+
+            socket.addEventListener('message', (event) => {
+                let data = JSON.parse(event.data);
+                console.log('WebSocket message received:', data);
+                if (data.event === "manualTransferConfig") {
+                    const { driveResponse, config } = data.data;
+                    console.log('manualTransferConfig:', { driveResponse, config });
+                    
+                    // Update the active transfers container
+                    const activeJobsContainer = $('#activeTransfers');
+                    activeJobsContainer.empty();
+
+                    if (config && config.jobId) {
+                        createTransferJobElement(config, activeJobsContainer);
+                        // Update drive status with the latest driveInfo
+                        updateDriveStatus(config.jobId, driveResponse);
+                        
+                        // Update create transfer button state
+                        // document.getElementById('createTransferBtn').disabled = true;
+                    } else {
+                        activeJobsContainer.html('<div class="alert alert-info">No active transfer jobs available.</div>');
+                        // Enable create transfer button if no active job
+                        document.getElementById('createTransferBtn').disabled = false;
+                    }
+                } else if (data.event === "manualTransferError") {
+                    showToast(data.data.error, 'error');
+                }
+            });
+
+            socket.addEventListener('close', (event) => {
+                console.log('WebSocket connection closed:', event);
+                setTimeout(connectWebsocket, 5000);
+            });
+
+            socket.addEventListener('error', (error) => {
+                console.error('WebSocket error:', error);
+            });
+        }
+
+        connectWebsocket();
+
+        // Alias for backward compatibility
+        const formatFileSize = formatBytes;
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('notificationToast');
+            const toastTitle = document.getElementById('toastTitle');
+            const toastBody = document.getElementById('toastBody');
+
+            toast.className = `toast align-items-center text-white bg-${type} border-0`;
+            toastTitle.textContent = type
+                .charAt(0)
+                .toUpperCase() + type.slice(1);
+            toastBody.textContent = message;
+
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+
+        function setTodayDateRange() {
+            const today = new Date();
+            const startOfDay = new Date(today.setHours(0, 0, 0, 0));
+            const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+
+            document
+                .getElementById('startDateTime')
+                .value = startOfDay
+                .toISOString()
+                .slice(0, 16);
+            document
+                .getElementById('endDateTime')
+                .value = endOfDay
+                .toISOString()
+                .slice(0, 16);
+        }
+
+        function updateTransferSummary() {
+            const drive = document
+                .getElementById('driveSelect')
+                .value;
+            const startDateTime = document
+                .getElementById('startDateTime')
+                .value;
+            const endDateTime = document
+                .getElementById('endDateTime')
+                .value;
+            const dataType = document
+                .querySelector('input[name="dataType"]:checked')
+                .value;
+
+            if (!drive || !startDateTime || !endDateTime) {
+                return;
+            }
+
+
+            let body = {
+                usbPath: drive,
+                startDateTime,
+                endDateTime,
+                dataType,
+                encryption: {
+                    enabled: document.getElementById('useEncryption').checked
+                }
+            }
+            console.log('body:', body);
+
+            fetch(`${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/summary`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(body)
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document
+                            .getElementById('filesToTransfer')
+                            .textContent = data.summary.total_files + ' files';
+                        document
+                            .getElementById('totalSize')
+                            .textContent = formatFileSize(data.summary.total_size);
+                        document
+                            .getElementById('destinationPath')
+                            .textContent = drive + '\\transfer\\' + new Date()
+                            .toISOString()
+                            .split('T')[0];
+                        document
+                            .getElementById('createTransferBtn')
+                            .disabled = false;
+                    } else {
+                        showToast(data.error || 'Failed to get transfer summary', 'error');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showToast('Failed to get transfer summary', 'error');
+                });
+        }
+
+        function createTransferJobElement(job, container) {
+            console.log('Creating element for job:', job);
+            const { status } = job;
+            const statusText = status.isFinished ? 'completed' 
+                    : status.isCancelled ? 'cancelled'
+                    : status.isPaused ? 'paused' 
+                    : 'in_progress';
+
+            const progress = status.totalFiles > 0
+                ? Math.round((status.transferredFiles / status.totalFiles) * 100)
+                : 0;
+
+            const jobElement = $(
+                `
+                <div class="job-card mb-3" id="job-${job.jobId}">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="mb-0">Job #${job.jobId}</h6>
+                        <span class="badge status-badge ${getStatusBadgeClass(statusText)}">${statusText}</span>
+                    </div>
+
+                    <div class="text-muted small mb-3 d-flex justify-content-between">
+                        <span class="me-2">Transfer Period</span>
+                        <span>${formatDateTime(job.startDateTime)} -- ${formatDateTime(job.endDateTime)}</span>
+                    </div>
+
+                    <div class="mb-3">
+                        <div class="d-flex justify-content-between mb-2">
+                            <span>Drive: <strong>${job.drive}</strong>
+                                <span id="drive-status-${job.jobId}" class="ms-2"></span>
+                            </span>
+                            <span>Progress: <strong>${progress}% (${status.transferredFiles}/${status.totalFiles} files)</strong></span>
+                        </div>
+                        <div class="progress">
+                            <div class="progress-bar ${getProgressBarClass(statusText)}" style="width: ${progress}%;" 
+                                 aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="details-grid mb-3">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="detail-item">
+                                    <span class="label">Total Size:</span><br>
+                                    <span class="value">${formatBytes(status.totalSize)}</span>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="detail-item">
+                                    <span class="label">Created At:</span><br>
+                                    <span class="value">${formatDateTime(job.createdAt)}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${ !status.isFinished && !status.isCancelled
+                ? `
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-light flex-grow-1 job-control-btn" 
+                                    data-action="${status.isPaused
+                    ? 'resume'
+                    : 'pause'}" 
+                                    data-job-id="${job.jobId}">
+                                <i class="fas ${status.isPaused
+                        ? 'fa-play'
+                        : 'fa-pause'} me-2"></i>
+                                ${status.isPaused
+                            ? 'Resume'
+                            : 'Pause'}
+                            </button>
+                            <button class="btn btn-danger flex-grow-1 job-control-btn" 
+                                    data-action="cancel" 
+                                    data-job-id="${job.jobId}">
+                                <i class="fas fa-times me-2"></i>Cancel
+                            </button>
+                        </div>
+                    `
+                : ''}
+                </div>
+            `);
+            container.append(jobElement);
+        }
+
+        function updateDriveStatus(jobId, driveResponse) {
+            const statusElement = $(`#drive-status-${jobId}`);
+            if (driveResponse) {
+                if (driveResponse.connected && driveResponse.success) {
+                    statusElement.html(`
+                        <span class="badge bg-success">
+                            <i class="fas fa-check"></i> Connected
+                            (${formatBytes(driveResponse.driveInfo.remainingSpace)} free)
+                        </span>
+                    `);
+                } else if (driveResponse.connected && !driveResponse.success) {
+                    statusElement.html(`
+                        <span class="badge bg-warning">
+                            <i class="fas fa-exclamation-triangle"></i> ${driveResponse.error || 'Drive error'}
+                        </span>
+                    `);
+                } else {
+                    statusElement.html(`
+                        <span class="badge bg-danger">
+                            <i class="fas fa-times"></i> ${driveResponse.error || 'Not Connected'}
+                        </span>
+                    `);
+                }
+            }
+        }
+
+        function getStatusBadgeClass(status) {
+            switch (status) {
+                case 'completed':
+                    return 'bg-success';
+                case 'cancelled':
+                    return 'bg-danger';
+                case 'paused':
+                    return 'bg-warning';
+                default:
+                    return 'bg-primary';
+            }
+        }
+
+        function getProgressBarClass(status) {
+            switch (status) {
+                case 'completed':
+                    return 'bg-success';
+                case 'cancelled':
+                    return 'bg-danger';
+                case 'paused':
+                    return 'bg-warning';
+                default:
+                    return 'bg-primary';
+            }
+        }
+
+        // Job control functions
+        async function pauseJob(jobId) {
+            try {
+                const response = await $.ajax({
+                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/pause`,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({jobId})
+                });
+
+                if (response.success) {
+                    showToast('Job paused successfully', 'success');
+                } else {
+                    showToast('Failed to pause job', 'error');
+                }
+            } catch (error) {
+                console.error('Error pausing job:', error);
+                showToast('Failed to pause job', 'error');
+            }
+        }
+
+        async function resumeJob(jobId) {
+            try {
+                const response = await $.ajax({
+                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/resume`,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({jobId})
+                });
+
+                if (response.success) {
+                    showToast('Job resumed successfully', 'success');
+                } else {
+                    showToast('Failed to resume job', 'error');
+                }
+            } catch (error) {
+                console.error('Error resuming job:', error);
+                showToast('Failed to resume job', 'error');
+            }
+        }
+
+        async function cancelJob(jobId) {
+            if (!confirm('Are you sure you want to cancel this transfer job?')) {
+                return;
+            }
+
+            try {
+                const response = await $.ajax({
+                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/cancel`,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({jobId})
+                });
+
+                if (response.success) {
+                    showToast('Job cancelled successfully', 'success');
+                } else {
+                    showToast('Failed to cancel job', 'error');
+                }
+            } catch (error) {
+                console.error('Error cancelling job:', error);
+                showToast('Failed to cancel job', 'error');
+            }
+        }
+
+        // Toggle pause/resume function
+        function togglePause(jobId, isPaused) {
+            if (isPaused) {
+                resumeJob(jobId);
+            } else {
+                pauseJob(jobId);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            // Set initial date range to today
+            setTodayDateRange();
+
+            // Load available drives
+            fetch(`${MANUAL_TRANSFER_SERVICE_URL}/drives`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const driveSelect = document.getElementById('driveSelect');
+                        driveSelect.innerHTML = '<option value="">Choose drive letter</option>';
+                        data
+                            .drives
+                            .forEach(drive => {
+                                driveSelect.innerHTML += `<option value="${drive.letter}">${drive.letter} (${drive.label})</option>`;
+                            });
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading drives:', error);
+                    showToast('Failed to load drives', 'error');
+                });
+
+            // Add jQuery click handler for the summary button
+            $('#showSummaryBtn').on('click', updateTransferSummary);
+
+            // Initially disable create transfer button
+            document
+                .getElementById('createTransferBtn')
+                .disabled = true;
+
+            // Create transfer job
+            document
+                .getElementById('createTransferForm')
+                .addEventListener('submit', async function (e) {
+                    e.preventDefault();
+
+                    const drive = document
+                        .getElementById('driveSelect')
+                        .value;
+                    const startDateTime = document
+                        .getElementById('startDateTime')
+                        .value;
+                    const endDateTime = document
+                        .getElementById('endDateTime')
+                        .value;
+                    const dataType = document
+                        .querySelector('input[name="dataType"]:checked')
+                        .value;
+
+                    if (!drive || !startDateTime || !endDateTime) {
+                        showToast('Please fill all required fields', 'error');
+                        return;
+                    }
+
+                    try {
+                        const response = await fetch(`${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/create`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify({
+                                usbPath: drive, 
+                                startDateTime, 
+                                endDateTime,
+                                dataType,
+                                encryption: {
+                                    enabled: document.getElementById('useEncryption').checked
+                                }
+                            })
+                        });
+
+                        const data = await response.json();
+
+                        if (data.success) {
+                            currentJobId = data.jobId;
+                            showToast('Transfer job created successfully', 'success');
+                            document
+                                .getElementById('createTransferBtn')
+                                .disabled = true;
+                            showToast('Waiting for transfer to start...', 'info');
+                        } else {
+                            showToast(data.error || 'Failed to create transfer job', 'error');
+                        }
+                    } catch (error) {
+                        console.error('Error:', error);
+                        showToast('Failed to create transfer job', 'error');
+                    }
+                });
+
+            $(document).ready(function () {
+                // const MANUAL_TRANSFER_SERVICE_URL = 'http://localhost:8991';
+
+                // Job control button handler
+                $(document).on('click', '.job-control-btn', function (e) {
+                    e.preventDefault();
+                    const $btn = $(this);
+                    const jobId = $btn.data('job-id');
+                    const action = $btn.data('action');
+
+                    if (action === 'cancel' && !confirm('Are you sure you want to cancel this transfer job?')) {
+                        return;
+                    }
+
+                    $.ajax({
+                        url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/control`,
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({jobId, action})
+                    })
+                    .done(function (response) {
+                        if (response.success) {
+                            showToast(response.message, 'success');
+                        } else {
+                            showToast(`Failed to ${action} job`, 'error');
+                        }
+                    })
+                    .fail(function (error) {
+                        console.error(`Error ${action}ing job:`, error);
+                        showToast(`Failed to ${action} job`, 'error');
+                    });
+                });
+            });
+
+            // Job control function
+            async function controlJob(jobId, action) {
+                if (action === 'cancel' && !confirm('Are you sure you want to cancel this transfer job?')) {
+                    return;
+                }
+
+                try {
+                    const response = await $.ajax({
+                        url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/control`,
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({jobId, action})
+                    });
+
+                    if (response.success) {
+                        showToast(response.message, 'success');
+                    } else {
+                        showToast(`Failed to ${action} job`, 'error');
+                    }
+                } catch (error) {
+                    console.error(`Error ${action}ing job:`, error);
+                    showToast(`Failed to ${action} job`, 'error');
+                }
+            }
+
+            // Add these functions for transfer history handling
+            function loadTransferHistory(page = 1, limit = 50, status = 'all', search = '') {
+                $.ajax({
+                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/history`,
+                    method: 'GET',
+                    data: { page, limit, status, search },
+                    success: function(response) {
+                        if (response.success) {
+                            renderTransferHistory(response.data);
+                            renderPagination(response.data.pagination);
+                        } else {
+                            showToast('Failed to load transfer history', 'error');
+                        }
+                    },
+                    error: function(error) {
+                        console.error('Error loading transfer history:', error);
+                        showToast('Failed to load transfer history', 'error');
+                    }
+                });
+            }
+
+            function renderTransferHistory(data) {
+                console.log(data);
+                const tbody = $('#transferHistoryTable tbody');
+                tbody.empty();
+
+                data.jobs.forEach(job => {
+                    const row = $(`
+                        <tr>
+                            <td>#${job.id}</td>
+                            <td>${formatDateTime(job.date)}</td>
+                            <td>${job.drive}</td>
+                            <td>${job.files.transferred.toLocaleString()} / ${job.files.total.toLocaleString()}</td>
+                            <td>${formatBytes(job.size)}</td>
+                            <td>${formatDuration(job.duration)}</td>
+                            <td><span class="badge ${getStatusBadgeClass(job.status.toLowerCase())}">${job.status}</span></td>
+                        </tr>
+                    `);
+                    tbody.append(row);
+                });
+            }
+
+            function renderPagination(pagination) {
+                const paginationContainer = $('.pagination');
+                paginationContainer.empty();
+
+                // Previous button
+                paginationContainer.append(`
+                    <li class="page-item ${pagination.page === 1 ? 'disabled' : ''}">
+                        <a class="page-link" href="#" data-page="${pagination.page - 1}" aria-label="Previous">
+                            <i class="fas fa-chevron-left"></i>
+                        </a>
+                    </li>
+                `);
+
+                // Page numbers
+                for (let i = 1; i <= pagination.pages; i++) {
+                    if (
+                        i === 1 || 
+                        i === pagination.pages || 
+                        (i >= pagination.page - 2 && i <= pagination.page + 2)
+                    ) {
+                        paginationContainer.append(`
+                            <li class="page-item ${i === pagination.page ? 'active' : ''}">
+                                <a class="page-link" href="#" data-page="${i}">${i}</a>
+                            </li>
+                        `);
+                    } else if (
+                        i === pagination.page - 3 || 
+                        i === pagination.page + 3
+                    ) {
+                        paginationContainer.append(`
+                            <li class="page-item disabled">
+                                <a class="page-link" href="#">...</a>
+                            </li>
+                        `);
+                    }
+                }
+
+                // Next button
+                paginationContainer.append(`
+                    <li class="page-item ${pagination.page === pagination.pages ? 'disabled' : ''}">
+                        <a class="page-link" href="#" data-page="${pagination.page + 1}" aria-label="Next">
+                            <i class="fas fa-chevron-right"></i>
+                        </a>
+                    </li>
+                `);
+            }
+
+            function formatDuration(minutes) {
+                if (minutes < 60) {
+                    return `${minutes} min`;
+                }
+                const hours = Math.floor(minutes / 60);
+                const remainingMinutes = minutes % 60;
+                return `${hours}h ${remainingMinutes}m`;
+            }
+
+            // Event handlers
+            $(document).ready(function() {
+                // Initial load
+                loadTransferHistory();
+
+                // Status filter buttons
+                $('.btn-group .btn').click(function() {
+                    $('.btn-group .btn').removeClass('active');
+                    $(this).addClass('active');
+                    const status = $(this).text().toLowerCase();
+                    loadTransferHistory(1, $('#entriesPerPage').val(), status, $('#searchInput').val());
+                });
+
+                // Search
+                $('#filterBtn').click(function() {
+                    loadTransferHistory(1, $('#entriesPerPage').val(), 
+                        $('.btn-group .btn.active').text().toLowerCase(), 
+                        $('#searchInput').val()
+                    );
+                });
+
+                // Entries per page
+                $('#entriesPerPage').change(function() {
+                    loadTransferHistory(1, $(this).val(), 
+                        $('.btn-group .btn.active').text().toLowerCase(), 
+                        $('#searchInput').val()
+                    );
+                });
+
+                // Pagination
+                $(document).on('click', '.pagination .page-link', function(e) {
+                    e.preventDefault();
+                    const page = $(this).data('page');
+                    if (page && !$(this).parent().hasClass('disabled')) {
+                        loadTransferHistory(page, $('#entriesPerPage').val(), 
+                            $('.btn-group .btn.active').text().toLowerCase(), 
+                            $('#searchInput').val()
+                        );
+                    }
+                });
+
+                // View details button
+                $(document).on('click', '.view-details', function() {
+                    const jobId = $(this).data('job-id');
+                    // Add your details view logic here
+                    console.log('View details for job:', jobId);
+                });
+            });
+        });
+    </script>
+{% endblock %}

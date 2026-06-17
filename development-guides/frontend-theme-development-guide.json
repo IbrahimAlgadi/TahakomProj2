@@ -1,0 +1,391 @@
+{
+  "title": "Frontend Theme Development Guide",
+  "version": "1.0.0",
+  "description": "Comprehensive guide for frontend theme development and styling in the Tahakom Data Transfer System",
+  
+  "theme_overview": {
+    "design_system": "Modern Admin Dashboard",
+    "color_scheme": "Bootstrap default with custom accents",
+    "typography": "System fonts with Bootstrap typography scale",
+    "layout_system": "Bootstrap Grid with custom components",
+    "responsive_design": "Mobile-first responsive approach"
+  },
+
+  "technology_stack": {
+    "template_engine": {
+      "name": "Nunjucks",
+      "version": "Latest",
+      "features": [
+        "Template inheritance",
+        "Macros and includes",
+        "Filters and functions",
+        "Conditional rendering",
+        "Loop constructs"
+      ]
+    },
+    
+    "css_framework": {
+      "name": "Bootstrap",
+      "version": "5.x",
+      "components_used": [
+        "Grid system",
+        "Cards",
+        "Forms",
+        "Buttons",
+        "Modals",
+        "Tables",
+        "Progress bars",
+        "Alerts",
+        "Badges",
+        "Tooltips",
+        "Toasts"
+      ]
+    },
+    
+    "icon_system": {
+      "name": "Font Awesome",
+      "version": "Latest",
+      "usage": "Icon classes throughout the interface",
+      "categories": [
+        "Navigation icons",
+        "Status indicators",
+        "Action buttons",
+        "File type icons",
+        "System status icons"
+      ]
+    },
+    
+    "visualization": {
+      "name": "Apache ECharts",
+      "version": "5.4.3",
+      "chart_types": [
+        "Line charts",
+        "Bar charts", 
+        "Pie charts",
+        "Area charts",
+        "Gauge charts"
+      ]
+    }
+  },
+
+  "layout_structure": {
+    "template_hierarchy": {
+      "main_layout": {
+        "file": "data_transfer_v2/views/layout/layout.njk",
+        "description": "Main application layout with sidebar navigation",
+        "extends": "root_layout.njk",
+        "components": [
+          "Header with title and controls",
+          "Sidebar navigation",
+          "Main content area",
+          "Footer (if needed)"
+        ]
+      }
+    },
+    
+    "partial_components": {
+      "navigation": "data_transfer_v2/views/layout/partials/",
+      "shared_components": [
+        "Sidebar navigation",
+        "Header components",
+        "Footer components",
+        "Common modals"
+      ]
+    },
+    
+    "page_structure": {
+      "container": "container-fluid for full-width layouts",
+      "content_sections": [
+        "Page header with title and actions",
+        "Filter/control cards",
+        "Main content cards",
+        "Data tables or charts",
+        "Modals for additional functionality"
+      ]
+    }
+  },
+
+  "styling_system": {
+    "css_organization": {
+      "main_css": "data_transfer_v2/public/css/main.css",
+      "bootstrap_css": "Bootstrap framework styles",
+      "vendor_css": "Third-party plugin styles",
+      "custom_css": "Application-specific styles"
+    },
+    
+    "color_palette": {
+      "primary": "Bootstrap primary (#0d6efd)",
+      "secondary": "Bootstrap secondary (#6c757d)",
+      "success": "Bootstrap success (#198754)",
+      "danger": "Bootstrap danger (#dc3545)",
+      "warning": "Bootstrap warning (#ffc107)",
+      "info": "Bootstrap info (#0dcaf0)",
+      "light": "Bootstrap light (#f8f9fa)",
+      "dark": "Bootstrap dark (#212529)"
+    },
+    
+    "typography": {
+      "headings": "Bootstrap heading classes (h1-h6)",
+      "body_text": "Bootstrap body text classes",
+      "text_utilities": [
+        "text-muted for secondary text",
+        "text-primary for highlighted text",
+        "fw-bold for bold text",
+        "small for smaller text"
+      ]
+    },
+    
+    "spacing": {
+      "margin_padding": "Bootstrap spacing utilities (m-*, p-*)",
+      "common_patterns": [
+        "mb-4 for bottom margin",
+        "me-2 for right margin on icons",
+        "p-3 for card padding",
+        "g-3 for grid gaps"
+      ]
+    }
+  },
+
+  "component_library": {
+    "cards": {
+      "structure": "card > card-header + card-body",
+      "variations": [
+        "Simple content cards",
+        "Cards with headers and actions",
+        "Status cards with metrics",
+        "Progress cards with bars"
+      ],
+      "styling": [
+        "bg-transparent for transparent headers",
+        "border-0 for borderless headers",
+        "Various background colors for status"
+      ]
+    },
+    
+    "forms": {
+      "form_groups": "form-group or mb-3 for spacing",
+      "input_styling": "form-control for inputs",
+      "select_styling": "form-select for dropdowns",
+      "button_styling": "btn btn-primary/secondary/outline-*",
+      "validation": "is-valid/is-invalid classes",
+      "input_groups": "input-group for combined controls"
+    },
+    
+    "tables": {
+      "base_classes": "table table-striped table-bordered",
+      "responsive": "table-responsive wrapper",
+      "hover_effects": "table-hover for row highlighting",
+      "size_variants": "table-sm for compact tables"
+    },
+    
+    "navigation": {
+      "sidebar": "Custom sidebar with navigation links",
+      "active_states": ".active class for current page",
+      "icons": "Font Awesome icons for nav items",
+      "responsive": "Collapsible on mobile devices"
+    },
+    
+    "progress_indicators": {
+      "progress_bars": "progress > progress-bar",
+      "color_variants": "bg-success, bg-warning, bg-danger",
+      "usage": "File transfer progress, storage usage"
+    },
+    
+    "status_indicators": {
+      "badges": "badge bg-success/danger/warning/secondary",
+      "status_dots": "Custom status indicators",
+      "icons": "Font Awesome status icons"
+    }
+  },
+
+  "interactive_components": {
+    "modals": {
+      "structure": "modal > modal-dialog > modal-content",
+      "sizes": "modal-lg for large modals",
+      "components": [
+        "Settings modal",
+        "Configuration dialogs",
+        "Confirmation dialogs"
+      ]
+    },
+    
+    "toasts": {
+      "positioning": "toast-container position-fixed",
+      "variants": "bg-success, bg-danger, bg-info",
+      "usage": "Success messages, error notifications"
+    },
+    
+    "dropdowns": {
+      "structure": "dropdown > dropdown-toggle + dropdown-menu",
+      "usage": "Export options, action menus",
+      "styling": "dropdown-item for menu items"
+    },
+    
+    "form_controls": {
+      "switches": "form-check form-switch for toggles",
+      "radio_groups": "btn-group with radio inputs",
+      "date_inputs": "form-control with type='date'",
+      "time_inputs": "form-control with type='time'"
+    }
+  },
+
+  "chart_integration": {
+    "echarts_setup": {
+      "library_inclusion": "/vendors/echarts/echarts.min.js",
+      "initialization": "echarts.init(document.getElementById('chartId'))",
+      "responsive": "chart.resize() on window resize"
+    },
+    
+    "chart_styling": {
+      "container_height": "Fixed height containers (400px, 300px)",
+      "color_scheme": "Consistent with Bootstrap colors",
+      "responsive_design": "Charts resize with container"
+    },
+    
+    "chart_types_implemented": {
+      "line_charts": "Time series data, trends",
+      "bar_charts": "Categorical data comparison",
+      "pie_charts": "Success/failure ratios",
+      "area_charts": "Cumulative data visualization"
+    }
+  },
+
+  "responsive_design": {
+    "breakpoints": {
+      "xs": "< 576px - Extra small devices",
+      "sm": "≥ 576px - Small devices", 
+      "md": "≥ 768px - Medium devices",
+      "lg": "≥ 992px - Large devices",
+      "xl": "≥ 1200px - Extra large devices",
+      "xxl": "≥ 1400px - Extra extra large devices"
+    },
+    
+    "grid_system": {
+      "container": "container-fluid for full width",
+      "rows": "row class for horizontal groups",
+      "columns": "col-* classes for responsive columns",
+      "common_patterns": [
+        "col-lg-6 for half-width on large screens",
+        "col-md-4 for thirds on medium screens",
+        "col-12 for full width on mobile"
+      ]
+    },
+    
+    "responsive_utilities": {
+      "display": "d-none d-md-block for hiding on mobile",
+      "spacing": "mb-4 mb-lg-0 for responsive margins",
+      "text": "text-center text-md-start for alignment"
+    }
+  },
+
+  "javascript_integration": {
+    "libraries_used": [
+      "Bootstrap JS for component interactions",
+      "ECharts for data visualization",
+      "Moment.js for date formatting",
+      "Custom application scripts"
+    ],
+    
+    "script_organization": {
+      "vendor_scripts": "/vendors/ directory",
+      "application_scripts": "/js/ directory",
+      "page_specific": "Inline scripts in template files",
+      "common_functions": "/js/common/ directory"
+    },
+    
+    "common_patterns": {
+      "websocket_connections": "Auto-reconnecting WebSocket clients",
+      "api_calls": "Fetch API for backend communication",
+      "form_handling": "Event listeners for form submissions",
+      "real_time_updates": "UI updates from WebSocket messages"
+    }
+  },
+
+  "development_workflow": {
+    "theme_customization": {
+      "color_overrides": "CSS custom properties for color scheme",
+      "component_styling": "Custom CSS classes for specific components",
+      "layout_modifications": "Grid and spacing adjustments"
+    },
+    
+    "asset_management": {
+      "css_files": "Static CSS files in public/css/",
+      "js_files": "Static JS files in public/js/",
+      "images": "Static images in public/assets/",
+      "fonts": "Web fonts in public/webfonts/"
+    },
+    
+    "template_development": {
+      "inheritance": "Extend base layouts for consistency",
+      "blocks": "Define content blocks for flexible layouts",
+      "includes": "Reuse common components",
+      "macros": "Create reusable template functions"
+    }
+  },
+
+  "best_practices": {
+    "accessibility": {
+      "semantic_html": "Use proper HTML5 semantic elements",
+      "aria_labels": "ARIA labels for screen readers",
+      "keyboard_navigation": "Ensure keyboard accessibility",
+      "color_contrast": "Maintain proper contrast ratios"
+    },
+    
+    "performance": {
+      "css_optimization": "Minimize custom CSS overrides",
+      "js_optimization": "Load scripts efficiently",
+      "image_optimization": "Optimize images for web",
+      "caching": "Leverage browser caching for static assets"
+    },
+    
+    "maintainability": {
+      "consistent_naming": "Use consistent CSS class naming",
+      "component_reuse": "Create reusable template components",
+      "documentation": "Document custom styles and components",
+      "version_control": "Track changes to theme files"
+    }
+  },
+
+  "customization_guide": {
+    "color_scheme_changes": {
+      "bootstrap_variables": "Override Bootstrap SCSS variables",
+      "css_custom_properties": "Use CSS custom properties for dynamic colors",
+      "component_specific": "Target specific components for color changes"
+    },
+    
+    "layout_modifications": {
+      "grid_adjustments": "Modify Bootstrap grid breakpoints",
+      "spacing_changes": "Adjust margin and padding utilities",
+      "component_sizing": "Modify component dimensions"
+    },
+    
+    "adding_new_components": {
+      "follow_bootstrap": "Use Bootstrap component patterns",
+      "consistent_styling": "Match existing design language",
+      "responsive_design": "Ensure mobile compatibility",
+      "accessibility": "Include proper accessibility features"
+    }
+  },
+
+  "testing_guidelines": {
+    "cross_browser": "Test in Chrome, Firefox, Safari, Edge",
+    "responsive_testing": "Test on various screen sizes",
+    "accessibility_testing": "Use accessibility testing tools",
+    "performance_testing": "Monitor page load times and rendering"
+  },
+
+  "maintenance": {
+    "updates": {
+      "bootstrap_updates": "Keep Bootstrap framework updated",
+      "icon_updates": "Update Font Awesome when needed",
+      "chart_library": "Monitor ECharts for updates",
+      "security_patches": "Apply security updates promptly"
+    },
+    
+    "documentation": {
+      "style_guide": "Maintain visual style guide",
+      "component_library": "Document reusable components",
+      "change_log": "Track changes to theme files"
+    }
+  }
+} 

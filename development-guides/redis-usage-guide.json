@@ -1,0 +1,404 @@
+{
+  "title": "Redis Usage Guide for Features",
+  "version": "1.0.0",
+  "description": "Comprehensive guide on how features use Redis for state management, queuing, and inter-service communication in the Tahakom Data Transfer System",
+  
+  "redis_overview": {
+    "purpose": "Redis serves as the backbone for state management, task queuing, and real-time communication",
+    "library": "ioredis v5.6.1",
+    "configuration": "Centralized via utils/envConfig.js",
+    "connection_pattern": "Dual connections per service (data operations + pub/sub)",
+    "key_patterns": ["State keys", "Queue keys", "Update channels"]
+  },
+
+  "redis_configuration": {
+    "connection_setup": {
+      "library": "const Redis = require('ioredis');",
+      "config_import": "const config = require('./utils/envConfig');",
+      "data_client": "const redis = new Redis({ host: config.redis.host, port: config.redis.port, retryStrategy: (times) => Math.min(times * 50, 2000) });",
+      "pubsub_client": "const redisPubSub = new Redis({ host: config.redis.host, port: config.redis.port, retryStrategy: (times) => Math.min(times * 50, 2000) });"
+    },
+    
+    "environment_variables": {
+      "REDIS_HOST": "localhost (default)",
+      "REDIS_PORT": "6379 (default)",
+      "configuration_file": "utils/envConfig.js"
+    },
+    
+    "retry_strategy": {
+      "pattern": "Exponential backoff with cap",
+      "formula": "Math.min(times * 50, 2000)",
+      "max_delay": "2000ms",
+      "purpose": "Handle connection failures gracefully"
+    }
+  },
+
+  "redis_key_store": {
+    "file": "redisKeyStore.js",
+    "purpose": "Centralized key management to prevent conflicts",
+    "key_categories": {
+      "drive_state": {
+        "CONNECTED_DRIVE_STATE": "connected_drive_state",
+        "CONNECTED_DRIVE_LIST": "connected_drive_list", 
+        "CONNECTED_DRIVE_LIST_UPDATE": "connected_drive_list_update"
+      },
+      "process_monitoring": {
+        "PROCESS_MONITOR_KEY": "process_monitor_data",
+        "PROCESS_MONITOR_UPDATE": "process_monitor_update"
+      },
+      "configuration": {
+        "CONFIG_STATE_KEY": "config_state"
+      }
+    }
+  },
+
+  "feature_redis_usage": {
+    "automatic_transfer_feature": {
+      "description": "Uses Redis for queue-based file transfer processing and state coordination",
+      
+      "services_involved": [
+        "FileTransferRedisService.js (Consumer)",
+        "routes/autoTransferRoutes.js (Producer)",
+        "ConfigStateServiceRedis.js (Config publisher)",
+        "DriveStateServiceRedis.js (Drive state publisher)"
+      ],
+      
+      "redis_patterns": {
+        "task_queuing": {
+          "queue_names": {
+            "IMAGE_FILE_TRANSFER_QUEUE": "image_file_transfer_queue",
+            "IMAGE_FILE_TRANSFER_RESULT_QUEUE": "image_file_transfer_result_queue"
+          },
+          "producer_pattern": "await redis.lpush(QUEUE_NAME, JSON.stringify(task_data))",
+          "consumer_pattern": "const result = await redis.brpop(QUEUE_NAME, 0);",
+          "result_handling": "await redis.lpush(RESULT_QUEUE, JSON.stringify(result))"
+        },
+        
+        "state_subscription": {
+          "subscribed_channels": [
+            "CONNECTED_DRIVE_STATE + '_update'",
+            "CONFIG_STATE_KEY + '_update'"
+          ],
+          "message_handling": {
+            "drive_state": "Updates IS_DRIVE_CONNECTED and SHOULD_STOP_TRANSFER flags",
+            "config_state": "Updates IS_AUTO_TRANSFER_ACTIVE flag"
+          }
+        }
+      },
+      
+      "workflow": {
+        "1": "ConfigStateServiceRedis publishes config changes",
+        "2": "DriveStateServiceRedis publishes drive state updates",
+        "3": "FileTransferRedisService subscribes to state changes",
+        "4": "autoTransferRoutes queries database and queues files",
+        "5": "FileTransferRedisService processes queue items",
+        "6": "Results published back to result queue",
+        "7": "WebSocket updates sent to frontend"
+      }
+    },
+
+    "drive_monitoring_feature": {
+      "description": "Real-time drive state monitoring and propagation",
+      
+      "services_involved": [
+        "DriveStateServiceRedis.js (State publisher)",
+        "routes/autoTransferRoutes.js (State consumer)",
+        "FileTransferRedisService.js (State consumer)"
+      ],
+      
+      "redis_patterns": {
+        "state_publishing": {
+          "key_storage": "redis.set(CONNECTED_DRIVE_STATE, JSON.stringify(driveState))",
+          "change_notification": "redis.publish(CONNECTED_DRIVE_STATE + '_update', JSON.stringify(driveState))",
+          "update_frequency": "Every 500ms"
+        },
+        
+        "state_consumption": {
+          "subscription": "redisPubSub.subscribe(CONNECTED_DRIVE_STATE + '_update')",
+          "message_processing": "Update local state variables based on drive connectivity and usage"
+        }
+      },
+      
+      "data_structure": {
+        "drive_state": {
+          "isConnected": "boolean",
+          "drive": "string (e.g., 'E:')",
+          "totalSpace": "number (bytes)",
+          "usedSpace": "number (bytes)",
+          "remainingSpace": "number (bytes)",
+          "usedPercentage": "number (0-100)"
+        }
+      }
+    },
+
+    "configuration_management_feature": {
+      "description": "Centralized configuration state management with file watching",
+      
+      "services_involved": [
+        "ConfigStateServiceRedis.js (Config publisher)",
+        "All services (Config consumers)"
+      ],
+      
+      "redis_patterns": {
+        "config_publishing": {
+          "file_watching": "chokidar.watch(CONFIG_FILE_PATH)",
+          "state_update": "redis.set(CONFIG_STATE_KEY, JSON.stringify(config))",
+          "change_notification": "redisPubSub.publish(CONFIG_STATE_KEY + '_update', JSON.stringify(config))"
+        },
+        
+        "config_consumption": {
+          "subscription": "redisPubSub.subscribe(CONFIG_STATE_KEY + '_update')",
+          "local_state_update": "Update service-specific configuration variables"
+        }
+      },
+      
+      "trigger_mechanisms": {
+        "file_change": "Automatic via chokidar file watcher",
+        "periodic_update": "Every 500ms fallback",
+        "manual_trigger": "Via API calls that modify config file"
+      }
+    },
+
+    "process_monitoring_feature": {
+      "description": "System process monitoring with Redis-based state distribution",
+      
+      "services_involved": [
+        "monitorSpecialProcessesMicroservice.js (Data collector)",
+        "routes/processMonitorRoutes.js (API + WebSocket handler)"
+      ],
+      
+      "redis_patterns": {
+        "data_collection": {
+          "state_storage": "redis.set(PROCESS_MONITOR_KEY, JSON.stringify(processData))",
+          "update_notification": "redis.publish(PROCESS_MONITOR_UPDATE, JSON.stringify(processData))",
+          "collection_frequency": "Every 5 seconds"
+        },
+        
+        "data_distribution": {
+          "api_access": "const data = await redis.get(PROCESS_MONITOR_KEY)",
+          "websocket_updates": "Subscribe to PROCESS_MONITOR_UPDATE for real-time updates"
+        }
+      },
+      
+      "monitored_processes": [
+        "image_export.exe",
+        "node.exe",
+        "redis-server.exe",
+        "vms_server.exe",
+        "postgres.exe",
+        "OpenVINOServer.exe"
+      ]
+    },
+
+    "connected_devices_feature": {
+      "description": "External device monitoring with database persistence and Redis updates",
+      
+      "services_involved": [
+        "monitorConnectedExternalDrivesMicroservice.js (Device monitor)",
+        "routes/connectedDevicesRoutes.js (API + WebSocket handler)"
+      ],
+      
+      "redis_patterns": {
+        "device_state_updates": {
+          "list_storage": "redis.set(CONNECTED_DRIVE_LIST, JSON.stringify(deviceList))",
+          "update_notification": "redis.publish(CONNECTED_DRIVE_LIST_UPDATE, JSON.stringify(deviceList))"
+        },
+        
+        "real_time_updates": {
+          "subscription": "redisPubSub.subscribe(CONNECTED_DRIVE_LIST_UPDATE)",
+          "websocket_broadcast": "Send device updates to all connected WebSocket clients"
+        }
+      },
+      
+      "integration_with_database": {
+        "persistence": "Device connections stored in device_connections table",
+        "state_sync": "Redis used for real-time state, PostgreSQL for historical data"
+      }
+    }
+  },
+
+  "redis_operation_patterns": {
+    "basic_operations": {
+      "set_data": "await redis.set(key, JSON.stringify(data))",
+      "get_data": "const data = await redis.get(key); return data ? JSON.parse(data) : null",
+      "delete_data": "await redis.del(key)"
+    },
+    
+    "queue_operations": {
+      "enqueue": "await redis.lpush(queueName, JSON.stringify(task))",
+      "dequeue_blocking": "const result = await redis.brpop(queueName, timeout)",
+      "dequeue_non_blocking": "const result = await redis.rpop(queueName)",
+      "queue_length": "const length = await redis.llen(queueName)"
+    },
+    
+    "pub_sub_operations": {
+      "publish": "await redisPubSub.publish(channel, JSON.stringify(message))",
+      "subscribe": "redisPubSub.subscribe(channel, callback)",
+      "message_handling": "redisPubSub.on('message', (channel, message) => { ... })",
+      "unsubscribe": "redisPubSub.unsubscribe(channel)"
+    }
+  },
+
+  "data_serialization": {
+    "format": "JSON",
+    "serialization": "JSON.stringify(data)",
+    "deserialization": "JSON.parse(data)",
+    "error_handling": "try-catch blocks for JSON parsing",
+    "type_safety": "Manual type checking after deserialization"
+  },
+
+  "performance_considerations": {
+    "connection_pooling": {
+      "pattern": "One connection per service for data operations",
+      "pubsub_separation": "Separate connection for pub/sub operations",
+      "reason": "Pub/sub connections are blocking and should be isolated"
+    },
+    
+    "retry_strategy": {
+      "implementation": "Exponential backoff with maximum delay",
+      "failure_handling": "Graceful degradation when Redis is unavailable",
+      "logging": "Error logging for connection failures"
+    },
+    
+    "memory_management": {
+      "key_expiration": "Not currently implemented (could be added)",
+      "data_size_limits": "Large data sets stored in PostgreSQL",
+      "cleanup_strategy": "Manual cleanup of queue items"
+    }
+  },
+
+  "error_handling_patterns": {
+    "connection_errors": {
+      "retry_logic": "Built-in retry strategy with exponential backoff",
+      "fallback_behavior": "Services continue with cached/default states",
+      "logging": "Error logging with context information"
+    },
+    
+    "serialization_errors": {
+      "json_parsing": "try-catch blocks around JSON.parse()",
+      "invalid_data": "Default values returned for invalid data",
+      "error_propagation": "Errors logged but not propagated to prevent cascading failures"
+    },
+    
+    "pub_sub_errors": {
+      "subscription_failures": "Retry subscription on connection restore",
+      "message_processing": "Individual message failures don't stop processing",
+      "channel_isolation": "Errors in one channel don't affect others"
+    }
+  },
+
+  "development_best_practices": {
+    "key_management": {
+      "centralized_keys": "Use redisKeyStore.js for all key definitions",
+      "naming_convention": "Descriptive names with category prefixes",
+      "no_hardcoded_keys": "Always import keys from central store"
+    },
+    
+    "connection_management": {
+      "dual_connections": "Separate connections for data and pub/sub operations",
+      "connection_reuse": "Share connections within same service",
+      "graceful_shutdown": "Implement proper cleanup on service shutdown"
+    },
+    
+    "message_design": {
+      "structured_messages": "Use consistent JSON message formats",
+      "channel_naming": "Use '_update' suffix for state change notifications",
+      "message_versioning": "Consider message versioning for future compatibility"
+    },
+    
+    "testing": {
+      "unit_tests": "Mock Redis operations for unit testing",
+      "integration_tests": "Use test Redis instance for integration testing",
+      "load_testing": "Test queue performance under load"
+    }
+  },
+
+  "monitoring_and_debugging": {
+    "redis_cli_commands": {
+      "monitor_keys": "redis-cli --scan --pattern '*'",
+      "check_queues": "redis-cli llen queue_name",
+      "monitor_activity": "redis-cli monitor",
+      "check_subscriptions": "redis-cli pubsub channels"
+    },
+    
+    "logging_strategies": {
+      "connection_events": "Log connection/disconnection events",
+      "queue_operations": "Log queue operations for debugging",
+      "pub_sub_activity": "Log subscription and message events",
+      "error_context": "Include context information in error logs"
+    },
+    
+    "performance_metrics": {
+      "queue_depths": "Monitor queue lengths for bottlenecks",
+      "message_rates": "Track pub/sub message frequency",
+      "connection_health": "Monitor connection stability",
+      "memory_usage": "Track Redis memory consumption"
+    }
+  },
+
+  "deployment_considerations": {
+    "redis_server_setup": {
+      "installation": "Redis server must be installed and running",
+      "configuration": "Configure Redis server for production use",
+      "persistence": "Consider Redis persistence settings",
+      "memory_limits": "Set appropriate memory limits"
+    },
+    
+    "network_configuration": {
+      "firewall_rules": "Ensure Redis port (6379) is accessible",
+      "security": "Configure Redis authentication if needed",
+      "network_latency": "Consider network latency for Redis operations"
+    },
+    
+    "backup_and_recovery": {
+      "data_persistence": "Most critical data is persisted in PostgreSQL",
+      "redis_backups": "Redis primarily used for transient state",
+      "disaster_recovery": "Services can restart with default state"
+    }
+  },
+
+  "common_issues_and_solutions": {
+    "connection_issues": {
+      "problem": "Redis connection failures",
+      "solution": "Check Redis server status, verify network connectivity, review retry strategy",
+      "prevention": "Implement proper error handling and retry logic"
+    },
+    
+    "queue_blockages": {
+      "problem": "Tasks stuck in queues",
+      "solution": "Clear blocked queues, restart consumer services, check for processing errors",
+      "prevention": "Implement queue monitoring and automatic cleanup"
+    },
+    
+    "pub_sub_delays": {
+      "problem": "Delayed state updates",
+      "solution": "Check Redis server performance, verify subscription setup, review message processing",
+      "prevention": "Monitor pub/sub performance and implement timeouts"
+    },
+    
+    "memory_issues": {
+      "problem": "Redis memory usage growing",
+      "solution": "Implement key expiration, clean up old data, optimize data structures",
+      "prevention": "Regular monitoring and data cleanup procedures"
+    }
+  },
+
+  "future_enhancements": {
+    "recommended_improvements": [
+      "Implement key expiration for temporary data",
+      "Add Redis cluster support for high availability",
+      "Implement message acknowledgment for critical queues",
+      "Add Redis metrics collection and monitoring",
+      "Implement connection pooling for better performance",
+      "Add data compression for large messages",
+      "Implement circuit breaker pattern for Redis operations"
+    ],
+    
+    "scalability_considerations": [
+      "Consider Redis Cluster for horizontal scaling",
+      "Implement queue partitioning for high-throughput scenarios",
+      "Add load balancing for multiple Redis instances",
+      "Consider Redis Streams for advanced messaging patterns"
+    ]
+  }
+} 

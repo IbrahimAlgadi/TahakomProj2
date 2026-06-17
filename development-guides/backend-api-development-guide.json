@@ -1,0 +1,674 @@
+{
+  "title": "Backend API Development Guide",
+  "version": "1.0.0",
+  "description": "Comprehensive guide for developing and maintaining backend APIs in the Tahakom Data Transfer System",
+  
+  "api_standards": {
+    "protocol": "HTTP/1.1",
+    "format": "JSON",
+    "base_url": "http://localhost:8454",
+    "authentication": "None (internal system)",
+    "content_type": "application/json",
+    "error_handling": "Standard HTTP status codes with JSON error messages"
+  },
+
+  "route_structure": {
+    "pattern": "Express.js router modules",
+    "organization": "Feature-based routing",
+    "middleware": ["body-parser", "cors", "error-handling"],
+    "response_format": {
+      "success": {
+        "success": true,
+        "data": "...",
+        "message": "optional message"
+      },
+      "error": {
+        "success": false,
+        "error": "error message",
+        "details": "optional details"
+      }
+    }
+  },
+
+  "api_endpoints": {
+    "auto_transfer_api": {
+      "base_path": "/auto-transfer",
+      "description": "Automatic transfer configuration and management",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/config",
+          "description": "Get current auto-transfer configuration",
+          "request": {
+            "headers": {},
+            "body": null
+          },
+          "response": {
+            "success_example": {
+              "success": true,
+              "config": {
+                "drive": "E",
+                "isActive": true,
+                "encryption": {
+                  "enabled": false,
+                  "algorithm": "aes-256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/test-drive",
+          "description": "Test drive connectivity and capacity",
+          "request": {
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "drive": "E"
+            }
+          },
+          "response": {
+            "success_example": {
+              "success": true,
+              "connected": true,
+              "message": "Drive is connected and has sufficient space",
+              "driveInfo": {
+                "drive": "E:",
+                "totalSpace": 1073741824,
+                "usedSpace": 536870912,
+                "remainingSpace": 536870912,
+                "usedPercentage": 50.0,
+                "type": "NTFS",
+                "readWrite": true
+              }
+            },
+            "error_example": {
+              "success": false,
+              "error": "Drive not found or not accessible",
+              "connected": false
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/save-config",
+          "description": "Save auto-transfer configuration",
+          "request": {
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "drive": "E",
+              "isActive": true,
+              "encryption": {
+                "enabled": true,
+                "algorithm": "aes-256",
+                "keyManagement": "manual",
+                "encryptMetadata": false
+              }
+            }
+          },
+          "response": {
+            "success_example": {
+              "success": true
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/toggle",
+          "description": "Toggle auto-transfer active state",
+          "request": {
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "isActive": true
+            }
+          },
+          "response": {
+            "success_example": {
+              "success": true
+            }
+          }
+        }
+      ]
+    },
+
+    "devices_api": {
+      "base_path": "/devices",
+      "description": "Connected devices management",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/",
+          "description": "Get currently connected devices",
+          "response": {
+            "success_example": {
+              "success": true,
+              "devices": [
+                {
+                  "drive": "E:",
+                  "label": "USB Drive",
+                  "totalSpace": 1073741824,
+                  "usedSpace": 536870912,
+                  "remainingSpace": 536870912,
+                  "usedPercentage": 50.0,
+                  "type": "NTFS",
+                  "readWrite": true,
+                  "isConnected": "connected",
+                  "connectedAt": "2024-01-01T12:00:00Z",
+                  "lastUpdated": "2024-01-01T12:30:00Z"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/history",
+          "description": "Get device connection history",
+          "response": {
+            "success_example": {
+              "success": true,
+              "history": [
+                {
+                  "drive": "E:",
+                  "label": "USB Drive",
+                  "type": "NTFS",
+                  "connectedAt": "2024-01-01T12:00:00Z",
+                  "disconnectedAt": "2024-01-01T13:00:00Z",
+                  "isConnected": "disconnected",
+                  "duration": 60
+                }
+              ]
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/refresh",
+          "description": "Refresh device list",
+          "response": {
+            "success_example": {
+              "success": true,
+              "devices": []
+            }
+          }
+        }
+      ]
+    },
+
+    "dashboard_api": {
+      "base_path": "/dashboard",
+      "description": "Dashboard data and reporting",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/data",
+          "description": "Get dashboard data with filtering",
+          "request": {
+            "query_params": {
+              "view": "hourly|daily|monthly|yearly",
+              "date": "YYYY-MM-DD",
+              "startDate": "YYYY-MM-DD",
+              "endDate": "YYYY-MM-DD",
+              "startHour": "0-23",
+              "endHour": "0-23",
+              "cameraFilter": "camera_id|aggregated|per_camera",
+              "vehicleType": "vehicle_type"
+            }
+          },
+          "response": {
+            "success_example": {
+              "success": true,
+              "data": [
+                {
+                  "period": "2024-01-01",
+                  "total_vehicles_count": 100,
+                  "total_files_count": 500,
+                  "success_produced_count": 450,
+                  "failed_produce_count": 50,
+                  "failed_produced_percentage": 10.0,
+                  "total_file_size_in_gb": 1.5
+                }
+              ]
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/export",
+          "description": "Export dashboard data",
+          "request": {
+            "query_params": {
+              "format": "json|xml|pdf",
+              "view": "hourly|daily|monthly|yearly"
+            }
+          },
+          "response": {
+            "description": "File download or JSON response based on format"
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/cameras",
+          "description": "Get available cameras",
+          "response": {
+            "success_example": {
+              "success": true,
+              "cameras": ["CAM001", "CAM002", "CAM003"]
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/vehicle-types",
+          "description": "Get available vehicle types",
+          "response": {
+            "success_example": {
+              "success": true,
+              "data": []
+            }
+          }
+        }
+      ]
+    },
+
+    "files_api": {
+      "base_path": "/files",
+      "description": "File management and data retrieval",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/data",
+          "description": "Get paginated file data",
+          "request": {
+            "query_params": {
+              "pageSize": "10",
+              "pageNumber": "1",
+              "search": "search_term",
+              "startDate": "YYYY-MM-DD HH:mm:ss",
+              "endDate": "YYYY-MM-DD HH:mm:ss",
+              "showMissing": "true|false"
+            }
+          },
+          "response": {
+            "success_example": {
+              "data": [
+                {
+                  "base_tid": "TID123",
+                  "plate_num": "ABC123",
+                  "site_id": "SITE001",
+                  "date_folder": "2024-01-01",
+                  "time_folder": "12:00:00",
+                  "date": "2024-01-01",
+                  "time": "12:00:00",
+                  "tid": ["TID1231", "TID1232"],
+                  "file_paths": ["/path/to/file1.jpg", "/path/to/file2.jpg"],
+                  "file_sizes": [1024, 2048],
+                  "file_names": ["file1.jpg", "file2.jpg"],
+                  "deletions": [false, false],
+                  "auto_transfers": [true, true],
+                  "ftp_transfers": [false, false]
+                }
+              ],
+              "pageSize": 10,
+              "pageNumber": 1,
+              "recordsTotal": 100,
+              "recordsFiltered": 100
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/size",
+          "description": "Get file system size statistics",
+          "response": {
+            "success_example": {
+              "exportDirSize": "1.5 GB",
+              "maxExportDirSize": "200 GB"
+            }
+          }
+        }
+      ]
+    },
+
+    "manual_transfer_api": {
+      "base_path": "/manual-transfer",
+      "description": "Manual transfer operations",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/drives",
+          "description": "Get available drives for manual transfer",
+          "response": {
+            "success_example": {
+              "success": true,
+              "drives": [
+                {
+                  "letter": "E:",
+                  "label": "USB Drive"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/create",
+          "description": "Create manual transfer job",
+          "request": {
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "startDateTime": "2024-01-01T12:00:00Z",
+              "endDateTime": "2024-01-01T13:00:00Z",
+              "usbPath": "E:\\backup"
+            }
+          },
+          "response": {
+            "success_example": {
+              "success": true,
+              "message": "Manual transfer job created successfully",
+              "jobId": 123,
+              "summary": {
+                "total_files": 100,
+                "total_size": 1073741824
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/control",
+          "description": "Control transfer job (pause/resume/cancel)",
+          "request": {
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "jobId": 123,
+              "action": "pause|resume|cancel"
+            }
+          },
+          "response": {
+            "success_example": {
+              "success": true,
+              "message": "Job paused successfully",
+              "newStatus": "paused"
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/history",
+          "description": "Get transfer job history",
+          "request": {
+            "query_params": {
+              "page": "1",
+              "limit": "50",
+              "status": "all|in_progress|completed|cancelled|paused",
+              "search": "search_term"
+            }
+          },
+          "response": {
+            "success_example": {
+              "success": true,
+              "data": {
+                "jobs": [
+                  {
+                    "id": 123,
+                    "date": "2024-01-01 12:00:00",
+                    "drive": "E:\\backup",
+                    "files": {
+                      "total": 100,
+                      "transferred": 50
+                    },
+                    "size": 1073741824,
+                    "duration": 30,
+                    "status": "in_progress"
+                  }
+                ],
+                "pagination": {
+                  "total": 10,
+                  "page": 1,
+                  "limit": 50,
+                  "pages": 1
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+
+    "processes_api": {
+      "base_path": "/processes",
+      "description": "Process monitoring",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/",
+          "description": "Get current processes",
+          "response": {
+            "success_example": {
+              "success": true,
+              "processes": [
+                {
+                  "name": "DashboardReportingBackend",
+                  "pid": 1234,
+                  "status": "running",
+                  "cpu": 5.2,
+                  "memory": 128,
+                  "uptime": 3600
+                }
+              ]
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/refresh",
+          "description": "Refresh process list",
+          "response": {
+            "success_example": {
+              "success": true,
+              "processes": []
+            }
+          }
+        }
+      ]
+    },
+
+    "config_api": {
+      "base_path": "/api",
+      "description": "System configuration management",
+      "endpoints": [
+        {
+          "method": "GET",
+          "path": "/config",
+          "description": "Get system configuration",
+          "response": {
+            "success_example": {
+              "storage": {
+                "directory": "C:\\export",
+                "maxCapacity": 200,
+                "retentionPolicy": "fifo",
+                "siteId": "SITE001"
+              },
+              "encryption": {
+                "enabled": false,
+                "algorithm": "aes-256",
+                "keyManagement": "manual",
+                "encryptMetadata": false
+              },
+              "autoTransfer": {
+                "drive": "E",
+                "isActive": true,
+                "stopPercentage": 95
+              }
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/config",
+          "description": "Update system configuration",
+          "request": {
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": {
+              "storage": {
+                "directory": "C:\\export",
+                "maxCapacity": 200,
+                "retentionPolicy": "fifo",
+                "siteId": "SITE001"
+              },
+              "encryption": {
+                "enabled": true,
+                "algorithm": "aes-256",
+                "keyManagement": "manual",
+                "encryptMetadata": false
+              }
+            }
+          },
+          "response": {
+            "success_example": {
+              "success": true,
+              "config": {}
+            }
+          }
+        }
+      ]
+    }
+  },
+
+  "websocket_api": {
+    "connection_url": "ws://localhost:8454",
+    "message_format": "JSON",
+    "connection_flow": {
+      "1": "Client connects to WebSocket",
+      "2": "Client sends subscription message",
+      "3": "Server sends initial data",
+      "4": "Server sends updates as they occur"
+    },
+    "subscription_message": {
+      "action": "subscribe",
+      "event": "event_name"
+    },
+    "events": {
+      "handleAutoTransfer": {
+        "description": "Auto transfer status updates",
+        "message_format": {
+          "event": "handleAutoTransfer",
+          "data": {
+            "success": true,
+            "response": {
+              "result": {
+                "return_event": "COPY_SUCCESS|COPY_ERROR|COPY_PAUSE|DRIVE_NOT_CONNECTED|TRANSFER_STOPPED",
+                "msg": "Status message",
+                "data": {
+                  "driveInfo": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "devices": {
+        "description": "Connected devices updates",
+        "message_format": {
+          "event": "devices",
+          "devices": []
+        }
+      },
+      "deviceHistory": {
+        "description": "Device connection history updates",
+        "message_format": {
+          "event": "deviceHistory",
+          "history": []
+        }
+      },
+      "processes": {
+        "description": "Process monitoring updates",
+        "message_format": {
+          "event": "processes",
+          "processes": []
+        }
+      }
+    }
+  },
+
+  "development_patterns": {
+    "route_creation": {
+      "1": "Create router function in routes/ directory",
+      "2": "Define endpoints with proper HTTP methods",
+      "3": "Implement request validation",
+      "4": "Add error handling with try-catch blocks",
+      "5": "Return consistent JSON responses",
+      "6": "Export router creation function",
+      "7": "Register router in main backend service"
+    },
+    
+    "error_handling": {
+      "pattern": "try-catch blocks with consistent error responses",
+      "logging": "Use logger.error() for error logging",
+      "client_errors": "Return 400-499 status codes",
+      "server_errors": "Return 500 status codes",
+      "error_response": {
+        "success": false,
+        "error": "Human-readable error message"
+      }
+    },
+    
+    "request_validation": {
+      "method": "Manual validation in route handlers",
+      "required_fields": "Check for required fields",
+      "data_types": "Validate data types",
+      "business_logic": "Implement business rule validation"
+    },
+    
+    "database_operations": {
+      "connection": "Use pool.query() for database operations",
+      "transactions": "Use BEGIN/COMMIT/ROLLBACK for transactions",
+      "error_handling": "Catch database errors and return appropriate responses",
+      "parameterized_queries": "Use parameterized queries to prevent SQL injection"
+    },
+    
+    "redis_operations": {
+      "get_data": "Use redis.get() for retrieving data",
+      "set_data": "Use redis.set() for storing data",
+      "pub_sub": "Use redisPubSub for inter-service communication",
+      "queues": "Use redis.lpush()/brpop() for queue operations"
+    }
+  },
+
+  "testing_guidelines": {
+    "unit_tests": "Test individual functions and methods",
+    "integration_tests": "Test API endpoints with real requests",
+    "database_tests": "Test database operations with test data",
+    "websocket_tests": "Test WebSocket connections and messages",
+    "error_scenarios": "Test error handling and edge cases"
+  },
+
+  "performance_considerations": {
+    "database_queries": "Optimize SQL queries and use indexes",
+    "redis_operations": "Use Redis efficiently for caching and queues",
+    "file_operations": "Handle file I/O asynchronously",
+    "memory_usage": "Monitor memory usage in long-running processes",
+    "error_recovery": "Implement retry mechanisms for transient failures"
+  },
+
+  "security_considerations": {
+    "input_validation": "Validate all input data",
+    "sql_injection": "Use parameterized queries",
+    "file_access": "Validate file paths and permissions",
+    "error_information": "Don't expose sensitive information in error messages",
+    "logging": "Log security-relevant events"
+  }
+} 

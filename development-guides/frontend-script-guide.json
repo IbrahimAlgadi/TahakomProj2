@@ -1,0 +1,454 @@
+{
+  "title": "Frontend Script Guide",
+  "version": "1.0.0",
+  "description": "Comprehensive guide to JavaScript implementation patterns and scripts in the Tahakom Data Transfer System frontend",
+  
+  "javascript_architecture": {
+    "overview": "Client-side JavaScript architecture built on modern ES6+ patterns with jQuery integration",
+    "core_technologies": [
+      "Vanilla JavaScript (ES6+)",
+      "jQuery 3.x",
+      "Bootstrap 5.x JavaScript components",
+      "Apache ECharts 5.4.3",
+      "WebSocket API",
+      "Fetch API"
+    ],
+    "design_patterns": [
+      "Module pattern for script organization",
+      "Event-driven architecture",
+      "Real-time data synchronization via WebSocket",
+      "Reactive UI updates",
+      "Error-first callback pattern"
+    ]
+  },
+
+  "common_patterns": {
+    "api_communication": {
+      "base_urls": {
+        "main_service": "http://localhost:8454",
+        "websocket": "ws://localhost:8454"
+      },
+      "http_requests": {
+        "pattern": "Fetch API with async/await",
+        "example": {
+          "get_request": "fetch(`${SERVICE_URL}/endpoint`).then(response => response.json())",
+          "post_request": "fetch(`${SERVICE_URL}/endpoint`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })",
+          "error_handling": "try/catch blocks with user-friendly error messages"
+        },
+        "response_format": {
+          "success": "{ success: true, data: {...}, message?: 'optional' }",
+          "error": "{ success: false, error: 'error message', details?: {...} }"
+        }
+      },
+      "websocket_communication": {
+        "connection_pattern": "Auto-reconnecting WebSocket with exponential backoff",
+        "subscription_format": "{ action: 'subscribe', event: 'event_name' }",
+        "message_handling": "JSON.parse with error handling and event routing",
+        "common_events": [
+          "realtimeDashboard",
+          "realtimeVideoDashboard", 
+          "devices",
+          "processes",
+          "handleAutoTransfer",
+          "handleAutoVideoTransfer",
+          "manualTransferConfig"
+        ]
+      }
+    },
+
+    "ui_patterns": {
+      "toast_notifications": {
+        "implementation": "Bootstrap 5 Toast component",
+        "function_signature": "showToast(message, type = 'info')",
+        "types": ["info", "success", "error", "warning"],
+        "pattern": "Global toast container with automatic positioning and dismissal"
+      },
+      "form_handling": {
+        "validation": "HTML5 validation with custom JavaScript checks",
+        "submission": "preventDefault() with async form processing",
+        "data_collection": "FormData or manual object construction",
+        "state_management": "Form disable/enable during processing"
+      },
+      "modal_management": {
+        "library": "Bootstrap 5 Modal component",
+        "initialization": "new bootstrap.Modal(element)",
+        "data_population": "Dynamic content loading on show.bs.modal event",
+        "cleanup": "Event listener cleanup on modal hide"
+      },
+      "progress_indicators": {
+        "types": ["Bootstrap progress bars", "Custom loading states", "Real-time progress updates"],
+        "update_pattern": "Percentage-based width updates with color coding"
+      }
+    },
+
+    "utility_functions": {
+      "data_formatting": {
+        "formatBytes": "Convert bytes to human-readable format (Bytes, KB, MB, GB, TB)",
+        "formatNumber": "Number formatting with locale-specific separators",
+        "formatDateTime": "ISO string to localized date/time format",
+        "formatDuration": "Minutes to hours/minutes format"
+      },
+      "dom_manipulation": {
+        "element_creation": "Template string literals with dynamic content",
+        "class_management": "classList.add/remove for state changes",
+        "content_updates": "innerHTML and textContent for data binding"
+      }
+    }
+  },
+
+  "page_implementations": {
+    "auto_transfer_page": {
+      "file": "data_transfer_v2/views/auto_transfer.njk",
+      "description": "Automatic USB transfer configuration and monitoring",
+      "key_features": [
+        "Drive configuration and testing",
+        "Encryption settings management",
+        "Real-time transfer status",
+        "Drive capacity monitoring"
+      ],
+      "javascript_components": {
+        "configuration_management": {
+          "load_config": "GET /auto-transfer/config on page load",
+          "save_config": "POST /auto-transfer/save-config with form data",
+          "test_drive": "POST /auto-transfer/test-drive with drive validation",
+          "toggle_transfer": "POST /auto-transfer/toggle for activation state"
+        },
+        "websocket_integration": {
+          "subscription": "realtimeDashboard event subscription",
+          "event_handling": "handleAutoTransfer event for status updates",
+          "ui_updates": [
+            "updateTransferStatus() for transfer state",
+            "updateDriveStatus() for connection state", 
+            "updateDriveInfo() for capacity information"
+          ]
+        },
+        "form_controls": {
+          "encryption_toggle": "Radio button handling for encryption options",
+          "drive_selection": "Dropdown with validation",
+          "form_state": "toggleFormControls() for active/inactive states"
+        },
+        "status_indicators": {
+          "drive_status": "Visual status with icons and badges",
+          "transfer_progress": "Real-time progress with status messages",
+          "capacity_display": "Progress bars and formatted size display"
+        }
+      }
+    },
+
+    "auto_transfer_video_page": {
+      "file": "data_transfer_v2/views/auto_transfer_video.njk", 
+      "description": "Automatic video transfer configuration (similar to auto_transfer)",
+      "differences": {
+        "websocket_event": "realtimeVideoDashboard instead of realtimeDashboard",
+        "api_endpoints": "/auto-transfer-video/* instead of /auto-transfer/*",
+        "event_handling": "handleAutoVideoTransfer instead of handleAutoTransfer"
+      },
+      "implementation": "Nearly identical to auto_transfer.njk with different API endpoints"
+    },
+
+    "dashboard_page": {
+      "file": "data_transfer_v2/views/dashboard.njk",
+      "description": "Statistical dashboard with charts and data visualization",
+      "key_features": [
+        "Multi-view data display (hourly/daily/monthly/yearly)",
+        "Interactive charts with Apache ECharts",
+        "Dynamic filtering and export functionality",
+        "Real-time data refresh"
+      ],
+      "javascript_components": {
+        "chart_management": {
+          "library": "Apache ECharts 5.4.3",
+          "initialization": "echarts.init(document.getElementById('chartId'))",
+          "chart_types": [
+            "Line charts for trends",
+            "Bar charts for comparisons", 
+            "Pie charts for distributions",
+            "Area charts for cumulative data"
+          ],
+          "update_functions": [
+            "updateMainChart(data)",
+            "updateSuccessChart(data)",
+            "updateFileSizeChart(data)", 
+            "updateVehicleChart(data)"
+          ],
+          "responsive_design": "window.addEventListener('resize') with chart.resize()"
+        },
+        "filter_system": {
+          "dynamic_filters": "renderFilters() based on current view",
+          "filter_types": [
+            "Date range pickers",
+            "Time selectors",
+            "Camera dropdowns",
+            "Vehicle type filters"
+          ],
+          "filter_application": "getFilterParams() with URLSearchParams construction"
+        },
+        "data_management": {
+          "api_calls": [
+            "GET /dashboard/data with query parameters",
+            "GET /dashboard/cameras for filter options",
+            "GET /dashboard/vehicle-types for filter options"
+          ],
+          "data_processing": [
+            "updateStatistics(data) for metric cards",
+            "updateDataTable(data) for tabular display"
+          ]
+        },
+        "export_functionality": {
+          "formats": ["PDF", "JSON", "XML", "Operation Reports"],
+          "implementation": "window.open(url, '_blank') for file downloads"
+        }
+      }
+    },
+
+    "devices_page": {
+      "file": "data_transfer_v2/views/devices.njk",
+      "description": "Connected devices monitoring and history",
+      "key_features": [
+        "Real-time device status cards",
+        "Device connection history",
+        "Capacity monitoring",
+        "Connection duration tracking"
+      ],
+      "javascript_components": {
+        "device_cards": {
+          "creation": "createDeviceCard(device) with template literals",
+          "status_indicators": "Color-coded badges and progress bars",
+          "capacity_display": "getProgressBarClass() for color coding based on usage"
+        },
+        "websocket_integration": {
+          "subscription": "devices event subscription",
+          "real_time_updates": [
+            "updateDevicesGrid(data.devices)",
+            "updateDeviceHistory(data.history)"
+          ]
+        },
+        "history_management": {
+          "table_rendering": "Dynamic tbody population",
+          "duration_calculation": "formatDuration() for time display",
+          "status_tracking": "Connection/disconnection events"
+        }
+      }
+    },
+
+    "manual_usb_page": {
+      "file": "data_transfer_v2/views/manual_usb.njk",
+      "description": "Manual USB transfer job management",
+      "key_features": [
+        "Transfer job creation",
+        "Real-time job monitoring", 
+        "Job control (pause/resume/cancel)",
+        "Transfer history with pagination"
+      ],
+      "javascript_components": {
+        "job_management": {
+          "creation": "POST /manual-transfer/create with date range",
+          "summary": "POST /manual-transfer/summary for file count preview",
+          "control": "POST /manual-transfer/control for pause/resume/cancel"
+        },
+        "websocket_integration": {
+          "subscription": "realtimeDashboard for job updates",
+          "event_handling": "manualTransferConfig event processing",
+          "ui_updates": "createTransferJobElement() for job cards"
+        },
+        "history_features": {
+          "pagination": "renderPagination() with page navigation",
+          "filtering": "Status-based filtering with search functionality",
+          "data_loading": "loadTransferHistory() with AJAX"
+        },
+        "job_controls": {
+          "progress_tracking": "Real-time progress bar updates",
+          "status_management": "Dynamic badge updates",
+          "drive_status": "updateDriveStatus() for connection monitoring"
+        }
+      }
+    },
+
+    "index_page": {
+      "file": "data_transfer_v2/views/index.njk",
+      "description": "All files management with storage configuration",
+      "key_features": [
+        "File table with DataTables integration",
+        "Storage configuration modal",
+        "Path structure configuration",
+        "Encryption settings"
+      ],
+      "javascript_components": {
+        "settings_modal": {
+          "initialization": "Bootstrap modal with dynamic content loading",
+          "configuration_saving": "POST /api/config with comprehensive settings",
+          "path_structure": "Sortable.js for drag-and-drop path ordering"
+        },
+        "file_management": {
+          "table_integration": "External script files (table.js)",
+          "filtering": "Date range and license plate search",
+          "data_loading": "AJAX-based file loading with pagination"
+        },
+        "storage_monitoring": {
+          "usage_display": "Progress bars for capacity visualization",
+          "size_calculations": "Real-time size formatting and display"
+        }
+      }
+    },
+
+    "process_monitor_page": {
+      "file": "data_transfer_v2/views/process_monitor.njk",
+      "description": "System process monitoring and management",
+      "key_features": [
+        "Process cards with CPU/memory usage",
+        "Real-time process monitoring",
+        "Process details modal",
+        "Sorting and filtering"
+      ],
+      "javascript_components": {
+        "process_cards": {
+          "creation": "createProcessCard(process) with resource bars",
+          "resource_monitoring": "getResourceClass() for color coding",
+          "sorting": "Multi-criteria sorting (name/CPU/memory)"
+        },
+        "websocket_integration": {
+          "subscription": "processes event subscription",
+          "real_time_updates": "updateProcessGrid(data.processes)"
+        },
+        "details_modal": {
+          "process_details": "showProcessDetails() with comprehensive info",
+          "pid_management": "Child process listing and search",
+          "resource_tracking": "Real-time CPU and memory display"
+        }
+      }
+    },
+
+    "ftp_transfer_page": {
+      "file": "data_transfer_v2/views/ftp_transfer.njk",
+      "description": "FTP/SFTP transfer configuration (UI only)",
+      "implementation": "Static UI components without JavaScript functionality",
+      "features": [
+        "Protocol selection (FTP/SFTP)",
+        "Server configuration form",
+        "Transfer status display",
+        "Progress monitoring interface"
+      ]
+    },
+
+    "history_page": {
+      "file": "data_transfer_v2/views/history.njk",
+      "description": "Search history interface (legacy implementation)",
+      "implementation": "Basic template with external script dependencies",
+      "external_scripts": ["res_codes.js", "history.js"]
+    }
+  },
+
+  "websocket_implementation": {
+    "connection_management": {
+      "pattern": "Auto-reconnecting WebSocket with error handling",
+      "initialization": "new WebSocket(WS_URL)",
+      "reconnection": "setTimeout(connectWebsocket, 5000) on close",
+      "error_handling": "Graceful degradation with fallback polling"
+    },
+    "event_subscription": {
+      "format": "{ action: 'subscribe', event: 'event_name' }",
+      "timing": "On WebSocket open event",
+      "multiple_subscriptions": "Support for multiple event types per page"
+    },
+    "message_processing": {
+      "parsing": "JSON.parse(event.data) with error handling",
+      "routing": "Switch/case based on data.event property",
+      "ui_updates": "Immediate DOM updates on message receipt"
+    },
+    "real_time_features": {
+      "transfer_monitoring": "Live progress updates for file transfers",
+      "device_tracking": "Real-time device connection/disconnection",
+      "process_monitoring": "Live CPU/memory usage updates",
+      "configuration_sync": "Real-time config change propagation"
+    }
+  },
+
+  "chart_integration": {
+    "apache_echarts": {
+      "version": "5.4.3",
+      "initialization": "echarts.init(document.getElementById('chartContainer'))",
+      "configuration": "Option objects with series, axes, and styling",
+      "responsive_design": "chart.resize() on window resize events"
+    },
+    "chart_types": {
+      "line_charts": {
+        "usage": "Trend analysis and time series data",
+        "example": "File processing over time",
+        "configuration": "type: 'line' with smooth curves and area fills"
+      },
+      "bar_charts": {
+        "usage": "Comparative data visualization", 
+        "example": "Success vs failed files",
+        "configuration": "type: 'bar' with custom colors"
+      },
+      "pie_charts": {
+        "usage": "Distribution and percentage display",
+        "example": "Success rate visualization",
+        "configuration": "type: 'pie' with radius and label options"
+      }
+    },
+    "data_binding": {
+      "pattern": "chart.setOption(newOption) for updates",
+      "data_format": "Arrays of values with corresponding categories",
+      "real_time_updates": "Dynamic option updates on WebSocket messages"
+    }
+  },
+
+  "error_handling": {
+    "api_errors": {
+      "pattern": "try/catch blocks with user-friendly messages",
+      "display": "Toast notifications for error feedback",
+      "fallback": "Graceful degradation with offline functionality"
+    },
+    "websocket_errors": {
+      "connection_failures": "Automatic reconnection with exponential backoff",
+      "message_parsing": "JSON.parse error handling",
+      "event_handling": "Default handlers for unknown events"
+    },
+    "form_validation": {
+      "client_side": "HTML5 validation with custom JavaScript checks",
+      "server_side": "Response validation with error display",
+      "user_feedback": "Immediate validation feedback"
+    }
+  },
+
+  "performance_optimizations": {
+    "debouncing": "Search input debouncing for API calls",
+    "lazy_loading": "Pagination for large datasets",
+    "caching": "Local storage for configuration data",
+    "dom_updates": "Efficient DOM manipulation with DocumentFragment",
+    "websocket_optimization": "Event-based updates instead of polling"
+  },
+
+  "development_patterns": {
+    "code_organization": {
+      "structure": "Page-specific scripts in template files",
+      "external_scripts": "Shared utilities in separate JS files",
+      "initialization": "DOMContentLoaded event listeners"
+    },
+    "debugging": {
+      "console_logging": "Comprehensive console.log statements",
+      "error_tracking": "Error logging with context information",
+      "websocket_debugging": "Message logging for real-time events"
+    },
+    "browser_compatibility": {
+      "modern_apis": "Fetch API, WebSocket, ES6+ features",
+      "fallbacks": "jQuery for DOM manipulation compatibility",
+      "progressive_enhancement": "Core functionality without JavaScript"
+    }
+  },
+
+  "security_considerations": {
+    "xss_prevention": "HTML escaping for dynamic content",
+    "csrf_protection": "Same-origin policy enforcement",
+    "input_validation": "Client and server-side validation",
+    "secure_websockets": "WSS in production environments"
+  },
+
+  "testing_approaches": {
+    "manual_testing": "Browser-based functional testing",
+    "error_simulation": "Network failure and edge case testing",
+    "cross_browser": "Testing across modern browser versions",
+    "real_time_testing": "WebSocket connection and data flow testing"
+  }
+} 

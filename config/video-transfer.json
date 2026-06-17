@@ -1,0 +1,51 @@
+{
+  "service": {
+    "name": "VideoTransferService",
+    "version": "1.0.0",
+    "description": "Event-driven video transfer service combining processing and transfer operations"
+  },
+  "processing": {
+    "videoTransferSize": 5,
+    "videoTransferConversionCount": 10,
+    "tempDirectory": "./temp_video_processing",
+    "maxConcurrentProcessing": 3,
+    "processingTimeout": 300000,
+    "ffmpegPath": "ffmpeg"
+  },
+  "transfer": {
+    "maxConcurrentTransfers": 2,
+    "transferTimeout": 600000,
+    "retryAttempts": 3,
+    "retryDelay": 5000,
+    "verifyTransfer": true,
+    "cleanupAfterTransfer": true
+  },
+  "storage": {
+    "minRequiredSpaceMB": 500,
+    "spaceWarningThresholdMB": 1000,
+    "spaceCriticalThresholdMB": 200
+  },
+  "monitoring": {
+    "healthCheckInterval": 30000,
+    "driveMonitorInterval": 5000,
+    "spaceMonitorInterval": 10000,
+    "performanceMetricsEnabled": true
+  },
+  "encryption": {
+    "enabled": false,
+    "algorithm": "aes-256-gcm",
+    "keyRotationDays": 30
+  },
+  "logging": {
+    "level": "info",
+    "filename": "video-transfer-service.log",
+    "maxFileSize": 10485760,
+    "maxFiles": 5,
+    "enableConsole": true
+  },
+  "events": {
+    "enableRedisPublish": true,
+    "enableWebSocketBroadcast": false,
+    "eventRetention": 1000
+  }
+}

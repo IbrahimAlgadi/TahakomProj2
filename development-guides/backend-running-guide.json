@@ -1,0 +1,395 @@
+{
+  "title": "Backend Running Guide",
+  "version": "1.0.0",
+  "description": "Comprehensive guide for running and managing the Tahakom Data Transfer System backend services",
+  
+  "prerequisites": {
+    "system_requirements": {
+      "operating_system": "Windows 10+",
+      "node_version": "Node.js 14+",
+      "memory": "Minimum 4GB RAM",
+      "storage": "Minimum 10GB free space"
+    },
+    
+    "dependencies": {
+      "required_services": [
+        "PostgreSQL Database Server",
+        "Redis Server"
+      ],
+      "npm_packages": [
+        "pm2 (globally installed)",
+        "All package.json dependencies"
+      ]
+    },
+    
+    "environment_setup": {
+      "database": {
+        "postgresql": {
+          "host": "localhost",
+          "port": 5432,
+          "username": "postgres",
+          "password": "postgres",
+          "database": "tahakom_transfer"
+        }
+      },
+      "redis": {
+        "host": "localhost",
+        "port": 6379,
+        "password": "optional"
+      }
+    }
+  },
+
+  "pm2_configuration": {
+    "config_file": "ecosystem.config.js",
+    "description": "PM2 ecosystem configuration defining all microservices",
+    
+    "common_config": {
+      "node_args": "--max-old-space-size=500",
+      "max_memory_restart": "500M",
+      "log_date_format": "YYYY-MM-DD HH:mm:ss Z",
+      "merge_logs": true,
+      "kill_timeout": 5000,
+      "restart_delay": 5000,
+      "max_restarts": 5,
+      "min_uptime": "10s"
+    },
+
+    "services": {
+      "ConfigStateServiceRedis": {
+        "description": "Configuration state management service",
+        "script": "ConfigStateServiceRedis.js",
+        "dependencies": [],
+        "startup_order": 1,
+        "critical": true
+      },
+      
+      "DriveStateServiceRedis": {
+        "description": "Drive state monitoring service",
+        "script": "DriveStateServiceRedis.js",
+        "dependencies": ["ConfigStateServiceRedis"],
+        "startup_order": 2,
+        "critical": true
+      },
+      
+      "monitorConnectedExternalDrivesMicroservice": {
+        "description": "External drive monitoring microservice",
+        "script": "monitorConnectedExternalDrivesMicroservice.js",
+        "dependencies": ["ConfigStateServiceRedis"],
+        "startup_order": 3,
+        "critical": true
+      },
+      
+      "monitorSpecialProcessesMicroservice": {
+        "description": "Process monitoring microservice",
+        "script": "monitorSpecialProcessesMicroservice.js",
+        "dependencies": [],
+        "startup_order": 4,
+        "critical": false
+      },
+      
+      "FileTransferRedisService": {
+        "description": "File transfer queue processing service",
+        "script": "FileTransferRedisService.js",
+        "dependencies": ["ConfigStateServiceRedis", "DriveStateServiceRedis", "monitorConnectedExternalDrivesMicroservice"],
+        "startup_order": 5,
+        "critical": true
+      },
+      
+      "DashboardReportingBackend": {
+        "description": "Main web backend service",
+        "script": "DashboardReportingBackend.js",
+        "port": 8454,
+        "dependencies": ["FileTransferRedisService"],
+        "startup_order": 6,
+        "critical": true
+      }
+    }
+  },
+
+  "startup_procedures": {
+    "initial_setup": {
+      "1": "Install Node.js and npm",
+      "2": "Install PM2 globally: npm install -g pm2",
+      "3": "Install PostgreSQL and create database",
+      "4": "Install Redis server",
+      "5": "Clone/download project files",
+      "6": "Run 'npm install' to install dependencies",
+      "7": "Configure database connection settings",
+      "8": "Run database migration if needed"
+    },
+    
+    "database_initialization": {
+      "script": "DatabaseMigration.js",
+      "commands": [
+        "node DatabaseMigration.js",
+        "Creates database if not exists",
+        "Creates required tables",
+        "Sets up initial schema"
+      ],
+      "tables_created": [
+        "files",
+        "transfer_job", 
+        "transfer_job_log",
+        "device_connections"
+      ]
+    },
+    
+    "service_startup": {
+      "method_1_all_services": {
+        "command": "pm2 start ecosystem.config.js",
+        "description": "Start all services defined in ecosystem configuration",
+        "benefits": "Handles dependencies and startup order automatically"
+      },
+      
+      "method_2_individual_services": {
+        "commands": [
+          "pm2 start ConfigStateServiceRedis.js",
+          "pm2 start DriveStateServiceRedis.js", 
+          "pm2 start monitorConnectedExternalDrivesMicroservice.js",
+          "pm2 start monitorSpecialProcessesMicroservice.js",
+          "pm2 start FileTransferRedisService.js",
+          "pm2 start DashboardReportingBackend.js"
+        ],
+        "description": "Start services individually in dependency order"
+      }
+    }
+  },
+
+  "pm2_commands": {
+    "service_management": {
+      "start_all": "pm2 start ecosystem.config.js",
+      "stop_all": "pm2 stop all",
+      "restart_all": "pm2 restart all",
+      "reload_all": "pm2 reload all",
+      "delete_all": "pm2 delete all"
+    },
+    
+    "individual_service_management": {
+      "start_service": "pm2 start <service_name>",
+      "stop_service": "pm2 stop <service_name>", 
+      "restart_service": "pm2 restart <service_name>",
+      "delete_service": "pm2 delete <service_name>",
+      "reload_service": "pm2 reload <service_name>"
+    },
+    
+    "monitoring_commands": {
+      "list_services": "pm2 list",
+      "detailed_info": "pm2 show <service_name>",
+      "real_time_monitoring": "pm2 monit",
+      "log_monitoring": "pm2 logs",
+      "log_specific_service": "pm2 logs <service_name>",
+      "flush_logs": "pm2 flush"
+    },
+    
+    "advanced_commands": {
+      "save_process_list": "pm2 save",
+      "resurrect_processes": "pm2 resurrect",
+      "startup_script": "pm2 startup",
+      "unstartup_script": "pm2 unstartup",
+      "update_pm2": "pm2 update"
+    }
+  },
+
+  "logging_configuration": {
+    "log_locations": {
+      "output_logs": "logs/<service_name>-out.log",
+      "error_logs": "logs/<service_name>-error.log",
+      "pm2_logs": "~/.pm2/logs/"
+    },
+    
+    "log_management": {
+      "rotation": "Automatic log rotation enabled",
+      "date_format": "YYYY-MM-DD HH:mm:ss Z",
+      "merge_logs": true,
+      "max_log_size": "10MB",
+      "retention": "7 days"
+    },
+    
+    "log_monitoring": {
+      "view_all_logs": "pm2 logs",
+      "view_service_logs": "pm2 logs <service_name>",
+      "view_only_errors": "pm2 logs <service_name> --err",
+      "follow_logs": "pm2 logs <service_name> --lines 100",
+      "clear_logs": "pm2 flush"
+    }
+  },
+
+  "health_monitoring": {
+    "service_status": {
+      "check_status": "pm2 list",
+      "detailed_info": "pm2 show <service_name>",
+      "cpu_memory_usage": "pm2 monit"
+    },
+    
+    "health_indicators": {
+      "status_green": "Service running normally",
+      "status_yellow": "Service restarting or experiencing issues", 
+      "status_red": "Service stopped or errored",
+      "memory_usage": "Monitor for memory leaks",
+      "cpu_usage": "Monitor for high CPU usage",
+      "restart_count": "Monitor for frequent restarts"
+    },
+    
+    "automatic_recovery": {
+      "auto_restart": "Services automatically restart on failure",
+      "max_restarts": "Maximum 5 restarts within min_uptime period",
+      "memory_limit": "Restart if memory exceeds 500MB",
+      "restart_delay": "5 second delay between restarts"
+    }
+  },
+
+  "troubleshooting": {
+    "common_issues": {
+      "service_wont_start": {
+        "symptoms": "Service shows 'stopped' status",
+        "causes": [
+          "Missing dependencies",
+          "Database connection failure",
+          "Redis connection failure",
+          "Port already in use",
+          "Configuration errors"
+        ],
+        "solutions": [
+          "Check error logs: pm2 logs <service_name> --err",
+          "Verify database is running",
+          "Verify Redis is running", 
+          "Check port availability",
+          "Validate configuration files"
+        ]
+      },
+      
+      "frequent_restarts": {
+        "symptoms": "High restart count in pm2 list",
+        "causes": [
+          "Memory leaks",
+          "Unhandled exceptions",
+          "Database connection issues",
+          "File system errors"
+        ],
+        "solutions": [
+          "Check error logs for exceptions",
+          "Monitor memory usage",
+          "Check database connectivity",
+          "Verify file permissions"
+        ]
+      },
+      
+      "high_memory_usage": {
+        "symptoms": "Memory usage approaching 500MB limit",
+        "causes": [
+          "Memory leaks in application code",
+          "Large file processing",
+          "Accumulating cached data"
+        ],
+        "solutions": [
+          "Restart service: pm2 restart <service_name>",
+          "Review application code for leaks",
+          "Implement proper cleanup routines",
+          "Adjust memory limits if necessary"
+        ]
+      }
+    },
+    
+    "debugging_steps": {
+      "1": "Check service status: pm2 list",
+      "2": "Review error logs: pm2 logs <service_name> --err",
+      "3": "Check resource usage: pm2 monit",
+      "4": "Verify external dependencies (DB, Redis)",
+      "5": "Check configuration files",
+      "6": "Review application logs for specific errors",
+      "7": "Restart problematic services if needed"
+    },
+    
+    "log_analysis": {
+      "error_patterns": [
+        "Connection refused - Check database/Redis",
+        "EADDRINUSE - Port already in use",
+        "Module not found - Missing dependencies",
+        "Permission denied - File/directory permissions"
+      ],
+      "log_commands": [
+        "pm2 logs --lines 50 - Recent logs",
+        "pm2 logs <service> --err - Error logs only",
+        "grep 'ERROR' logs/*.log - Search for errors"
+      ]
+    }
+  },
+
+  "maintenance_procedures": {
+    "regular_maintenance": {
+      "daily": [
+        "Check service status: pm2 list",
+        "Review error logs for issues",
+        "Monitor resource usage"
+      ],
+      "weekly": [
+        "Rotate/archive old logs",
+        "Check disk space usage",
+        "Review performance metrics"
+      ],
+      "monthly": [
+        "Update PM2: pm2 update",
+        "Review and optimize configuration",
+        "Performance testing"
+      ]
+    },
+    
+    "backup_procedures": {
+      "configuration_backup": [
+        "ecosystem.config.js",
+        "Database configuration",
+        "Application configuration files"
+      ],
+      "data_backup": [
+        "Database backup",
+        "Redis data backup (if persistent)",
+        "Application logs"
+      ]
+    },
+    
+    "update_procedures": {
+      "application_update": [
+        "1. Stop services: pm2 stop all",
+        "2. Backup current version",
+        "3. Deploy new code",
+        "4. Run database migrations if needed",
+        "5. Start services: pm2 start ecosystem.config.js",
+        "6. Verify all services are running",
+        "7. Test functionality"
+      ],
+      
+      "pm2_update": [
+        "1. Save process list: pm2 save",
+        "2. Update PM2: npm install -g pm2@latest",
+        "3. Update PM2: pm2 update",
+        "4. Verify services: pm2 list"
+      ]
+    }
+  },
+
+  "performance_optimization": {
+    "configuration_tuning": {
+      "memory_limits": "Adjust max_memory_restart based on usage patterns",
+      "restart_delays": "Optimize restart_delay for faster recovery",
+      "log_management": "Configure appropriate log rotation",
+      "node_arguments": "Tune --max-old-space-size for memory optimization"
+    },
+    
+    "monitoring_metrics": {
+      "cpu_usage": "Monitor per-service CPU usage",
+      "memory_usage": "Track memory consumption trends",
+      "restart_frequency": "Monitor restart patterns",
+      "response_times": "Track API response times",
+      "error_rates": "Monitor error frequency"
+    }
+  },
+
+  "security_considerations": {
+    "process_isolation": "Each service runs in separate process",
+    "log_security": "Ensure logs don't contain sensitive information",
+    "file_permissions": "Proper file system permissions",
+    "network_security": "Configure firewall for required ports only",
+    "service_dependencies": "Minimize inter-service dependencies"
+  }
+} 

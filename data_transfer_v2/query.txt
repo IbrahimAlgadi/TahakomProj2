@@ -1,0 +1,30 @@
+SELECT 
+    ARRAY_AGG(f.id) AS ids,                       
+    ARRAY_AGG(f.tid) AS tids,
+    plate_num,
+    site_id,
+    date_folder,
+    time_folder,
+    ARRAY_AGG(f.file_path) AS file_paths,
+    ARRAY_AGG(f.file_size) AS file_sizes,
+    ARRAY_AGG(f.file_name) AS file_names,
+    ARRAY_AGG(f.deleted) AS deletions,
+    ARRAY_AGG(f.is_auto_transferred) AS auto_transfers,
+    ARRAY_AGG(f.is_ftp_transferred) AS ftp_transfers,
+    MIN(f.date) AS date,
+    MIN(f.time) AS time,
+    BOOL_OR(NOT COALESCE(f.is_auto_transferred, false)) AS needs_auto_transfer
+FROM 
+    public.files f
+WHERE 
+    f.deleted = false
+    AND TO_TIMESTAMP(f.date::text || ' ' || f.time::text, 'YYYY-MM-DD HH24:MI:SS') >= NOW() - INTERVAL '30 minutes'
+    AND TO_TIMESTAMP(f.date::text || ' ' || f.time::text, 'YYYY-MM-DD HH24:MI:SS') <= NOW()
+GROUP BY 
+    f.plate_num, f.site_id, f.date_folder, f.time_folder
+HAVING 
+    BOOL_AND(f.file_size > 0)              
+    AND BOOL_OR(NOT COALESCE(f.is_auto_transferred, false))  
+ORDER BY 
+    TO_TIMESTAMP(MIN(f.date)::text || ' ' || MIN(f.time)::text, 'YYYY-MM-DD HH24:MI:SS') DESC  -- Most recent first
+LIMIT 500;

@@ -1,0 +1,575 @@
+{% extends './layout/layout.njk' %}
+
+{% block content %}
+
+    <div class="container">
+        <!-- Header Section -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>All Files</h1>
+            <div class="text-secondary">
+                Storage Statistics (<span class='exportDirSize'>-</span> / <span class='maxExportDirSize'>-</span>)
+            </div>
+        </div>
+
+        <!-- Storage Card -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h2 class="card-title mb-0">Storage Overview</h2>
+                <button 
+                    class="btn btn-outline-secondary settings-btn" 
+                    data-bs-toggle="modal"
+                    data-bs-target="#settingsModal"
+                >
+                    <i class="fas fa-cog me-2"></i>
+                    Configure
+                </button>
+            </div>
+
+            <div class="card-body">
+                <!-- Usage Stats -->
+                <div class="mb-4">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-secondary">Current Usage</span>
+                        <span class="text-primary fw-bold">
+                            <span class='exportDirSize'>-</span>
+                        </span>
+                    </div>
+
+                    <div class="progress mb-2">
+                        <div 
+                            id='sizeProgress'
+                            class="progress-bar bg-primary" 
+                            style="width: 0%"
+                        ></div>
+                    </div>
+
+                    <div class="text-secondary small">
+                        Maximum Capacity: <span class='maxExportDirSize'>-</span>
+                    </div>
+                </div>
+
+                <!-- Metrics -->
+                <div class="row g-3 mb-4 d-none">
+                    <div class="col-md-4">
+                        <div class="metric-item">
+                            <div class="metric-label">Total Files Processed</div>
+                            <div class="metric-value">125,432</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="metric-item">
+                            <div class="metric-label">Files Removed (30 days)</div>
+                            <div class="metric-value">15,230</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="metric-item">
+                            <div class="metric-label">Average File Age</div>
+                            <div class="metric-value">45 days</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Chart -->
+                <div>
+                    <h3>Storage History</h3>
+                    <div id="historyChart" class="mt-3"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label">Start</label>
+                                <div class="input-group">
+                                    <input type="date" id="startDate" class="form-control">
+                                    <input type="time" id="startTime" class="form-control">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label">End</label>
+                                <div class="input-group">
+                                    <input type="date" id="endDate" class="form-control">
+                                    <input type="time" id="endTime" class="form-control">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Search</label>
+                        <div class="input-group">
+                            <span class="input-group-text">
+                                <i class="fas fa-search"></i>
+                            </span>
+                            <input id="plateNumberSearch" type="text" class="form-control" placeholder="Search license plate...">
+                            <button id="filterButton" class="btn btn-primary">
+                                <i class="fas fa-filter me-2"></i>
+                                Filter
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Table Container -->
+        <div class="table-container">
+            <div class="card">
+                <div class="card-body">
+
+                    <div class="table-responsive">
+                        <table id="filesTable" class="table table-striped table-bordered" style="width:100%">
+                            <thead>
+                                <tr>
+                                    <th>TID</th>
+                                    <th>Plate Number</th>
+                                    <th>Site ID</th>
+                                    <th>Date</th>
+                                    <th>Time</th>
+                                    <th>File Paths</th>
+                                    <th>File Sizes</th>
+                                    <th>File Count</th>
+                                    <th>Download</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="modal fade">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Storage Settings</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+
+                <div class="modal-body">
+                    <!-- Site ID -->
+                    <div class="mb-4">
+                        <label class="form-label">Site ID</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" name="siteId" placeholder="Enter site ID (e.g., HQ1232)">
+                        </div>
+                    </div>
+
+                    <!-- Storage Directory -->
+                    <div class="mb-4">
+                        <label class="form-label">Storage Directory</label>
+                        <div class="input-group">
+                            <input type="text" class="form-control" name="exportDirectory" placeholder="Enter directory path (e.g., C:\export)">
+                        </div>
+                    </div>
+
+                    <!-- Transfer Settings -->
+                    <div class="mb-4">
+                        <h6 class="mb-3">Transfer Settings</h6>
+
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="encryptionType" id="noEncryption" checked>
+                            <label class="form-check-label" for="noEncryption">
+                                No encryption (clear files)
+                            </label>
+                        </div>
+
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="radio" name="encryptionType" id="useEncryption">
+                            <label class="form-check-label" for="useEncryption">
+                                Enable encryption
+                            </label>
+                        </div>
+
+                        <div class="encryption-options border rounded p-3 bg-light" id="encryptionOptions">
+                            <div class="mb-3">
+                                <label class="form-label">Encryption Algorithm</label>
+                                <select class="form-select" disabled>
+                                    <option value="aes-256-cbc" selected>AES-256-CBC (Mandatory)</option>
+                                </select>
+                                <div class="form-text">AES-256-CBC encryption is mandatory for security compliance.</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">Key Management</label>
+                                <div class="form-control-plaintext">
+                                    <span class="badge bg-primary">Certificate-Based (Mandatory)</span>
+                                </div>
+                                <div class="form-text">All encryption uses certificate-based key management for security compliance.</div>
+                            </div>
+
+                            <!-- Certificate Upload Section -->
+                            <div class="mb-3" id="certificateUploadSection">
+                                <label class="form-label">Public Key Certificate</label>
+                                
+                                <div class="mb-3">
+                                    <div class="input-group">
+                                        <input type="file" class="form-control" id="publicKeyCert" accept=".pem,.crt">
+                                        <button type="button" class="btn btn-outline-secondary" id="uploadPublicKey">
+                                            <i class="fas fa-upload me-1"></i>Upload
+                                        </button>
+                                    </div>
+                                    <div class="form-text">Upload public key certificate for encryption (public_key.pem or certificate.crt)</div>
+                                </div>
+
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Certificate Status:</strong>
+                                    <div id="certificateStatus" class="mt-1">
+                                        <span class="text-muted">Checking certificate status...</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="encryptMetadata" checked disabled>
+                                    <label class="form-check-label" for="encryptMetadata">
+                                        Encrypt file metadata (Mandatory)
+                                    </label>
+                                </div>
+                                <div class="form-text">File metadata encryption is mandatory for security compliance.</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Path Structure -->
+                    <div class="mb-4">
+                        <h6>Path Structure <span class="small">(Drag & drop to rearrange)</span></h6>
+
+                        <div class="path-preview bg-light p-2 rounded mb-2">
+                            <code class="path-example">Current structure: SITE_ID/DATE/TIME/FILE_NAME</code>
+                        </div>
+
+                        <div class="path-components sortable">
+                            <div class="card mb-2 path-item" data-value="SITE_ID">
+                                <div class="card-body d-flex align-items-center p-2">
+                                    Site ID
+                                    <select class="form-select form-select-sm ms-auto" style="width: auto;">
+                                        <option>SITE_ID/</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="card mb-2 path-item" data-value="DATE">
+                                <div class="card-body d-flex align-items-center p-2">
+                                        Date
+                                        <select class="form-select form-select-sm ms-auto" style="width: auto;">
+                                        <option>YYYY_MM_DD/</option>
+                                        <option>DD_MM_YYYY/</option>
+                                        <option>MM_DD_YYYY/</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="card mb-2 path-item" data-value="TIME">
+                                <div class="card-body d-flex align-items-center p-2">
+                                        Time
+                                        <select class="form-select form-select-sm ms-auto" style="width: auto;">
+                                        <option>HH_mm_ss/</option>
+                                        <option>HH_mm_ss_SSS/</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Maximum Storage -->
+                    <div class="mb-4">
+                        <label class="form-label">Maximum Storage Capacity</label>
+                        <div class="input-group">
+                            <input type="number" class="form-control" value="200">
+                            <span class="input-group-text">GB</span>
+                        </div>
+                    </div>
+
+                    <!-- Retention Policy -->
+                    <div class="mb-4">
+                        <h6>Retention Policy</h6>
+                        <div class="radio-group">
+                            <div class="form-check mb-2">
+                                <input class="form-check-input" type="radio" name="retentionPolicy" id="fifo" checked>
+                                <label class="form-check-label" for="fifo">
+                                        Remove oldest files first (FIFO)
+                                    </label>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+{% endblock %}
+
+{% block script %}
+    <script src="/js/all-files/settings-modal.js"></script>
+    <script src="/js/all-files/size-config.js"></script>
+    <script src="/js/all-files/table.js"></script>
+    <script src="/js/Sortable.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('.all-files').addClass('active');
+
+            // Initialize sortable for path components
+            new Sortable($('.path-components')[0], {
+                animation: 150,
+                onEnd: updatePathPreview
+            });
+
+            // Function to update path preview
+            function updatePathPreview() {
+                const components = [];
+                $('.path-components .path-item').each(function() {
+                    const value = $(this).data('value');
+                    const format = $(this).find('select').val();
+                    
+                    switch(value) {
+                        case 'SITE_ID':
+                            components.push('SITE_ID/');
+                            break;
+                        case 'DATE':
+                        case 'TIME':
+                            components.push(format);
+                            break;
+                    }
+                });
+                $('.path-example').text('Current structure: ' + components.join('') + 'FILE_NAME');
+            }
+
+            // Update path preview when structure changes
+            $('.path-components select').on('change', updatePathPreview);
+
+            // Toggle encryption options visibility
+            $('input[name="encryptionType"]').on('change', function() {
+                $('#encryptionOptions').toggle($(this).attr('id') === 'useEncryption');
+            });
+
+            // Certificate upload section is always visible since we only use certificate-based encryption
+            // Load certificate status on page load
+            updateCertificateStatus();
+
+            // Certificate upload handler
+            $('#uploadPublicKey').on('click', function() {
+                const fileInput = document.getElementById('publicKeyCert');
+                const file = fileInput.files[0];
+                
+                if (!file) {
+                    showToast('Please select a public key certificate file', false);
+                    return;
+                }
+
+                if (!file.name.endsWith('.pem') && !file.name.endsWith('.crt')) {
+                    showToast('Please upload a valid .pem or .crt file', false);
+                    return;
+                }
+
+                const formData = new FormData();
+                formData.append('certificate', file);
+                formData.append('type', 'public');
+
+                uploadCertificate(formData, 'public key');
+            });
+
+            // Certificate upload function
+            async function uploadCertificate(formData, keyType) {
+                try {
+                    const response = await fetch('/api/certificates/upload', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        showToast(`${keyType} certificate uploaded successfully`, true);
+                        updateCertificateStatus();
+                    } else {
+                        showToast(`Failed to upload ${keyType} certificate: ${result.error}`, false);
+                    }
+                } catch (error) {
+                    console.error('Error uploading certificate:', error);
+                    showToast(`Failed to upload ${keyType} certificate`, false);
+                }
+            }
+
+            // Update certificate status display
+            async function updateCertificateStatus() {
+                try {
+                    const response = await fetch('/api/certificates/status');
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        const status = result.certificates;
+                        let statusHtml = '';
+                        
+                        if (status.publicKey) {
+                            if (status.isDefault) {
+                                statusHtml = '<span class="badge bg-info me-2"><i class="fas fa-file-certificate"></i> Default Certificate (public_key.pem)</span>';
+                            } else {
+                                statusHtml = '<span class="badge bg-success me-2"><i class="fas fa-check"></i> Public Key Certificate Uploaded</span>';
+                            }
+                        } else {
+                            statusHtml = '<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>No public key certificate found</span>';
+                        }
+                        
+                        $('#certificateStatus').html(statusHtml);
+                    } else {
+                        $('#certificateStatus').html('<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Unable to check certificate status</span>');
+                    }
+                } catch (error) {
+                    console.error('Error fetching certificate status:', error);
+                    $('#certificateStatus').html('<span class="text-danger"><i class="fas fa-times me-1"></i>Error checking certificate status</span>');
+                }
+            }
+
+            // Function to show toast message
+            function showToast(message, isSuccess = true) {
+                const toastHtml = `
+                    <div class="toast-container position-fixed top-0 end-0 p-3">
+                        <div class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+                            <div class="toast-header ${isSuccess ? 'bg-success' : 'bg-danger'} text-white">
+                                <strong class="me-auto">${isSuccess ? 'Success' : 'Error'}</strong>
+                                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+                            </div>
+                            <div class="toast-body">
+                                ${message}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Remove any existing toast container
+                $('.toast-container').remove();
+                
+                // Add new toast to body
+                $('body').append(toastHtml);
+                
+                // Show the toast
+                const toastElement = $('.toast').last();
+                const toast = new bootstrap.Toast(toastElement);
+                toast.show();
+                
+                // Remove toast after it's hidden
+                toastElement.on('hidden.bs.toast', function() {
+                    $(this).closest('.toast-container').remove();
+                });
+            }
+
+            // Save settings handler
+            $('.modal-footer .btn-primary').on('click', async function() {
+                const config = {
+                    storage: {
+                        directory: $('input[name="exportDirectory"]').val(),
+                        maxCapacity: parseInt($('input[type="number"]').val()),
+                        retentionPolicy: $('#fifo').prop('checked') ? 'fifo' : 'custom',
+                        siteId: $('input[name="siteId"]').val()
+                    },
+                    encryption: {
+                        enabled: $('#useEncryption').prop('checked'),
+                        algorithm: 'aes-256-cbc',  // Mandatory AES-256-CBC
+                        keyManagement: 'certificate',  // Always certificate-based
+                        encryptMetadata: true  // Mandatory metadata encryption
+                    },
+                    pathStructure: {
+                        components: [],
+                        formats: {}
+                    }
+                };
+
+                // Collect path structure configuration
+                $('.path-item').each(function() {
+                    const component = $(this).data('value');
+                    config.pathStructure.components.push(component);
+                    
+                    if (component === 'DATE' || component === 'TIME') {
+                        // Remove the trailing slash before saving
+                        const format = $(this).find('select').val().replace('/', '');
+                        config.pathStructure.formats[component] = format;
+                    }
+                });
+
+                try {
+                    const response = await fetch('/api/config', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(config)
+                    });
+
+                    if (response.ok) {
+                        showToast('Settings saved successfully');
+                        $('#settingsModal').modal('hide');
+                    } else {
+                        showToast('Failed to save settings', false);
+                    }
+                } catch (error) {
+                    console.error('Error saving settings:', error);
+                    showToast('Failed to save settings: ' + error.message, false);
+                }
+            });
+
+            // Load settings when modal is opened
+            $('#settingsModal').on('show.bs.modal', function() {
+                $.get('/api/config')
+                    .done(function(config) {
+                        // Storage Directory
+                        $('input[name="siteId"]').val(config.storage.siteId || '');
+                        $('input[name="exportDirectory"]').val(config.storage.directory || '');
+                        
+                        // Encryption Settings
+                        if (config.encryption.enabled) {
+                            $('#useEncryption').prop('checked', true);
+                        } else {
+                            $('#noEncryption').prop('checked', true);
+                        }
+                        $('#encryptionOptions').toggle(config.encryption.enabled);
+                        
+                        // Certificate-based key management is always used
+                        // No need to set dropdown values since we only use certificate-based encryption
+                        
+                        // Path Structure
+                        if (config.pathStructure.formats) {
+                            config.pathStructure.formats.DATE && $('.path-item[data-value="DATE"] select').val(config.pathStructure.formats.DATE + '/');
+                            config.pathStructure.formats.TIME && $('.path-item[data-value="TIME"] select').val(config.pathStructure.formats.TIME + '/');
+                        }
+                        
+                        // Update path preview
+                        updatePathPreview();
+                        
+                        // Maximum Storage
+                        $('input[type="number"]').val(config.storage.maxCapacity);
+                        
+                        // Retention Policy
+                        if (config.storage.retentionPolicy === 'fifo') {
+                            $('#fifo').prop('checked', true);
+                        }
+
+                        // Load certificate status
+                        updateCertificateStatus();
+                    })
+                    .fail(function(xhr, status, error) {
+                        console.error('Failed to load settings:', error);
+                        showToast('Failed to load settings. Using default values.', false);
+                    });
+            });
+        });
+    </script>
+{% endblock %}

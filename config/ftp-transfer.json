@@ -1,0 +1,54 @@
+{
+  "server": {
+    "protocol": "ftps",
+    "host": "localhost",
+    "port": 21,
+    "remoteDirectory": "/vpc",
+    "username": "tahakom",
+    "password": "tahakom"
+  },
+  "transferSchedule": {
+    "scheduleType": "continuous",
+    "scheduleFrequency": "weekly",
+    "dayOfWeek": "friday",
+    "transferTime": "10:00",
+    "dataType": "both",
+    "startPoint": {
+      "type": "lastStopped",
+      "customDateTime": null
+    }
+  },
+  "connection": {
+    "status": "connected",
+    "lastConnected": "2026-05-20T19:09:56.551Z",
+    "connectionTest": {
+      "lastTest": "2026-05-20T19:09:56.551Z",
+      "result": "tahakom",
+      "message": "Connection test successful"
+    }
+  },
+  "transfer": {
+    "startTransfer": false,
+    "currentTransfer": null,
+    "lastTransferCheckpoint": {
+      "exists": true,
+      "stoppedAt": "2025-08-14T15:45:30.000Z",
+      "lastProcessedFile": "IMG_20250114_143020.jpg",
+      "reason": "user_stopped"
+    },
+    "statistics": {
+      "filesPending": 0,
+      "filesTransferred": 0,
+      "totalFiles": 0,
+      "transferSpeed": 0,
+      "bytesTransferred": 0,
+      "totalBytes": 0
+    },
+    "progress": {
+      "currentFile": null,
+      "percentage": 0,
+      "eta": null,
+      "status": "stopped"
+    }
+  }
+}

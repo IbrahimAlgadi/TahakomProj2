@@ -1,0 +1,441 @@
+{
+  "title": "Frontend-Backend API Calling Guide",
+  "version": "1.0.0",
+  "description": "Comprehensive guide for frontend-backend communication in the Tahakom Data Transfer System",
+  
+  "communication_overview": {
+    "protocols": ["HTTP/REST", "WebSocket"],
+    "data_format": "JSON",
+    "base_url": "http://localhost:8454",
+    "websocket_url": "ws://localhost:8454",
+    "authentication": "None (internal system)"
+  },
+
+  "http_api_communication": {
+    "request_patterns": {
+      "fetch_api": {
+        "description": "Modern fetch API for HTTP requests",
+        "example": "fetch('/api/endpoint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })",
+        "error_handling": "async/await with try-catch blocks"
+      },
+      
+      "jquery_ajax": {
+        "description": "jQuery AJAX for some legacy interactions",
+        "example": "$.get('/api/endpoint').done(function(data) { ... }).fail(function(error) { ... })",
+        "usage": "Limited usage in some components"
+      }
+    },
+    
+    "request_headers": {
+      "content_type": "application/json for POST requests",
+      "accept": "application/json for response format",
+      "custom_headers": "None required for this system"
+    },
+    
+    "response_handling": {
+      "success_pattern": {
+        "structure": "{ success: true, data: {...}, message?: 'optional' }",
+        "handling": "Check success flag and process data",
+        "ui_updates": "Update components with response data"
+      },
+      
+      "error_pattern": {
+        "structure": "{ success: false, error: 'error message', details?: {...} }",
+        "handling": "Display error message to user via toast notifications",
+        "fallback": "Graceful degradation when APIs fail"
+      }
+    }
+  },
+
+  "websocket_communication": {
+    "connection_management": {
+      "initialization": "new WebSocket('ws://localhost:8454')",
+      "auto_reconnection": "Reconnect on connection loss with exponential backoff",
+      "connection_states": ["connecting", "open", "closing", "closed"]
+    },
+    
+    "message_protocol": {
+      "subscription": {
+        "format": "{ action: 'subscribe', event: 'event_name' }",
+        "purpose": "Subscribe to specific event types",
+        "examples": [
+          "{ action: 'subscribe', event: 'devices' }",
+          "{ action: 'subscribe', event: 'handleAutoTransfer' }",
+          "{ action: 'subscribe', event: 'processes' }"
+        ]
+      },
+      
+      "incoming_messages": {
+        "format": "{ event: 'event_type', data: {...}, timestamp?: 'ISO_string' }",
+        "processing": "JSON.parse() and route to event handlers",
+        "error_handling": "Graceful handling of malformed messages"
+      }
+    },
+    
+    "event_handling": {
+      "page_specific": "Each page subscribes to relevant events only",
+      "ui_updates": "Real-time UI updates based on received data",
+      "state_synchronization": "Keep frontend state in sync with backend"
+    }
+  },
+
+  "page_specific_implementations": {
+    "auto_transfer_page": {
+      "file": "data_transfer_v2/views/auto_transfer.njk",
+      "service_url": "const AUTO_TRANSFER_SERVICE_URL = 'http://localhost:8454'",
+      "websocket_url": "const AUTO_TRANSFER_WS_URL = 'ws://localhost:8454'",
+      
+      "api_calls": {
+        "load_config": {
+          "endpoint": "GET /auto-transfer/config",
+          "purpose": "Load initial configuration on page load",
+          "handler": "Populate form fields with current settings"
+        },
+        
+        "test_drive": {
+          "endpoint": "POST /auto-transfer/test-drive",
+          "payload": "{ drive: 'E' }",
+          "success_handler": "Show drive info and enable save button",
+          "error_handler": "Show error message and update drive status"
+        },
+        
+        "save_config": {
+          "endpoint": "POST /auto-transfer/save-config", 
+          "payload": "{ drive, encryption: {...}, isActive }",
+          "success_handler": "Show success toast notification",
+          "error_handler": "Show error toast and revert changes"
+        },
+        
+        "toggle_transfer": {
+          "endpoint": "POST /auto-transfer/toggle",
+          "payload": "{ isActive: boolean }",
+          "success_handler": "Update UI state and show confirmation",
+          "error_handler": "Revert toggle state and show error"
+        }
+      },
+      
+      "websocket_integration": {
+        "subscription": "{ action: 'subscribe', event: 'realtimeDashboard' }",
+        "event_handling": {
+          "handleAutoTransfer": {
+            "purpose": "Real-time transfer status updates",
+            "data_format": "{ event: 'handleAutoTransfer', data: { success, response } }",
+            "ui_updates": [
+              "updateTransferStatus()",
+              "updateDriveStatus()",
+              "updateDriveInfo()",
+              "showToast() for errors"
+            ]
+          }
+        }
+      }
+    },
+
+    "devices_page": {
+      "file": "data_transfer_v2/views/devices.njk",
+      "service_url": "const DEVICES_SERVICE_URL = 'http://localhost:8454'",
+      "websocket_url": "const WS_URL = 'ws://localhost:8454'",
+      
+      "api_calls": {
+        "load_devices": {
+          "endpoint": "GET /devices",
+          "purpose": "Initial load of connected devices",
+          "handler": "updateDevicesGrid(data.devices)"
+        },
+        
+        "load_history": {
+          "endpoint": "GET /devices/history",
+          "purpose": "Load device connection history",
+          "handler": "updateDeviceHistory(data.history)"
+        },
+        
+        "refresh_devices": {
+          "endpoint": "POST /devices/refresh",
+          "purpose": "Manual refresh of device list",
+          "handler": "Update grid and show success message"
+        }
+      },
+      
+      "websocket_integration": {
+        "subscription": "{ action: 'subscribe', event: 'devices' }",
+        "event_handling": {
+          "devices": {
+            "purpose": "Real-time device connection updates",
+            "handler": "updateDevicesGrid(data.devices)"
+          },
+          "deviceHistory": {
+            "purpose": "Real-time history updates",
+            "handler": "updateDeviceHistory(data.history)"
+          }
+        }
+      }
+    },
+
+    "dashboard_page": {
+      "file": "data_transfer_v2/views/dashboard.njk",
+      "service_url": "const DASHBOARD_URL = 'http://localhost:8454'",
+      
+      "api_calls": {
+        "load_data": {
+          "endpoint": "GET /dashboard/data",
+          "query_params": "view, date filters, camera filters",
+          "purpose": "Load dashboard statistics and charts",
+          "handlers": [
+            "updateStatistics(data)",
+            "updateMainChart(data)",
+            "updateSuccessChart(data)",
+            "updateFileSizeChart(data)",
+            "updateVehicleChart(data)",
+            "updateDataTable(data)"
+          ]
+        },
+        
+        "export_data": {
+          "endpoint": "GET /dashboard/export",
+          "query_params": "format, view, filters",
+          "purpose": "Export dashboard data",
+          "handler": "window.open(url, '_blank')"
+        },
+        
+        "load_cameras": {
+          "endpoint": "GET /dashboard/cameras",
+          "purpose": "Populate camera filter dropdown",
+          "handler": "Build camera options dynamically"
+        }
+      },
+      
+      "chart_integration": {
+        "library": "ECharts",
+        "initialization": "echarts.init(document.getElementById('chartId'))",
+        "data_binding": "chart.setOption(chartConfig)",
+        "responsive": "chart.resize() on window resize"
+      }
+    },
+
+    "files_page": {
+      "file": "data_transfer_v2/views/index.njk",
+      
+      "api_calls": {
+        "load_files": {
+          "endpoint": "GET /files/data",
+          "query_params": "pageSize, pageNumber, search, date filters",
+          "purpose": "Load paginated file data",
+          "handler": "Update DataTable with server-side pagination"
+        },
+        
+        "load_size": {
+          "endpoint": "GET /files/size",
+          "purpose": "Load storage size statistics",
+          "handler": "Update storage progress bars and statistics"
+        },
+        
+        "load_config": {
+          "endpoint": "GET /api/config",
+          "purpose": "Load system configuration for settings modal",
+          "handler": "Populate form fields in settings modal"
+        },
+        
+        "save_config": {
+          "endpoint": "POST /api/config",
+          "payload": "Complete configuration object",
+          "purpose": "Save system configuration",
+          "handler": "Show success/error toast and close modal"
+        }
+      }
+    },
+
+    "manual_transfer_page": {
+      "file": "data_transfer_v2/views/manual_usb.njk",
+      
+      "api_calls": {
+        "load_drives": {
+          "endpoint": "GET /manual-transfer/drives",
+          "purpose": "Load available drives for selection",
+          "handler": "Populate drive dropdown"
+        },
+        
+        "create_job": {
+          "endpoint": "POST /manual-transfer/create",
+          "payload": "{ startDateTime, endDateTime, usbPath }",
+          "purpose": "Create new transfer job",
+          "handler": "Show success message and job summary"
+        },
+        
+        "control_job": {
+          "endpoint": "POST /manual-transfer/control",
+          "payload": "{ jobId, action: 'pause|resume|cancel' }",
+          "purpose": "Control active transfer job",
+          "handler": "Update job status and UI controls"
+        },
+        
+        "load_history": {
+          "endpoint": "GET /manual-transfer/history",
+          "query_params": "page, limit, status, search",
+          "purpose": "Load transfer job history",
+          "handler": "Update history table with pagination"
+        }
+      }
+    }
+  },
+
+  "common_patterns": {
+    "loading_states": {
+      "pattern": "Show loading indicators during API calls",
+      "implementation": [
+        "Disable buttons during requests",
+        "Show spinners or progress bars",
+        "Grey out forms during submission"
+      ]
+    },
+    
+    "error_handling": {
+      "toast_notifications": {
+        "library": "Bootstrap Toast component",
+        "function": "showToast(message, type)",
+        "types": ["success", "error", "warning", "info"],
+        "positioning": "Bottom-right corner"
+      },
+      
+      "form_validation": {
+        "client_side": "Validate inputs before API calls",
+        "server_side": "Handle server validation errors",
+        "display": "Show field-specific error messages"
+      },
+      
+      "network_errors": {
+        "detection": "Catch fetch() rejections",
+        "user_feedback": "Show 'Network error' messages",
+        "retry_logic": "Provide retry options for failed requests"
+      }
+    },
+    
+    "data_formatting": {
+      "file_sizes": "formatFileSize() function for byte conversion",
+      "dates": "formatDateTime() for consistent date display",
+      "numbers": "formatNumber() for thousands separators",
+      "percentages": "toFixed(2) for consistent decimal places"
+    },
+    
+    "ui_updates": {
+      "real_time": "Update UI immediately on WebSocket messages",
+      "optimistic": "Update UI optimistically during API calls",
+      "rollback": "Revert changes if API calls fail",
+      "synchronization": "Keep multiple UI elements in sync"
+    }
+  },
+
+  "error_handling_strategies": {
+    "api_errors": {
+      "http_status_codes": {
+        "400": "Bad Request - Show validation errors",
+        "404": "Not Found - Show 'Resource not found'",
+        "500": "Server Error - Show 'Server error, please try again'"
+      },
+      
+      "application_errors": {
+        "success_false": "Check response.success flag",
+        "error_messages": "Display response.error to user",
+        "fallback_handling": "Provide default error messages"
+      }
+    },
+    
+    "websocket_errors": {
+      "connection_failed": "Show 'Connection lost' message",
+      "reconnection": "Attempt automatic reconnection",
+      "message_errors": "Handle malformed JSON gracefully"
+    },
+    
+    "user_feedback": {
+      "immediate": "Show immediate feedback for user actions",
+      "persistent": "Keep error messages visible until resolved",
+      "actionable": "Provide clear next steps for users"
+    }
+  },
+
+  "performance_optimization": {
+    "api_efficiency": {
+      "debouncing": "Debounce search inputs to reduce API calls",
+      "caching": "Cache static data like camera lists",
+      "pagination": "Use server-side pagination for large datasets",
+      "compression": "Enable gzip compression for large responses"
+    },
+    
+    "websocket_optimization": {
+      "selective_subscription": "Subscribe only to needed events",
+      "message_filtering": "Filter messages before processing",
+      "throttling": "Throttle high-frequency updates"
+    },
+    
+    "ui_optimization": {
+      "virtual_scrolling": "For large tables and lists",
+      "lazy_loading": "Load charts and heavy components on demand",
+      "request_cancellation": "Cancel outdated requests"
+    }
+  },
+
+  "development_best_practices": {
+    "api_integration": {
+      "consistent_patterns": "Use consistent patterns across pages",
+      "error_boundaries": "Implement error boundaries for components",
+      "type_safety": "Validate API response structures",
+      "documentation": "Document API integration patterns"
+    },
+    
+    "websocket_integration": {
+      "connection_management": "Centralize WebSocket connection logic",
+      "event_routing": "Create event routing system",
+      "state_management": "Maintain consistent state across components",
+      "cleanup": "Properly close connections on page unload"
+    },
+    
+    "testing": {
+      "mock_apis": "Mock API responses for testing",
+      "integration_tests": "Test API integration flows",
+      "websocket_tests": "Test real-time functionality",
+      "error_scenarios": "Test error handling paths"
+    }
+  },
+
+  "debugging_techniques": {
+    "network_debugging": {
+      "browser_devtools": "Use Network tab to inspect requests",
+      "console_logging": "Log API requests and responses",
+      "request_timing": "Monitor request performance",
+      "response_validation": "Validate response data structures"
+    },
+    
+    "websocket_debugging": {
+      "connection_logs": "Log connection state changes",
+      "message_logging": "Log incoming and outgoing messages",
+      "event_tracking": "Track event subscription and handling",
+      "reconnection_debugging": "Debug reconnection logic"
+    },
+    
+    "common_issues": {
+      "cors_errors": "Cross-origin request blocked",
+      "json_parsing": "Invalid JSON in API responses",
+      "websocket_connection": "WebSocket connection failures",
+      "stale_data": "UI not updating with latest data"
+    }
+  },
+
+  "security_considerations": {
+    "input_validation": {
+      "client_side": "Validate user inputs before sending",
+      "sanitization": "Sanitize data for display",
+      "xss_prevention": "Prevent cross-site scripting attacks"
+    },
+    
+    "data_transmission": {
+      "https_usage": "Use HTTPS in production",
+      "sensitive_data": "Don't log sensitive information",
+      "token_handling": "Secure handling of authentication tokens"
+    },
+    
+    "websocket_security": {
+      "origin_validation": "Validate WebSocket origins",
+      "message_validation": "Validate incoming message structure",
+      "rate_limiting": "Implement client-side rate limiting"
+    }
+  }
+} 

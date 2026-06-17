@@ -1,0 +1,359 @@
+{
+  "title": "Backend-Frontend Architecture Guide",
+  "version": "1.0.0",
+  "description": "Comprehensive guide to the Tahakom Data Transfer System architecture",
+  
+  "system_overview": {
+    "name": "Tahakom Data Transfer System",
+    "architecture_type": "Microservices with Event-Driven Architecture",
+    "communication_patterns": ["REST API", "WebSocket", "Redis Pub/Sub", "Database"],
+    "deployment_model": "PM2 Process Manager",
+    "language": "Node.js",
+    "template_engine": "Nunjucks"
+  },
+
+  "backend_architecture": {
+    "overview": "Microservices architecture with Redis-based state management and PostgreSQL persistence",
+    
+    "core_services": {
+      "DashboardReportingBackend": {
+        "file": "DashboardReportingBackend.js",
+        "port": 8454,
+        "description": "Main backend service providing web interface and API endpoints",
+        "responsibilities": [
+          "Web server (Express.js)",
+          "Route management",
+          "WebSocket connections",
+          "Static file serving",
+          "Template rendering"
+        ],
+        "dependencies": ["ConfigStateServiceRedis", "DriveStateServiceRedis", "monitorConnectedExternalDrivesMicroservice"]
+      },
+      
+      "ConfigStateServiceRedis": {
+        "file": "ConfigStateServiceRedis.js",
+        "description": "Configuration state management service",
+        "responsibilities": [
+          "Configuration persistence",
+          "State synchronization",
+          "Config change notifications via Redis"
+        ],
+        "redis_keys": ["CONFIG_STATE_KEY"]
+      },
+      
+      "DriveStateServiceRedis": {
+        "file": "DriveStateServiceRedis.js", 
+        "description": "Drive state monitoring and management",
+        "responsibilities": [
+          "Drive information monitoring",
+          "Drive state persistence",
+          "Drive change notifications"
+        ],
+        "redis_keys": ["CONNECTED_DRIVE_STATE", "CONNECTED_DRIVE_LIST"]
+      },
+      
+      "FileTransferRedisService": {
+        "file": "FileTransferRedisService.js",
+        "description": "File transfer queue processing service",
+        "responsibilities": [
+          "File transfer queue management",
+          "Batch file copying",
+          "Transfer result handling"
+        ],
+        "redis_queues": ["image_file_transfer_queue", "image_file_transfer_result_queue"]
+      },
+      
+      "monitorConnectedExternalDrivesMicroservice": {
+        "file": "monitorConnectedExternalDrivesMicroservice.js",
+        "description": "External drive monitoring service",
+        "responsibilities": [
+          "Drive connection detection",
+          "Drive information collection",
+          "Database persistence of drive connections"
+        ]
+      },
+      
+      "monitorSpecialProcessesMicroservice": {
+        "file": "monitorSpecialProcessesMicroservice.js",
+        "description": "Process monitoring service",
+        "responsibilities": [
+          "System process monitoring",
+          "Process state tracking",
+          "Process alerts"
+        ]
+      }
+    },
+
+    "api_routes": {
+      "autoTransferRoutes": {
+        "file": "routes/autoTransferRoutes.js",
+        "base_path": "/auto-transfer",
+        "endpoints": [
+          "GET /config",
+          "POST /test-drive", 
+          "POST /save-config",
+          "POST /toggle"
+        ],
+        "websocket_events": ["handleAutoTransfer"]
+      },
+      
+      "connectedDevicesRoutes": {
+        "file": "routes/connectedDevicesRoutes.js",
+        "base_path": "/devices",
+        "endpoints": [
+          "GET /",
+          "GET /history",
+          "POST /refresh"
+        ],
+        "websocket_events": ["devices", "deviceHistory"]
+      },
+      
+      "dashboardRoutes": {
+        "file": "routes/dashboardRoutes.js",
+        "base_path": "/dashboard",
+        "endpoints": [
+          "GET /data",
+          "GET /export",
+          "GET /operation-report",
+          "GET /cameras",
+          "GET /vehicle-types",
+          "POST /refresh"
+        ]
+      },
+      
+      "mainControlRoutes": {
+        "file": "routes/mainControlRoutes.js",
+        "base_path": "/",
+        "endpoints": [
+          "GET / (page routes)",
+          "GET /api/config",
+          "POST /api/config",
+          "GET /files/data",
+          "GET /files/size",
+          "GET /transfer/list",
+          "POST /transfer/create/new"
+        ],
+        "websocket_events": ["startStorageTransfer"]
+      },
+      
+      "manualTransferRoutes": {
+        "file": "routes/manualTransferRoutes.js",
+        "base_path": "/manual-transfer",
+        "endpoints": [
+          "GET /drives",
+          "POST /test-drive",
+          "POST /create",
+          "POST /summary",
+          "GET /config",
+          "POST /control",
+          "GET /history"
+        ]
+      },
+      
+      "processMonitorRoutes": {
+        "file": "routes/processMonitorRoutes.js",
+        "base_path": "/processes",
+        "endpoints": [
+          "GET /",
+          "POST /refresh"
+        ],
+        "websocket_events": ["processes"]
+      }
+    },
+
+    "utilities": {
+      "configUtils": {
+        "file": "utils/configUtils.js",
+        "description": "Configuration management utilities",
+        "functions": ["readConfig", "writeConfig"]
+      },
+      
+      "encryptionService": {
+        "file": "utils/encryptionService.js",
+        "description": "Encryption/decryption services",
+        "functions": ["generateAESKey", "encryptFileAES", "decryptFileAES", "encryptWithRSAPublicKey", "decryptWithRSAPrivateKey"]
+      },
+      
+      "websocketUtils": {
+        "file": "utils/websocketUtils.js",
+        "description": "WebSocket utilities",
+        "functions": ["emitEventToClients"]
+      }
+    },
+
+    "data_layer": {
+      "database": {
+        "type": "PostgreSQL",
+        "migration_file": "DatabaseMigration.js",
+        "main_tables": [
+          "files",
+          "transfer_job",
+          "transfer_job_log",
+          "device_connections"
+        ]
+      },
+      
+      "redis": {
+        "purpose": "State management and message queuing",
+        "key_store": "redisKeyStore.js",
+        "usage_patterns": [
+          "Configuration state",
+          "Drive state",
+          "Process monitoring",
+          "Task queuing",
+          "Pub/Sub messaging"
+        ]
+      }
+    },
+
+    "process_management": {
+      "pm2_config": "ecosystem.config.js",
+      "restart_policy": "always",
+      "log_rotation": true,
+      "service_dependencies": {
+        "ConfigStateServiceRedis": [],
+        "DriveStateServiceRedis": ["ConfigStateServiceRedis"],
+        "monitorConnectedExternalDrivesMicroservice": ["ConfigStateServiceRedis"],
+        "monitorSpecialProcessesMicroservice": [],
+        "FileTransferRedisService": ["ConfigStateServiceRedis", "DriveStateServiceRedis", "monitorConnectedExternalDrivesMicroservice"],
+        "DashboardReportingBackend": ["FileTransferRedisService"]
+      }
+    }
+  },
+
+  "frontend_architecture": {
+    "overview": "Server-rendered templates with client-side JavaScript for interactivity",
+    
+    "template_engine": {
+      "name": "Nunjucks",
+      "layout_system": "Hierarchical layout inheritance",
+      "base_layouts": [
+        "data_transfer_v2/views/layout/root_layout.njk",
+        "data_transfer_v2/views/layout/layout.njk"
+      ]
+    },
+
+    "page_structure": {
+      "auto_transfer": {
+        "file": "data_transfer_v2/views/auto_transfer.njk",
+        "description": "Automatic USB transfer configuration",
+        "api_endpoints": ["/auto-transfer/config", "/auto-transfer/test-drive", "/auto-transfer/save-config", "/auto-transfer/toggle"],
+        "websocket_events": ["handleAutoTransfer"]
+      },
+      
+      "auto_transfer_video": {
+        "file": "data_transfer_v2/views/auto_transfer_video.njk",
+        "description": "Automatic video transfer configuration",
+        "api_endpoints": ["/auto-transfer-video/config", "/auto-transfer-video/test-drive", "/auto-transfer-video/save-config", "/auto-transfer-video/toggle"],
+        "websocket_events": ["handleAutoVideoTransfer"]
+      },
+      
+      "dashboard": {
+        "file": "data_transfer_v2/views/dashboard.njk",
+        "description": "Statistical dashboard with charts",
+        "api_endpoints": ["/dashboard/data", "/dashboard/export", "/dashboard/cameras", "/dashboard/vehicle-types"],
+        "libraries": ["ECharts", "Moment.js"]
+      },
+      
+      "devices": {
+        "file": "data_transfer_v2/views/devices.njk",
+        "description": "Connected devices management",
+        "api_endpoints": ["/devices", "/devices/history", "/devices/refresh"],
+        "websocket_events": ["devices", "deviceHistory"]
+      },
+      
+      "index": {
+        "file": "data_transfer_v2/views/index.njk",
+        "description": "Main files listing and storage overview",
+        "api_endpoints": ["/files/data", "/files/size", "/api/config"],
+        "features": ["File filtering", "Storage configuration", "Settings modal"]
+      },
+      
+      "manual_usb": {
+        "file": "data_transfer_v2/views/manual_usb.njk",
+        "description": "Manual USB transfer interface"
+      },
+      
+      "process_monitor": {
+        "file": "data_transfer_v2/views/process_monitor.njk",
+        "description": "Process monitoring interface",
+        "api_endpoints": ["/processes", "/processes/refresh"],
+        "websocket_events": ["processes"]
+      }
+    },
+
+    "ui_framework": {
+      "css_framework": "Bootstrap 5",
+      "icon_library": "Font Awesome",
+      "chart_library": "Apache ECharts",
+      "date_library": "Moment.js",
+      "styling": {
+        "theme": "Modern admin dashboard",
+        "color_scheme": "Bootstrap default with custom accents",
+        "layout": "Responsive grid system",
+        "components": ["Cards", "Tables", "Forms", "Modals", "Toasts", "Progress bars"]
+      }
+    },
+
+    "client_side_features": {
+      "real_time_updates": {
+        "technology": "WebSocket",
+        "connection_management": "Auto-reconnection",
+        "event_handling": "JSON message parsing"
+      },
+      
+      "data_visualization": {
+        "charts": ["Line", "Bar", "Pie", "Area"],
+        "interactive_features": ["Zoom", "Filter", "Export"],
+        "responsive_design": "Mobile-friendly charts"
+      },
+      
+      "form_handling": {
+        "validation": "Client-side validation",
+        "file_uploads": "Multi-file support",
+        "configuration": "JSON-based settings"
+      }
+    }
+  },
+
+  "communication_patterns": {
+    "http_api": {
+      "protocol": "REST",
+      "format": "JSON",
+      "authentication": "None (internal system)",
+      "error_handling": "Standard HTTP status codes"
+    },
+    
+    "websocket": {
+      "protocol": "WebSocket",
+      "message_format": "JSON",
+      "connection_url": "ws://localhost:8454",
+      "event_types": ["Subscribe", "Data updates", "Status changes"]
+    },
+    
+    "redis_pubsub": {
+      "purpose": "Inter-service communication",
+      "channels": ["CONFIG_STATE_KEY_update", "CONNECTED_DRIVE_STATE_update", "CONNECTED_DRIVE_LIST_UPDATE", "PROCESS_MONITOR_UPDATE"],
+      "message_format": "JSON"
+    }
+  },
+
+  "deployment_architecture": {
+    "process_manager": "PM2",
+    "service_discovery": "Static configuration",
+    "load_balancing": "Single instance per service",
+    "monitoring": "PM2 built-in monitoring",
+    "logging": {
+      "strategy": "File-based logging",
+      "location": "logs/ directory",
+      "rotation": "PM2 managed"
+    }
+  },
+
+  "scalability_considerations": {
+    "horizontal_scaling": "Each microservice can be scaled independently",
+    "bottlenecks": ["Database connections", "Redis connections", "File I/O"],
+    "caching": "Redis for state caching",
+    "queue_management": "Redis-based task queuing"
+  }
+} 

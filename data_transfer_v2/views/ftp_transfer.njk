@@ -1,0 +1,1312 @@
+{% extends './layout/layout.njk' %}
+
+{% block content %}
+    <style>
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .status-badge.connected {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-badge.disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-badge.in-progress {
+            background-color: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        
+        .stat-box {
+            text-align: center;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .stat-label {
+            font-size: 0.8rem;
+            color: #6c757d;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #495057;
+        }
+    </style>
+
+    <div class="container-fluid">
+        <!-- Page Header -->
+        <div class="mb-4">
+            <h1 class="h3 mb-1">FTP/FTPS Transfer</h1>
+            <p class="text-muted">Remote File Transfer Configuration</p>
+        </div>
+
+        <div class="row">
+            <!-- Configuration Card with Tabs -->
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-cogs me-2"></i>Configuration
+                        </h5>
+                        <!-- Tab Navigation -->
+                        <ul class="nav nav-tabs card-header-tabs mt-3" id="configTabs" role="tablist">
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link active" id="ftp-config-tab" data-bs-toggle="tab" data-bs-target="#ftp-config" type="button" role="tab" aria-controls="ftp-config" aria-selected="true">
+                                    <i class="fas fa-server me-2"></i>FTP Configuration
+                                </button>
+                            </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="transfer-type-tab" data-bs-toggle="tab" data-bs-target="#transfer-type" type="button" role="tab" aria-controls="transfer-type" aria-selected="false">
+                                    <i class="fas fa-clock me-2"></i>Transfer Type
+                                </button>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class="card-body">
+                        <div class="tab-content" id="configTabsContent">
+                            <!-- FTP Configuration Tab -->
+                            <div class="tab-pane fade show active" id="ftp-config" role="tabpanel" aria-labelledby="ftp-config-tab">
+                                <form id="ftp-form">
+                                    <!-- Protocol Selection -->
+                                    <div class="mb-3">
+                                        <label class="form-label">Protocol</label>
+                                        <select class="form-select" id="protocolSelect" name="protocol">
+                                            <option value="ftp" selected>FTP - File Transfer Protocol</option>
+                                            <option value="ftps">FTPS - FTP over SSL/TLS</option>
+                                        </select>
+                                    </div>
+
+                                    <!-- Server Host -->
+                                    <div class="mb-3">
+                                        <label class="form-label">Server Host</label>
+                                        <input type="text" class="form-control" placeholder="Enter server host">
+                                    </div>
+
+                                    <!-- Port and Directory -->
+                                    <div class="row mb-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label">Port</label>
+                                            <input type="number" class="form-control" placeholder="21">
+                                        </div>
+                                        <div class="col-md-8">
+                                            <label class="form-label">Remote Directory</label>
+                                            <input type="text" class="form-control" placeholder="/path/to/directory">
+                                        </div>
+                                    </div>
+
+                                    <!-- Username -->
+                                    <div class="mb-3">
+                                        <label class="form-label">Username</label>
+                                        <input type="text" class="form-control" placeholder="Enter username">
+                                    </div>
+
+                                    <!-- Password -->
+                                    <div class="mb-4">
+                                        <label class="form-label">Password</label>
+                                        <div class="position-relative">
+                                            <input type="password" class="form-control" placeholder="Enter password">
+                                            <button type="button" class="password-toggle">
+                                                <i class="far fa-eye"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Action Buttons -->
+                                    <div class="d-grid gap-2">
+                                        <button type="button" class="btn btn-outline-primary">
+                                            <i class="fas fa-plug me-2"></i>Test Connection
+                                        </button>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <!-- Transfer Type Configuration Tab -->
+                            <div class="tab-pane fade" id="transfer-type" role="tabpanel" aria-labelledby="transfer-type-tab">
+                                <form id="transfer-type-form">
+                                    <!-- Transfer Schedule -->
+                                    <div class="mb-4">
+                                        <h6 class="fw-bold mb-3">
+                                            <i class="fas fa-calendar-alt me-2"></i>Transfer Schedule
+                                        </h6>
+                                        
+                                        <!-- Schedule Type -->
+                                        <div class="mb-3">
+                                            <div class="form-check mb-2">
+                                                <input class="form-check-input" type="radio" name="scheduleType" id="continuousLoop" value="continuous">
+                                                <label class="form-check-label" for="continuousLoop">
+                                                    <i class="fas fa-infinity me-2 text-primary"></i><strong>Continuous Loop</strong> - Transfer files immediately when USB is connected
+                                                </label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="radio" name="scheduleType" id="scheduledTransfer" value="scheduled" checked>
+                                                <label class="form-check-label" for="scheduledTransfer">
+                                                    <i class="fas fa-clock me-2 text-info"></i><strong>Scheduled Transfer</strong> - Transfer files at specific times
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Schedule Configuration -->
+                                        <div id="scheduleConfiguration" class="mt-3">
+                                            <h6 class="fw-bold mb-3">Schedule Configuration</h6>
+                                            
+                                            <!-- Schedule Type Selection -->
+                                            <div class="mb-3">
+                                                <label class="form-label">Schedule Type</label>
+                                                <div class="form-check mb-2">
+                                                    <input class="form-check-input" type="radio" name="scheduleFrequency" id="hourly" value="hourly">
+                                                    <label class="form-check-label" for="hourly">
+                                                        <i class="fas fa-clock me-2"></i><strong>Hourly</strong> - Transfer at specific hour each day
+                                                    </label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="radio" name="scheduleFrequency" id="weekly" value="weekly" checked>
+                                                    <label class="form-check-label" for="weekly">
+                                                        <i class="fas fa-calendar-week me-2"></i><strong>Weekly</strong> - Transfer on specific day of the week
+                                                    </label>
+                                                </div>
+                                            </div>
+
+                                            <!-- Day of Week Selection -->
+                                            <div class="mb-3" id="daySelection">
+                                                <label class="form-label">Select Day of Week</label>
+                                                <select class="form-select" id="dayOfWeek">
+                                                    <option value="monday" selected>Monday</option>
+                                                    <option value="tuesday">Tuesday</option>
+                                                    <option value="wednesday">Wednesday</option>
+                                                    <option value="thursday">Thursday</option>
+                                                    <option value="friday">Friday</option>
+                                                    <option value="saturday">Saturday</option>
+                                                    <option value="sunday">Sunday</option>
+                                                </select>
+                                                <div class="form-text">Transfer will occur weekly on the selected day</div>
+                                            </div>
+
+                                            <!-- Time Selection -->
+                                            <div class="mb-3">
+                                                <label class="form-label">Select Time</label>
+                                                <select class="form-select" id="transferTime">
+                                                    <option value="00:00">12:00 AM</option>
+                                                    <option value="01:00">1:00 AM</option>
+                                                    <option value="02:00">2:00 AM</option>
+                                                    <option value="03:00">3:00 AM</option>
+                                                    <option value="04:00">4:00 AM</option>
+                                                    <option value="05:00">5:00 AM</option>
+                                                    <option value="06:00">6:00 AM</option>
+                                                    <option value="07:00">7:00 AM</option>
+                                                    <option value="08:00">8:00 AM</option>
+                                                    <option value="09:00" selected>9:00 AM</option>
+                                                    <option value="10:00">10:00 AM</option>
+                                                    <option value="11:00">11:00 AM</option>
+                                                    <option value="12:00">12:00 PM</option>
+                                                    <option value="13:00">1:00 PM</option>
+                                                    <option value="14:00">2:00 PM</option>
+                                                    <option value="15:00">3:00 PM</option>
+                                                    <option value="16:00">4:00 PM</option>
+                                                    <option value="17:00">5:00 PM</option>
+                                                    <option value="18:00">6:00 PM</option>
+                                                    <option value="19:00">7:00 PM</option>
+                                                    <option value="20:00">8:00 PM</option>
+                                                    <option value="21:00">9:00 PM</option>
+                                                    <option value="22:00">10:00 PM</option>
+                                                    <option value="23:00">11:00 PM</option>
+                                                </select>
+                                            </div>
+
+                                            <!-- Important Note -->
+                                            <div class="alert alert-info">
+                                                <i class="fas fa-info-circle me-2"></i>
+                                                <strong>Note:</strong> Scheduled transfers will only execute if the USB drive is connected at the scheduled time.
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Data Type Selection -->
+                                    <div class="mb-4">
+                                        <h6 class="fw-bold mb-3">
+                                            <i class="fas fa-file me-2"></i>Data to Transfer
+                                        </h6>
+                                        
+                                        <div class="form-check mb-2">
+                                            <input 
+                                                class="form-check-input" 
+                                                type="radio" 
+                                                name="dataType" 
+                                                id="imagesOnly"
+                                                value="images"
+                                            >
+                                            <label class="form-check-label" for="imagesOnly">
+                                                <i class="fas fa-image me-2 text-primary"></i><strong>Images Only</strong> - Transfer image files (.jpg, .jpeg)
+                                            </label>
+                                        </div>
+
+                                        <div class="form-check mb-2">
+                                            <input 
+                                                class="form-check-input" 
+                                                type="radio" 
+                                                name="dataType"
+                                                id="videosOnly"
+                                                value="videos"
+                                            >
+                                            <label class="form-check-label" for="videosOnly">
+                                                <i class="fas fa-video me-2 text-success"></i><strong>Videos Only</strong> - Transfer video files (.mp4)
+                                            </label>
+                                        </div>
+
+                                        <div class="form-check mb-3">
+                                            <input 
+                                                class="form-check-input" 
+                                                type="radio" 
+                                                name="dataType"
+                                                id="bothTypes"
+                                                value="both"
+                                                checked
+                                            >
+                                            <label class="form-check-label" for="bothTypes">
+                                                <i class="fas fa-file-alt me-2 text-info"></i><strong>Both Images & Videos</strong> - Transfer all media files
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Transfer Start Point -->
+                                    <div class="mb-4">
+                                        <h6 class="fw-bold mb-3">
+                                            <i class="fas fa-play me-2"></i>Transfer Start Point
+                                        </h6>
+                                        
+                                        <!-- Continue from last stopped (conditional) -->
+                                        <div class="form-check mb-2" id="lastStoppedOption" style="display: none;">
+                                            <input 
+                                                class="form-check-input" 
+                                                type="radio" 
+                                                name="startPointType" 
+                                                id="lastStopped"
+                                                value="lastStopped"
+                                            >
+                                            <label class="form-check-label" for="lastStopped">
+                                                <i class="fas fa-history me-2 text-success"></i><strong>Continue from last stopped</strong>
+                                                <div class="small text-muted mt-1" id="lastCheckpointInfo">
+                                                    Resume transfer from where it was last interrupted
+                                                </div>
+                                            </label>
+                                        </div>
+
+                                        <!-- Custom date & time option -->
+                                        <div class="form-check mb-3">
+                                            <input 
+                                                class="form-check-input" 
+                                                type="radio" 
+                                                name="startPointType"
+                                                id="customDateTime"
+                                                value="customDateTime"
+                                                checked
+                                            >
+                                            <label class="form-check-label" for="customDateTime">
+                                                <i class="fas fa-calendar-plus me-2 text-warning"></i><strong>Start from specific date & time</strong> - Begin transfer from a custom point in time
+                                            </label>
+                                        </div>
+
+                                        <!-- No checkpoint available message -->
+                                        <div id="noCheckpointMessage" class="alert alert-info">
+                                            <i class="fas fa-info-circle me-2"></i>
+                                            <strong>No previous transfer found.</strong> Please select a start date and time for your first transfer.
+                                        </div>
+
+                                        <!-- Custom Date Time Selection -->
+                                        <div id="customDateTimeSelection" class="mt-3" style="display: none;">
+                                            <div class="p-3 bg-light rounded">
+                                                <h6 class="fw-bold mb-3">Select Start Date & Time</h6>
+                                                
+                                                <div class="row">
+                                                    <div class="col-md-6 mb-3">
+                                                        <label class="form-label">Start Date</label>
+                                                        <input type="date" class="form-control" id="startDate">
+                                                    </div>
+                                                    <div class="col-md-6 mb-3">
+                                                        <label class="form-label">Start Time</label>
+                                                        <input type="time" class="form-control" id="startTime">
+                                                    </div>
+                                                </div>
+
+                                                <div class="alert alert-info mb-0">
+                                                    <i class="fas fa-info-circle me-2"></i>
+                                                    <strong>Note:</strong> Files created or modified after this date and time will be transferred.
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+
+                        <!-- Global Save Button -->
+                        <div class="mt-4 pt-3 border-top">
+                            <div class="d-grid">
+                                <button type="button" class="btn btn-primary" id="saveAllConfiguration">
+                                    <i class="fas fa-save me-2"></i>Save Configuration
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Transfer Status Card -->
+            <div class="col-lg-6 mb-4">
+                <div class="card">
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-exchange-alt me-2"></i>Transfer Status
+                                </h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Connection Status -->
+                        <div class="p-3 bg-success bg-opacity-10 rounded mb-4 d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-check-circle text-success me-2"></i>
+                                <span id="connectionStatusText">Connected to FTP Server</span>
+                            </div>
+                            <span class="status-badge connected" id="connectionStatusBadge">Connected</span>
+                        </div>
+
+                        <!-- Configuration Summary -->
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-6">
+                                <div class="p-3 bg-info bg-opacity-10 rounded">
+                                    <h6 class="fw-bold mb-2">
+                                        <i class="fas fa-cog me-2"></i>Transfer Configuration
+                                    </h6>
+                                    <div class="small text-muted mb-1">Schedule Type:</div>
+                                    <div class="fw-medium mb-2" id="scheduleTypeDisplay">Scheduled Transfer - Weekly</div>
+                                    <div class="small text-muted mb-1">Data Type:</div>
+                                    <div class="fw-medium" id="dataTypeDisplay">Both Images & Videos</div>
+                                    <div class="small text-muted mt-2" id="scheduleDetailsDisplay">
+                                        <i class="fas fa-calendar me-1"></i>Monday at 9:00 AM
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="p-3 bg-warning bg-opacity-10 rounded">
+                                    <h6 class="fw-bold mb-2">
+                                        <i class="fas fa-server me-2"></i>Destination
+                                    </h6>
+                                    <div class="small text-muted mb-1">Protocol:</div>
+                                    <div class="fw-medium mb-2" id="protocolDisplay">FTP</div>
+                                    <div class="small text-muted mb-1">Server:</div>
+                                    <div class="fw-medium mb-2" id="serverDisplay">Not configured</div>
+                                    <div class="small text-muted mb-1">Directory:</div>
+                                    <div class="fw-medium" id="directoryDisplay">Not set</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Transfer Statistics -->
+                        <div class="row g-3 mb-4">
+                            <div class="col-md-4">
+                                <div class="stat-box">
+                                    <div class="stat-label">Files Pending</div>
+                                    <div class="stat-value">245</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="stat-box">
+                                    <div class="stat-label">Files Transferred</div>
+                                    <div class="stat-value">1,234</div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="stat-box">
+                                    <div class="stat-label">Transfer Speed</div>
+                                    <div class="stat-value">2.5 MB/s</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Current Transfer -->
+                        <div class="p-3 bg-light rounded mb-4">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <div class="text-muted">Current Transfer</div>
+                                <span class="status-badge in-progress" id="transferStatus">In Progress</span>
+                            </div>
+                            <div class="mb-3">
+                                <i class="fas fa-file me-2"></i>
+                                <span id="current-transfer-file">image_file.jpg</span>
+                            </div>
+                            <div class="progress transfer-progress mb-2">
+                                <div class="progress-bar" style="width: 45%"></div>
+                            </div>
+                            <div class="d-flex justify-content-between text-muted small">
+                                <span class="progress-text">45% Complete</span>
+                                <span class="transfer-speed">2.5 MB/s</span>
+                                <span id="transfer-eta">ETA: 2 min</span>
+                            </div>
+                            <div class="mt-2 small text-muted">
+                                Last updated: <span id="lastUpdateTime">--:--</span>
+                            </div>
+                        </div>
+
+                        <!-- Start Transfer Button -->
+                        <button class="btn btn-primary w-100" id="transferControlBtn">
+                            <i class="fas fa-play me-2"></i>Start Transfer
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+{% endblock %}
+
+{% block script %}
+    <script>
+        $('.ftp-transfer').addClass('active');
+
+        // WebSocket connection for real-time metrics updates
+        let ws = null;
+        
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(protocol + '//' + window.location.host);
+            
+            ws.onopen = function() {
+                console.log('WebSocket connected for FTP metrics');
+            };
+            
+            ws.onmessage = function(event) {
+                try {
+                    const message = JSON.parse(event.data);
+                    handleWebSocketMessage(message);
+                } catch (error) {
+                    console.error('Error parsing WebSocket message:', error);
+                }
+            };
+            
+            ws.onclose = function() {
+                console.log('WebSocket disconnected, attempting to reconnect...');
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+        
+        function handleWebSocketMessage(message) {
+            const event = message.event;
+            const data = message.data;
+
+            
+            if (event === 'ftpImageMetricsUpdate') {
+                console.log(data);
+                updateImageMetrics(data);
+            } else if (event === 'ftpVideoMetricsUpdate') {
+                console.log(data);
+                updateVideoMetrics(data);
+            } else if (event === 'ftpCombinedMetricsUpdate') {
+                console.log(data);
+                updateCombinedMetrics(data);
+            } else if (event === 'ftpMetricsUpdate') {
+                console.log(data);
+                updateGeneralMetrics(data);
+            }
+        }
+        
+        function updateImageMetrics(data) {
+            console.log('Updating image metrics:', data);
+            
+            // Update image-specific metrics
+            if (data.filesPending !== undefined) {
+                var pendingElement = $('.stat-box').eq(0).find('.stat-value');
+                console.log('Updating files pending:', data.filesPending, 'Element found:', pendingElement.length);
+                pendingElement.text(data.filesPending);
+            }
+            if (data.filesTransferred !== undefined) {
+                var transferredElement = $('.stat-box').eq(1).find('.stat-value');
+                console.log('Updating files transferred:', data.filesTransferred, 'Element found:', transferredElement.length);
+                transferredElement.text(data.filesTransferred.toLocaleString());
+            }
+            if (data.transferSpeed !== undefined) {
+                var speedElement = $('.stat-box').eq(2).find('.stat-value');
+                var speedText = data.transferSpeed > 0 ? data.transferSpeed.toFixed(2) + ' files/s' : '0 files/s';
+                console.log('Updating transfer speed:', speedText, 'Element found:', speedElement.length);
+                speedElement.text(speedText);
+            }
+            
+            // Update connection status for images
+            updateConnectionStatus(data.connectionStatus, data.serverHost);
+        }
+        
+        function updateVideoMetrics(data) {
+            console.log('Updating video metrics:', data);
+            
+            // Update current transfer file info
+            if (data.currentTransferFile && data.currentTransferFile.name) {
+                var fileName = data.currentTransferFile.name;
+                console.log('Updating current transfer file:', fileName);
+                $('#current-transfer-file').text(fileName);
+                
+                // Update transfer status
+                $('#transferStatus').removeClass('in-progress').addClass('in-progress').text('Transferring');
+            } else {
+                $('#current-transfer-file').text('No active transfer');
+                $('#transferStatus').removeClass('in-progress').text('Idle');
+            }
+            
+            // Update progress bar
+            if (data.progress !== undefined) {
+                var progressPercent = Math.max(0, Math.min(100, data.progress));
+                console.log('Updating progress:', progressPercent + '%');
+                $('.progress-bar').css('width', progressPercent + '%');
+                $('.progress-text').text(progressPercent + '% Complete');
+            }
+            
+            // Update transfer speed
+            if (data.transferSpeed !== undefined) {
+                var speedText = data.transferSpeed > 0 ? 
+                    (data.transferSpeed).toFixed(2) + ' MB/s' : '0 MB/s';
+                console.log('Updating video transfer speed:', speedText);
+                $('.transfer-speed').text(speedText);
+            }
+            
+            // Update ETA
+            if (data.eta) {
+                console.log('Updating ETA:', data.eta);
+                $('#transfer-eta').text('ETA: ' + data.eta);
+            } else {
+                $('#transfer-eta').text('ETA: --');
+            }
+            
+            // Update video queue stats (don't override image stats, just log for now)
+            console.log('Video queue info - In Queue:', data.videosInQueue, 'Transferred:', data.videosTransferred);
+            
+            // Update connection status for videos
+            updateConnectionStatus(data.connectionStatus, data.serverHost);
+        }
+        
+        function updateCombinedMetrics(data) {
+            console.log('Updating combined metrics:', data);
+            
+            // Update combined statistics if available
+            if (data.totalFilesPending !== undefined) {
+                $('.stat-box').eq(0).find('.stat-value').text(data.totalFilesPending);
+            }
+            if (data.totalFilesTransferred !== undefined) {
+                $('.stat-box').eq(1).find('.stat-value').text(data.totalFilesTransferred.toLocaleString());
+            }
+            if (data.averageTransferSpeed !== undefined) {
+                var speedText = data.averageTransferSpeed > 0 ? 
+                    data.averageTransferSpeed.toFixed(2) + ' MB/s' : '0 MB/s';
+                $('.stat-box').eq(2).find('.stat-value').text(speedText);
+            }
+            
+            // Update overall connection status
+            updateConnectionStatus(data.overallStatus);
+        }
+        
+        function updateConnectionStatus(status, serverHost) {
+            console.log('Updating connection status:', status, 'Server:', serverHost);
+            
+            var isConnected = status === 'connected';
+            var statusElement = $('#connectionStatusBadge');
+            var statusText = $('#connectionStatusText');
+            var statusContainer = statusElement.closest('.p-3');
+            
+            if (isConnected) {
+                statusElement.removeClass('disconnected').addClass('connected').text('Connected');
+                statusText.text('Connected to FTP Server');
+                statusContainer.removeClass('bg-danger bg-opacity-10').addClass('bg-success bg-opacity-10');
+                statusContainer.find('i').removeClass('fa-times-circle text-danger').addClass('fa-check-circle text-success');
+            } else {
+                statusElement.removeClass('connected').addClass('disconnected').text('Disconnected');
+                statusText.text('FTP Server Disconnected');
+                statusContainer.removeClass('bg-success bg-opacity-10').addClass('bg-danger bg-opacity-10');
+                statusContainer.find('i').removeClass('fa-check-circle text-success').addClass('fa-times-circle text-danger');
+            }
+            
+            // Update server display if provided
+            if (serverHost && serverHost !== 'N/A') {
+                $('#serverDisplay').text(serverHost);
+            }
+        }
+        
+        function updateGeneralMetrics(message) {
+            var data = message.data;
+            
+            console.log('Updating general metrics from channel:', message.channel);
+            
+            // Update last update timestamp
+            if (data.timestamp) {
+                var updateTime = new Date(data.timestamp).toLocaleTimeString();
+                $('#lastUpdateTime').text(updateTime);
+            }
+            
+            // Update server info if available
+            if (data.serverHost && data.serverHost !== 'N/A') {
+                $('#serverDisplay').text(data.serverHost);
+            }
+            
+            // Route to specific update function based on data type
+            if (data.type === 'image') {
+                updateImageMetrics(data);
+            } else if (data.type === 'video') {
+                updateVideoMetrics(data);
+            }
+        }
+        
+        // Initialize stats on page load
+        function initializeStats() {
+            console.log('Initializing FTP transfer stats display');
+            
+            // Set initial values
+            $('.stat-box').eq(0).find('.stat-value').text('0'); // Pending
+            $('.stat-box').eq(1).find('.stat-value').text('0'); // Transferred  
+            $('.stat-box').eq(2).find('.stat-value').text('0 files/s'); // Speed
+            
+            $('#current-transfer-file').text('No active transfer');
+            $('#transferStatus').text('Idle');
+            $('.progress-bar').css('width', '0%');
+            $('.progress-text').text('0% Complete');
+            $('#transfer-eta').text('ETA: --');
+            $('#lastUpdateTime').text('Never');
+            
+            console.log('Stats initialized');
+        }
+
+        // FTP Transfer Configuration JavaScript
+        $(document).ready(function() {
+            // Initialize stats display
+            initializeStats();
+            
+            // Initialize WebSocket connection
+            connectWebSocket();
+            // Handle schedule type changes
+            $('input[name="scheduleType"]').change(function() {
+                if ($(this).val() === 'scheduled') {
+                    $('#scheduleConfiguration').show();
+                } else {
+                    $('#scheduleConfiguration').hide();
+                }
+                // Update transfer configuration display when schedule type changes
+                updateTransferConfigDisplay();
+            });
+
+            // Handle schedule frequency changes
+            $('input[name="scheduleFrequency"]').change(function() {
+                if ($(this).val() === 'weekly') {
+                    $('#daySelection').show();
+                } else {
+                    $('#daySelection').hide();
+                }
+                // Update transfer configuration display when schedule frequency changes
+                updateTransferConfigDisplay();
+            });
+
+            // Handle start point type changes
+            $('input[name="startPointType"]').change(function() {
+                if ($(this).val() === 'customDateTime') {
+                    $('#customDateTimeSelection').show();
+                } else {
+                    $('#customDateTimeSelection').hide();
+                }
+                // Update transfer configuration display when start point changes
+                updateTransferConfigDisplay();
+            });
+
+            // Password toggle functionality
+            $('.password-toggle').click(function() {
+                const passwordInput = $(this).siblings('input[type="password"], input[type="text"]');
+                const icon = $(this).find('i');
+                
+                if (passwordInput.attr('type') === 'password') {
+                    passwordInput.attr('type', 'text');
+                    icon.removeClass('fa-eye').addClass('fa-eye-slash');
+                } else {
+                    passwordInput.attr('type', 'password');
+                    icon.removeClass('fa-eye-slash').addClass('fa-eye');
+                }
+            });
+
+
+
+            // Save Configuration functionality
+            $('#saveAllConfiguration').click(function() {
+                // Collect FTP server configuration
+                const serverConfig = {
+                    protocol: $('#protocolSelect').val(),
+                    host: $('input[placeholder="Enter server host"]').val(),
+                    port: parseInt($('input[placeholder="21"]').val()) || 21,
+                    remoteDirectory: $('input[placeholder="/path/to/directory"]').val(),
+                    username: $('input[placeholder="Enter username"]').val(),
+                    password: $('input[type="password"]').val()
+                };
+
+                // Collect transfer schedule configuration
+                const scheduleConfig = {
+                    scheduleType: $('input[name="scheduleType"]:checked').val(),
+                    scheduleFrequency: $('input[name="scheduleFrequency"]:checked').val(),
+                    dayOfWeek: $('#dayOfWeek').val(),
+                    transferTime: $('#transferTime').val(),
+                    dataType: $('input[name="dataType"]:checked').val(),
+                    startPoint: {
+                        type: $('input[name="startPointType"]:checked').val(),
+                        customDateTime: $('input[name="startPointType"]:checked').val() === 'customDateTime' 
+                            ? $('#startDate').val() + 'T' + $('#startTime').val() + ':00'
+                            : null
+                    }
+                };
+
+                // Combined configuration for API
+                const configUpdate = {
+                    server: serverConfig,
+                    transferSchedule: scheduleConfig
+                };
+
+                // Show loading state
+                $(this).html('<i class="fas fa-spinner fa-spin me-2"></i>Saving...');
+                $(this).prop('disabled', true);
+
+                // Save configuration via API
+                $.ajax({
+                    url: '/api/ftp-transfer/config',
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(configUpdate),
+                    success: function(response) {
+                        if (response.success) {
+                            $('#saveAllConfiguration').html('<i class="fas fa-check me-2"></i>Configuration Saved');
+                            $('#saveAllConfiguration').removeClass('btn-primary').addClass('btn-success');
+                            
+                            // Update displays with new configuration
+                            updateTransferConfigDisplay();
+                            updateDestinationDisplay();
+                            
+                            // Show success message
+                            if (typeof toastr !== 'undefined') {
+                                toastr.success('FTP configuration saved successfully!');
+                            }
+                            
+                            setTimeout(() => {
+                                $('#saveAllConfiguration').html('<i class="fas fa-save me-2"></i>Save Configuration');
+                                $('#saveAllConfiguration').removeClass('btn-success').addClass('btn-primary');
+                                $('#saveAllConfiguration').prop('disabled', false);
+                            }, 2000);
+                        } else {
+                            throw new Error(response.error || 'Failed to save configuration');
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('Failed to save FTP configuration:', error);
+                        $('#saveAllConfiguration').html('<i class="fas fa-exclamation-triangle me-2"></i>Save Failed');
+                        $('#saveAllConfiguration').removeClass('btn-primary').addClass('btn-danger');
+                        
+                        if (typeof toastr !== 'undefined') {
+                            toastr.error('Failed to save FTP configuration: ' + error);
+                        }
+                        
+                        setTimeout(() => {
+                            $('#saveAllConfiguration').html('<i class="fas fa-save me-2"></i>Save Configuration');
+                            $('#saveAllConfiguration').removeClass('btn-danger').addClass('btn-primary');
+                            $('#saveAllConfiguration').prop('disabled', false);
+                        }, 3000);
+                    }
+                });
+            });
+
+            // Function to initialize schedule configuration visibility
+            function initializeScheduleVisibility() {
+                // Handle schedule type visibility
+                if ($('input[name="scheduleType"]:checked').val() === 'continuous') {
+                    $('#scheduleConfiguration').hide();
+                } else {
+                    $('#scheduleConfiguration').show();
+                }
+
+                // Handle day selection visibility  
+                if ($('input[name="scheduleFrequency"]:checked').val() !== 'weekly') {
+                    $('#daySelection').hide();
+                } else {
+                    $('#daySelection').show();
+                }
+
+                // Handle start point custom date time visibility
+                if ($('input[name="startPointType"]:checked').val() === 'customDateTime') {
+                    $('#customDateTimeSelection').show();
+                } else {
+                    $('#customDateTimeSelection').hide();
+                }
+            }
+
+            // Function to handle checkpoint availability
+            function handleCheckpointAvailability(checkpointData) {
+                if (checkpointData && checkpointData.exists) {
+                    // Checkpoint exists - show continue option
+                    $('#lastStoppedOption').show();
+                    $('#noCheckpointMessage').hide();
+                    
+                    // Update checkpoint info
+                    if (checkpointData.stoppedAt) {
+                        const stoppedDate = new Date(checkpointData.stoppedAt);
+                        const formattedDate = stoppedDate.toLocaleDateString();
+                        const formattedTime = stoppedDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                        $('#lastCheckpointInfo').html(`
+                            Last stopped: ${formattedDate} at ${formattedTime}<br>
+                            ${checkpointData.lastProcessedFile ? `Last file: ${checkpointData.lastProcessedFile}` : 'Resume from where it left off'}
+                        `);
+                    }
+                    
+                    // Set last stopped as default if available
+                    $('#lastStopped').prop('checked', true);
+                    $('#customDateTime').prop('checked', false);
+                } else {
+                    // No checkpoint - hide continue option and force custom date/time
+                    $('#lastStoppedOption').hide();
+                    $('#noCheckpointMessage').show();
+                    
+                    // Force custom date/time selection
+                    $('#customDateTime').prop('checked', true);
+                    $('#customDateTimeSelection').show();
+                    
+                    // Set default date/time to today
+                    if (!$('#startDate').val()) {
+                        const today = new Date();
+                        const todayString = today.toISOString().split('T')[0];
+                        $('#startDate').val(todayString);
+                    }
+                    if (!$('#startTime').val()) {
+                        $('#startTime').val('09:00');
+                    }
+                }
+            }
+
+            // Initialize schedule configuration visibility on page load
+            initializeScheduleVisibility();
+
+            // Function to update transfer configuration display
+            function updateTransferConfigDisplay() {
+                const scheduleType = $('input[name="scheduleType"]:checked').val();
+                const scheduleFrequency = $('input[name="scheduleFrequency"]:checked').val();
+                const dayOfWeek = $('#dayOfWeek').val();
+                const transferTime = $('#transferTime').val();
+                const dataType = $('input[name="dataType"]:checked').val();
+                const startPointType = $('input[name="startPointType"]:checked').val();
+
+                // Update schedule type display
+                let scheduleText = '';
+                let scheduleDetails = '';
+                if (scheduleType === 'continuous') {
+                    scheduleText = 'Continuous Loop';
+                    scheduleDetails = '<i class="fas fa-infinity me-1"></i>Transfer when USB connected';
+                } else {
+                    if (scheduleFrequency === 'weekly') {
+                        scheduleText = 'Scheduled Transfer - Weekly';
+                        const timeFormatted = convertTo12Hour(transferTime);
+                        const dayCapitalized = dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1);
+                        scheduleDetails = `<i class="fas fa-calendar me-1"></i>${dayCapitalized} at ${timeFormatted}`;
+                    } else {
+                        scheduleText = 'Scheduled Transfer - Hourly';
+                        const timeFormatted = convertTo12Hour(transferTime);
+                        scheduleDetails = `<i class="fas fa-clock me-1"></i>Daily at ${timeFormatted}`;
+                    }
+                }
+
+                // Add start point information to schedule details
+                if (startPointType === 'customDateTime') {
+                    const startDate = $('#startDate').val();
+                    const startTime = $('#startTime').val();
+                    if (startDate && startTime) {
+                        const formattedDate = new Date(startDate + 'T' + startTime).toLocaleDateString();
+                        const formattedTime = convertTo12Hour(startTime);
+                        scheduleDetails += `<br><i class="fas fa-play me-1"></i>Start from: ${formattedDate} at ${formattedTime}`;
+                    } else {
+                        scheduleDetails += `<br><i class="fas fa-calendar-plus me-1"></i>Start from: Custom date/time (not set)`;
+                    }
+                } else if (startPointType === 'lastStopped') {
+                    scheduleDetails += `<br><i class="fas fa-history me-1"></i>Continue from last checkpoint`;
+                } else {
+                    scheduleDetails += `<br><i class="fas fa-calendar-plus me-1"></i>Custom date/time required`;
+                }
+
+                $('#scheduleTypeDisplay').text(scheduleText);
+                $('#scheduleDetailsDisplay').html(scheduleDetails);
+
+                // Update data type display
+                let dataTypeText = '';
+                switch(dataType) {
+                    case 'images':
+                        dataTypeText = 'Images Only (.jpg, .jpeg)';
+                        break;
+                    case 'videos':
+                        dataTypeText = 'Videos Only (.mp4)';
+                        break;
+                    case 'both':
+                    default:
+                        dataTypeText = 'Both Images & Videos';
+                        break;
+                }
+                $('#dataTypeDisplay').text(dataTypeText);
+            }
+
+            // Function to update destination display
+            function updateDestinationDisplay() {
+                const protocol = $('#protocolSelect').val();
+                const host = $('input[placeholder="Enter server host"]').val();
+                const port = $('input[placeholder="21"]').val();
+                const directory = $('input[placeholder="/path/to/directory"]').val();
+
+                // Update protocol
+                const protocolText = protocol ? protocol.toUpperCase() : 'FTP';
+                $('#protocolDisplay').text(protocolText);
+
+                // Update connection status text
+                $('#connectionStatusText').text(`Connected to ${protocolText} Server`);
+
+                // Update server display
+                if (host) {
+                    const serverText = port && port !== '21' ? `${host}:${port}` : host;
+                    $('#serverDisplay').text(serverText);
+                } else {
+                    $('#serverDisplay').text('Not configured');
+                }
+
+                // Update directory display
+                $('#directoryDisplay').text(directory || 'Not set');
+            }
+
+            // Helper function to convert 24-hour time to 12-hour format
+            function convertTo12Hour(time24) {
+                if (!time24) return '';
+                const [hours, minutes] = time24.split(':');
+                const hour = parseInt(hours, 10);
+                const ampm = hour >= 12 ? 'PM' : 'AM';
+                const hour12 = hour % 12 || 12;
+                return `${hour12}:${minutes} ${ampm}`;
+            }
+
+            // Add event listeners to update displays when configuration changes
+            $('input[name="scheduleType"], input[name="scheduleFrequency"], input[name="dataType"], input[name="startPointType"]').on('change', updateTransferConfigDisplay);
+            $('#dayOfWeek, #transferTime, #startDate, #startTime').on('change', updateTransferConfigDisplay);
+            
+            $('#protocolSelect, input[placeholder="Enter server host"], input[placeholder="21"], input[placeholder="/path/to/directory"]').on('input change', updateDestinationDisplay);
+
+            // Load FTP configuration from API
+            function loadFtpConfiguration() {
+                $.ajax({
+                    url: '/api/ftp-transfer/config',
+                    method: 'GET',
+                    success: function(response) {
+                        if (response.success && response.config) {
+                            const config = response.config;
+                            
+                            // Apply server configuration
+                            if (config.server) {
+                                const server = config.server;
+                                
+                                // Set protocol
+                                if (server.protocol) {
+                                    $('#protocolSelect').val(server.protocol);
+                                }
+                                
+                                // Set server details
+                                if (server.host) {
+                                    $('input[placeholder="Enter server host"]').val(server.host);
+                                }
+                                if (server.port) {
+                                    $('input[placeholder="21"]').val(server.port);
+                                }
+                                if (server.remoteDirectory) {
+                                    $('input[placeholder="/path/to/directory"]').val(server.remoteDirectory);
+                                }
+                                if (server.username) {
+                                    $('input[placeholder="Enter username"]').val(server.username);
+                                }
+                                if (server.password) {
+                                    $('input[type="password"]').val(server.password);
+                                }
+                            }
+                            
+                            // Apply transfer schedule settings
+                            if (config.transferSchedule) {
+                                const schedule = config.transferSchedule;
+                                
+                                // Set schedule type
+                                if (schedule.scheduleType) {
+                                    $(`input[name="scheduleType"][value="${schedule.scheduleType}"]`).prop('checked', true);
+                                    // Manually handle visibility based on loaded configuration
+                                    if (schedule.scheduleType === 'continuous') {
+                                        $('#scheduleConfiguration').hide();
+                                    } else {
+                                        $('#scheduleConfiguration').show();
+                                    }
+                                    $('input[name="scheduleType"]').trigger('change');
+                                }
+                                
+                                // Set schedule frequency
+                                if (schedule.scheduleFrequency) {
+                                    $(`input[name="scheduleFrequency"][value="${schedule.scheduleFrequency}"]`).prop('checked', true);
+                                    // Manually handle day selection visibility based on loaded configuration
+                                    if (schedule.scheduleFrequency === 'weekly') {
+                                        $('#daySelection').show();
+                                    } else {
+                                        $('#daySelection').hide();
+                                    }
+                                    $('input[name="scheduleFrequency"]').trigger('change');
+                                }
+                                
+                                // Set day of week
+                                if (schedule.dayOfWeek) {
+                                    $('#dayOfWeek').val(schedule.dayOfWeek);
+                                }
+                                
+                                // Set transfer time
+                                if (schedule.transferTime) {
+                                    $('#transferTime').val(schedule.transferTime);
+                                }
+                                
+                                // Set data type
+                                if (schedule.dataType) {
+                                    $(`input[name="dataType"][value="${schedule.dataType}"]`).prop('checked', true);
+                                }
+
+                                // Set start point configuration
+                                if (schedule.startPoint) {
+                                    const startPoint = schedule.startPoint;
+                                    
+                                    // Set start point type
+                                    if (startPoint.type) {
+                                        $(`input[name="startPointType"][value="${startPoint.type}"]`).prop('checked', true);
+                                        
+                                        // Show/hide custom date time selection
+                                        if (startPoint.type === 'customDateTime') {
+                                            $('#customDateTimeSelection').show();
+                                            
+                                            // Set custom date and time if available
+                                            if (startPoint.customDateTime) {
+                                                const dateTime = new Date(startPoint.customDateTime);
+                                                const date = dateTime.toISOString().split('T')[0];
+                                                const time = dateTime.toTimeString().slice(0, 5);
+                                                $('#startDate').val(date);
+                                                $('#startTime').val(time);
+                                            }
+                                        } else {
+                                            $('#customDateTimeSelection').hide();
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Update displays after loading configuration
+                            updateTransferConfigDisplay();
+                            updateDestinationDisplay();
+                            
+                            // Initialize schedule visibility after configuration is loaded
+                            initializeScheduleVisibility();
+                            
+                            // Update transfer status if available
+                            if (config.transfer) {
+                                updateTransferStatus(config.transfer);
+                                
+                                // Handle checkpoint availability
+                                if (config.transfer.lastTransferCheckpoint) {
+                                    handleCheckpointAvailability(config.transfer.lastTransferCheckpoint);
+                                } else {
+                                    // No checkpoint data - force custom date/time
+                                    handleCheckpointAvailability(null);
+                                }
+                            } else {
+                                // No transfer data - force custom date/time
+                                handleCheckpointAvailability(null);
+                            }
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error('Failed to load FTP configuration:', error);
+                        if (typeof toastr !== 'undefined') {
+                            toastr.warning('Failed to load FTP configuration, using defaults');
+                        }
+                    }
+                });
+            }
+            
+            // Function to update transfer status display
+            function updateTransferStatus(transferData) {
+                if (transferData.startTransfer) {
+                    $('#transferControlBtn').removeClass('btn-primary').addClass('btn-danger');
+                    $('#transferControlBtn').html('<i class="fas fa-stop me-2"></i>Stop Transfer');
+                } else {
+                    $('#transferControlBtn').removeClass('btn-danger').addClass('btn-primary');
+                    $('#transferControlBtn').html('<i class="fas fa-play me-2"></i>Start Transfer');
+                }
+                
+                // Update statistics if provided
+                if (transferData.statistics) {
+                    $('.stat-box').eq(0).find('.stat-value').text(transferData.statistics.filesPending);
+                    $('.stat-box').eq(1).find('.stat-value').text(transferData.statistics.filesTransferred);
+                    $('.stat-box').eq(2).find('.stat-value').text(transferData.statistics.transferSpeed + ' MB/s');
+                }
+            }
+
+            // Transfer control button functionality
+            $('#transferControlBtn').click(function() {
+                const isStartButton = $(this).hasClass('btn-primary');
+                const endpoint = isStartButton ? '/api/ftp-transfer/start' : '/api/ftp-transfer/stop';
+                const action = isStartButton ? 'Starting' : 'Stopping';
+                
+                // Show loading state
+                $(this).html(`<i class="fas fa-spinner fa-spin me-2"></i>${action}...`);
+                $(this).prop('disabled', true);
+
+                $.ajax({
+                    url: endpoint,
+                    method: 'POST',
+                    success: function(response) {
+                        if (response.success) {
+                            if (response.startTransfer) {
+                                $('#transferControlBtn').removeClass('btn-primary').addClass('btn-danger');
+                                $('#transferControlBtn').html('<i class="fas fa-stop me-2"></i>Stop Transfer');
+                            } else {
+                                $('#transferControlBtn').removeClass('btn-danger').addClass('btn-primary');
+                                $('#transferControlBtn').html('<i class="fas fa-play me-2"></i>Start Transfer');
+                            }
+                            
+                            if (typeof toastr !== 'undefined') {
+                                toastr.success(response.message);
+                            }
+                        } else {
+                            throw new Error(response.error || `Failed to ${action.toLowerCase()} transfer`);
+                        }
+                    },
+                    error: function(xhr, status, error) {
+                        console.error(`Failed to ${action.toLowerCase()} transfer:`, error);
+                        
+                        if (typeof toastr !== 'undefined') {
+                            toastr.error(`Failed to ${action.toLowerCase()} transfer: ` + error);
+                        }
+                        
+                        // Reset button state
+                        if (isStartButton) {
+                            $('#transferControlBtn').html('<i class="fas fa-play me-2"></i>Start Transfer');
+                        } else {
+                            $('#transferControlBtn').html('<i class="fas fa-stop me-2"></i>Stop Transfer');
+                        }
+                    },
+                    complete: function() {
+                        $('#transferControlBtn').prop('disabled', false);
+                    }
+                });
+            });
+
+            // Test Connection button functionality update for API
+            $('.btn-outline-primary').click(function() {
+                if ($(this).text().includes('Test Connection')) {
+                    // Show loading state
+                    const originalText = $(this).html();
+                    $(this).html('<i class="fas fa-spinner fa-spin me-2"></i>Testing...');
+                    $(this).prop('disabled', true);
+
+                    $.ajax({
+                        url: '/api/ftp-transfer/test-connection',
+                        method: 'POST',
+                        success: function(response) {
+                            if (response.success && response.test.success) {
+                                $('.btn-outline-primary').html('<i class="fas fa-check me-2"></i>Connection Successful');
+                                $('.btn-outline-primary').removeClass('btn-outline-primary').addClass('btn-success');
+                                
+                                // Update connection status in display
+                                $('#connectionStatusText').text(`Connected to ${$('#protocolSelect').val().toUpperCase()} Server`);
+                                $('#connectionStatusBadge').text('Connected').removeClass('status-badge').addClass('status-badge connected');
+                                
+                                if (typeof toastr !== 'undefined') {
+                                    toastr.success('FTP connection test successful!');
+                                }
+                            } else {
+                                $('.btn-outline-primary').html('<i class="fas fa-times me-2"></i>Connection Failed');
+                                $('.btn-outline-primary').removeClass('btn-outline-primary').addClass('btn-warning');
+                                
+                                if (typeof toastr !== 'undefined') {
+                                    toastr.warning(response.test.message || 'Connection test failed');
+                                }
+                            }
+                            
+                            setTimeout(() => {
+                                $('.btn-success, .btn-warning').html(originalText);
+                                $('.btn-success, .btn-warning').removeClass('btn-success btn-warning').addClass('btn-outline-primary');
+                                $('.btn-outline-primary').prop('disabled', false);
+                            }, 3000);
+                        },
+                        error: function(xhr, status, error) {
+                            console.error('Connection test failed:', error);
+                            $('.btn-outline-primary').html('<i class="fas fa-exclamation-triangle me-2"></i>Test Failed');
+                            $('.btn-outline-primary').removeClass('btn-outline-primary').addClass('btn-danger');
+                            
+                            if (typeof toastr !== 'undefined') {
+                                toastr.error('Connection test failed: ' + error);
+                            }
+                            
+                            setTimeout(() => {
+                                $('.btn-danger').html(originalText);
+                                $('.btn-danger').removeClass('btn-danger').addClass('btn-outline-primary');
+                                $('.btn-outline-primary').prop('disabled', false);
+                            }, 3000);
+                        }
+                    });
+                }
+            });
+
+            // Load configuration on page load
+            loadFtpConfiguration();
+
+            // Load initial metrics
+            loadInitialMetrics();
+
+            // Initialize displays
+            updateTransferConfigDisplay();
+            updateDestinationDisplay();
+        });
+        
+        function loadInitialMetrics() {
+            console.log('Loading initial FTP metrics...');
+            
+            $.ajax({
+                url: '/api/ftp-transfer/metrics',
+                method: 'GET',
+                success: function(response) {
+                    console.log('Initial metrics response:', response);
+                    
+                    if (response.success && response.metrics) {
+                        if (response.metrics.image) {
+                            console.log('Loading initial image metrics:', response.metrics.image);
+                            updateImageMetrics(response.metrics.image);
+                        }
+                        if (response.metrics.video) {
+                            console.log('Loading initial video metrics:', response.metrics.video);
+                            updateVideoMetrics(response.metrics.video);
+                        }
+                        if (response.metrics.combined) {
+                            console.log('Loading initial combined metrics:', response.metrics.combined);
+                            updateCombinedMetrics(response.metrics.combined);
+                        }
+                    } else {
+                        console.log('No metrics data available in response');
+                    }
+                },
+                error: function(xhr, status, error) {
+                    console.error('Failed to load initial FTP metrics:', error);
+                    console.error('Response:', xhr.responseText);
+                }
+            });
+        }
+    </script>
+{% endblock %}

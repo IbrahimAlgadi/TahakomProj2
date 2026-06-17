@@ -1,0 +1,117 @@
+{% extends './layout/root_layout.njk' %}
+{% block title %} Export File Manager {% endblock %}
+
+{% block content %}
+<!-- Content Header (Page header) -->
+<div class="content-header">
+    <div class="container-fluid">
+        <div class="row mb-2">
+            <div class="col-sm-6">
+                <h1 class="m-0">History</h1>
+            </div><!-- /.col -->
+            <div class="col-sm-6">
+                <ol class="breadcrumb float-sm-right">
+                    <li class="breadcrumb-item">
+                        search history
+                    </li>
+                </ol>
+            </div><!-- /.col -->
+        </div><!-- /.row -->
+    </div><!-- /.container-fluid -->
+</div>
+<!-- /.content-header -->
+
+<!-- Main content -->
+<div class="content" id="">
+
+    <div class="col-md-12">
+        <form id="filterForm">
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-3">
+                        <!-- Start Date -->
+                        <div class="form-group">
+                            <div class="input-group date" id="startDate" data-target-input="nearest">
+                                <input
+                                        type="text"
+                                        id="startDateInput"
+                                        name="startDate"
+                                        class="form-control datetimepicker-input"
+                                        data-target="#startDate"
+                                />
+                                <div
+                                        class="input-group-append"
+                                        data-target="#startDate"
+                                        data-toggle="datetimepicker"
+                                >
+                                    <div class="input-group-text"><i class="fa fa-calendar"></i></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <!-- Start Date -->
+                        <div class="form-group">
+                            <div class="input-group date" id="endDate" data-target-input="nearest">
+                                <input
+                                        type="text"
+                                        name="endDate"
+                                        id="endDateInput"
+                                        class="form-control datetimepicker-input"
+                                        data-target="#endDate"
+                                />
+                                <div
+                                        class="input-group-append"
+                                        data-target="#endDate"
+                                        data-toggle="datetimepicker"
+                                >
+                                    <div class="input-group-text"><i class="fa fa-calendar"></i></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-group">
+                            <input
+                                    type="text"
+                                    name="carPlate"
+                                    class="form-control"
+                                    id="exampleInputEmail1"
+                                    placeholder="Enter Car Plate"
+                            >
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-group">
+                            <button type="submit" class="btn btn-primary">Filter</button>
+                            <button id="exportExcel" type="button" class="btn btn-success">To Excel</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <div class="col-md-12">
+        <div class="card bg-theme">
+
+            <!-- /.card-header -->
+            <div class="card-body">
+
+                <div id="databaseResults"></div>
+
+            </div>
+            <!-- /.card-body -->
+
+        </div>
+        <!-- /.card -->
+    </div>
+
+</div>
+<!-- /.content -->
+{% endblock %}
+
+{% block script %}
+<% script('res_codes.js') -%>
+<% script('history.js') -%>
+{% endblock %}

@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Data Transfer - All Files</title>
+        <link href="/bootstrap.min.css" rel="stylesheet"/>
+        <link href="/fontaweasome/all.min.css" rel="stylesheet"/>
+        <link href="/dataTables.bootstrap5.min.css" rel="stylesheet"/>
+        <link href="/css/main.css" rel="stylesheet"/>
+
+        <style>
+            /* Modal Style */
+            .handle {
+                cursor: move;
+                color: #6c757d;
+            }
+
+            .filename-item,
+            .path-item {
+                cursor: move;
+            }
+
+            .filename-item .card-body,
+            .path-item .card-body {
+                padding: 0.5rem 1rem;
+            }
+
+            .sortable-ghost {
+                opacity: 0.5;
+            }
+
+            .sortable-chosen {
+                background: #f8f9fa;
+            }
+        </style>
+
+        <style>
+            /* Table Styles */
+            .table-container {
+                background: white;
+                border-radius: 0.75rem;
+                box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+                overflow: hidden;
+            }
+
+            .files-table {
+                width: 100%;
+                border-collapse: separate;
+                border-spacing: 0;
+            }
+
+            .files-table td,
+            .files-table th {
+                padding: 0.75rem 1rem;
+                text-align: left;
+                font-size: 0.875rem;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .files-table th {
+                background-color: var(--bg-secondary);
+                color: var(--text-secondary);
+                font-weight: 500;
+            }
+
+            .files-table th {
+                white-space: nowrap;
+                background-color: #f8f9fa;
+            }
+
+            .files-table td {
+                white-space: nowrap;
+            }
+
+            .btn-icon {
+                padding: 0.25rem 0.5rem;
+            }
+
+            .pagination .page-link {
+                padding: 0.25rem 0.5rem;
+                font-size: 0.875rem;
+            }
+
+            .fa-spin {
+                animation: fa-spin 1s infinite linear;
+            }
+
+            @keyframes fa-spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+
+            /* Toast Styles */
+            .toast {
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                z-index: 1050;
+            }
+        </style>
+
+    </head>
+    <body>
+        <!-- Toast Notification -->
+        <div class="toast align-items-center text-white border-0" role="alert" aria-live="assertive" aria-atomic="true" id="notificationToast">
+            <div class="d-flex">
+                <div class="toast-body">
+                    <strong id="toastTitle"></strong>
+                    <span id="toastBody"></span>
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+
+        <!-- Add this button at the top of your layout-container -->
+        <button class="mobile-toggle d-md-none">
+            <i class="fas fa-bars"></i>
+        </button>
+
+        <div class="layout-container">
+            <!-- Sidebar Overlay -->
+            <div class="sidebar-overlay"></div>
+
+            <!-- Sidebar -->
+            <nav class="sidebar">
+                <div class="sidebar-header mt-10 p-3">
+                    <h3 class="text-white">DATA TRANSFER</h3>
+                </div>
+
+                <div class="nav flex-column p-3">
+                    <a href="/dashboard" class="dashboard nav-item">
+                        <i class="fas fa-chart-line me-2"></i>Dashboard
+                    </a>
+                    <a href="/" class="all-files nav-item">
+                        <i class="fas fa-folder me-2"></i>All Files
+                    </a>
+                    <a href="/media-files" class="media-files-dashboard nav-item">
+                        <i class="fas fa-video me-2"></i>Media Archive
+                    </a>
+                    <a href="/process_monitor" class="process_monitor nav-item">
+                        <i class="fas fa-cogs me-2"></i>Process Monitor
+                    </a>
+                    <a href="/devices" class="devices nav-item">
+                        <i class="fas fa-hdd me-2"></i>Devices
+                    </a>
+                    <a href="/auto_transfer" class="auto-transfer nav-item">
+                        <i class="fas fa-sync-alt me-2"></i>Auto Transfer
+                    </a>
+                    <a href="/ftp_transfer" class="ftp-transfer nav-item">
+                        <i class="fas fa-server me-2"></i>FTP Transfer
+                    </a>
+                    <a href="/manual_usb" class="manual-usb nav-item">
+                        <i class="fas fa-usb me-2"></i>Manual USB
+                    </a>
+                </div>
+
+                <div class="sidebar-footer p-3 mt-auto border-top border-white border-opacity-10">
+                    Tahakom Export File Manager
+                </div>
+            </nav>
+
+            <!-- Main Content -->
+            <main class="main-content" role="main">
+                {% block content %} {% endblock %}
+            </main>
+        </div>
+
+        <!-- Scripts -->
+        <script src="/js/jquery.min.js"></script>
+        <script src="/js/bootstrap.bundle.min.js"></script>
+        <script src="/js/Sortable.min.js"></script>
+        <script src="/js/dataTables.min.js"></script>
+        <script src="/js/dataTables.bootstrap5.min.js"></script>
+        <!-- Moment -->
+        <script src="/vendors/moment/moment.min.js"></script>
+        <!-- Menu Control Add this jQuery script -->
+        <script src="js/common/sidebar.js"></script>
+
+        {% block script %}{% endblock %}
+
+    </body>
+</html>

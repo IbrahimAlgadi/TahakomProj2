@@ -1,0 +1,1504 @@
+{% extends './layout/layout.njk' %}
+
+{% block content %}
+
+    <div class="container-fluid">
+
+        <!-- Header Section -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Automatic USB Transfer</h1>
+        </div>
+
+        <!-- Drive Configuration Card -->
+        <div class="row mb-4">
+
+            <div class="col-lg-6 mb-4 mb-lg-0">
+                <div class="card">
+                    <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-hdd me-2"></i>Drive Configuration
+                        </h5>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="transferActiveToggle">
+                            <label class="form-check-label" for="transferActiveToggle">Transfer Toggle Active</label>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <form id="autoTransferForm" onsubmit="return false;">
+                            <!-- Transfer Mode Selection -->
+                            <div class="form-group mb-4">
+                                <label class="form-label">Transfer Device</label>
+                                
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="transferMode" 
+                                        id="specificUSB"
+                                        value="specific"
+                                        checked
+                                    >
+                                    <label class="form-check-label" for="specificUSB">
+                                        <strong>Connected USB</strong> - Transfer to specific USB drive
+                                    </label>
+                                </div>
+
+                                <div class="form-check mb-3">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="transferMode"
+                                        id="anyUSB"
+                                        value="any"
+                                    >
+                                    <label class="form-check-label" for="anyUSB">
+                                        <strong>Transfer to any connected USB</strong> - Automatically transfer to any USB that gets connected
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- USB Drive Selection (for specific USB mode) -->
+                            <div class="form-group mb-4" id="driveSelectionSection">
+                                <label class="form-label">Connected USB Drive</label>
+                                <div class="input-group">
+                                    <select class="form-select" id="driveSelect">
+                                        <option value="">Loading connected drives...</option>
+                                    </select>
+                                    <button class="btn btn-outline-secondary" type="button" id="refreshDrives" title="Refresh drive list">
+                                        <i class="fas fa-sync-alt"></i>
+                                    </button>
+                                </div>
+                                <div class="form-text">Select the specific USB drive for transfer operations</div>
+                                <div id="driveSelectionMessage" class="mt-2"></div>
+                            </div>
+
+                            <!-- Transfer Schedule Selection -->
+                            <div class="form-group mb-4">
+                                <label class="form-label">Transfer Schedule</label>
+                                
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="transferSchedule" 
+                                        id="continuousTransfer"
+                                        value="continuous"
+                                        checked
+                                    >
+                                    <label class="form-check-label" for="continuousTransfer">
+                                        <i class="fas fa-infinity me-2 text-primary"></i><strong>Continuous Loop</strong> - Transfer files immediately when USB is connected
+                                    </label>
+                                </div>
+
+                                <div class="form-check mb-3">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="transferSchedule"
+                                        id="scheduledTransfer"
+                                        value="scheduled"
+                                    >
+                                    <label class="form-check-label" for="scheduledTransfer">
+                                        <i class="fas fa-clock me-2 text-info"></i><strong>Scheduled Transfer</strong> - Transfer files at specific times
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Scheduled Transfer Options (hidden by default) -->
+                            <div class="form-group mb-4" id="scheduleOptionsSection" style="display: none;">
+                                <div class="card">
+                                    <div class="card-body">
+                                        <h6 class="card-title mb-3">Schedule Configuration</h6>
+                                        
+                                        <div class="form-group mb-3">
+                                            <label class="form-label">Schedule Type</label>
+                                            
+                                            <div class="form-check mb-2">
+                                                <input 
+                                                    class="form-check-input" 
+                                                    type="radio" 
+                                                    name="scheduleType" 
+                                                    id="hourlySchedule"
+                                                    value="hourly"
+                                                    checked
+                                                >
+                                                <label class="form-check-label" for="hourlySchedule">
+                                                    <i class="fas fa-hourglass-half me-2"></i><strong>Hourly</strong> - Transfer at specific hour each day
+                                                </label>
+                                            </div>
+
+                                            <div class="form-check mb-3">
+                                                <input 
+                                                    class="form-check-input" 
+                                                    type="radio" 
+                                                    name="scheduleType"
+                                                    id="weeklySchedule"
+                                                    value="weekly"
+                                                >
+                                                <label class="form-check-label" for="weeklySchedule">
+                                                    <i class="fas fa-calendar-week me-2"></i><strong>Weekly</strong> - Transfer on specific day of the week
+                                                </label>
+                                            </div>
+                                        </div>
+
+                                        <!-- Hourly Schedule Options -->
+                                        <div class="form-group mb-3" id="hourlyOptions">
+                                            <label class="form-label">Select Hour</label>
+                                            <select class="form-select" id="scheduleHour">
+                                                <option value="0">12:00 AM (Midnight)</option>
+                                                <option value="1">1:00 AM</option>
+                                                <option value="2">2:00 AM</option>
+                                                <option value="3">3:00 AM</option>
+                                                <option value="4">4:00 AM</option>
+                                                <option value="5">5:00 AM</option>
+                                                <option value="6">6:00 AM</option>
+                                                <option value="7">7:00 AM</option>
+                                                <option value="8">8:00 AM</option>
+                                                <option value="9" selected>9:00 AM</option>
+                                                <option value="10">10:00 AM</option>
+                                                <option value="11">11:00 AM</option>
+                                                <option value="12">12:00 PM (Noon)</option>
+                                                <option value="13">1:00 PM</option>
+                                                <option value="14">2:00 PM</option>
+                                                <option value="15">3:00 PM</option>
+                                                <option value="16">4:00 PM</option>
+                                                <option value="17">5:00 PM</option>
+                                                <option value="18">6:00 PM</option>
+                                                <option value="19">7:00 PM</option>
+                                                <option value="20">8:00 PM</option>
+                                                <option value="21">9:00 PM</option>
+                                                <option value="22">10:00 PM</option>
+                                                <option value="23">11:00 PM</option>
+                                            </select>
+                                            <div class="form-text">Transfer will occur daily at the selected hour</div>
+                                        </div>
+
+                                        <!-- Weekly Schedule Options -->
+                                        <div class="form-group mb-3" id="weeklyOptions" style="display: none;">
+                                            <label class="form-label">Select Day of Week</label>
+                                            <select class="form-select" id="scheduleDayOfWeek">
+                                                <option value="0">Sunday</option>
+                                                <option value="1" selected>Monday</option>
+                                                <option value="2">Tuesday</option>
+                                                <option value="3">Wednesday</option>
+                                                <option value="4">Thursday</option>
+                                                <option value="5">Friday</option>
+                                                <option value="6">Saturday</option>
+                                            </select>
+                                            <div class="form-text">Transfer will occur weekly on the selected day</div>
+                                            
+                                            <label class="form-label mt-3">Select Time</label>
+                                            <select class="form-select" id="scheduleWeeklyHour">
+                                                <option value="0">12:00 AM (Midnight)</option>
+                                                <option value="1">1:00 AM</option>
+                                                <option value="2">2:00 AM</option>
+                                                <option value="3">3:00 AM</option>
+                                                <option value="4">4:00 AM</option>
+                                                <option value="5">5:00 AM</option>
+                                                <option value="6">6:00 AM</option>
+                                                <option value="7">7:00 AM</option>
+                                                <option value="8">8:00 AM</option>
+                                                <option value="9" selected>9:00 AM</option>
+                                                <option value="10">10:00 AM</option>
+                                                <option value="11">11:00 AM</option>
+                                                <option value="12">12:00 PM (Noon)</option>
+                                                <option value="13">1:00 PM</option>
+                                                <option value="14">2:00 PM</option>
+                                                <option value="15">3:00 PM</option>
+                                                <option value="16">4:00 PM</option>
+                                                <option value="17">5:00 PM</option>
+                                                <option value="18">6:00 PM</option>
+                                                <option value="19">7:00 PM</option>
+                                                <option value="20">8:00 PM</option>
+                                                <option value="21">9:00 PM</option>
+                                                <option value="22">10:00 PM</option>
+                                                <option value="23">11:00 PM</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="alert alert-info">
+                                            <i class="fas fa-info-circle me-2"></i>
+                                            <strong>Note:</strong> Scheduled transfers will only execute if the USB drive is connected at the scheduled time.
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Data Type Selection -->
+                            <div class="form-group mb-4">
+                                <label class="form-label">Data to Transfer</label>
+                                
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="dataType" 
+                                        id="imagesOnly"
+                                        value="images"
+                                    >
+                                    <label class="form-check-label" for="imagesOnly">
+                                        <i class="fas fa-image me-2 text-primary"></i><strong>Images Only</strong> - Transfer image files (.jpg, .jpeg)
+                                    </label>
+                                </div>
+
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="dataType"
+                                        id="videosOnly"
+                                        value="videos"
+                                    >
+                                    <label class="form-check-label" for="videosOnly">
+                                        <i class="fas fa-video me-2 text-success"></i><strong>Videos Only</strong> - Transfer video files (.mp4)
+                                    </label>
+                                </div>
+
+                                <div class="form-check mb-3">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="dataType"
+                                        id="bothTypes"
+                                        value="both"
+                                        checked
+                                    >
+                                    <label class="form-check-label" for="bothTypes">
+                                        <i class="fas fa-file-alt me-2 text-info"></i><strong>Both Images & Videos</strong> - Transfer all media files
+                                    </label>
+                                </div>
+                            </div>
+
+                            <!-- Encryption Settings -->
+                            <div class="mb-4">
+                                <label class="form-label">File Encryption</label>
+
+                                <div class="form-check mb-2">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="encryptionType" 
+                                        id="noEncryption"
+                                        checked
+                                    >
+                                    <label class="form-check-label" for="noEncryption">
+                                        Disable encryption
+                                    </label>
+                                </div>
+
+                                <div class="form-check mb-3">
+                                    <input 
+                                        class="form-check-input" 
+                                        type="radio" 
+                                        name="encryptionType"
+                                        id="useEncryption"
+                                    >
+                                    <label class="form-check-label" for="useEncryption">
+                                        Enable encryption
+                                    </label>
+                                </div>
+
+                                <div class="alert alert-info" id="encryptionInfo">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Encryption Settings:</strong> Centrally managed from <a href="/" class="alert-link">All Files page</a>. 
+                                    Current settings will be applied automatically when encryption is enabled.
+                                </div>
+                            </div>
+
+                            <!-- Drive Info Display -->
+                            <div id="driveInfo" class="mb-4 d-none">
+                                <h6 class="mb-3">Drive Information</h6>
+                                <div class="progress mb-2">
+                                    <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+                                </div>
+                                <div class="small text-muted">
+                                    <span id="usedSpace">0 GB</span> used of <span id="totalSpace">0 GB</span>
+                                </div>
+                            </div>
+
+                            <div class="button-group">
+                                <button type="button" class="btn btn-outline-primary" id="testConnection">
+                                    <i class="fas fa-plug me-2"></i>
+                                    Test Connection
+                                </button>
+                                <button type="button" class="btn btn-primary" id="saveConfig" disabled>
+                                    <i class="fas fa-save me-2"></i>
+                                    Save Configuration
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-lg-6">
+
+                <div class="card">
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-chart-pie me-2"></i>
+                            Drive Status
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="text-muted">Storage Usage</span>
+                                <span class="fw-medium">
+                                    <span class="driveSpaceUsed">-</span> / <span class="driveTotalSpace">-</span></span>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar" id="driveUsedSpacePercentage" style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <div class="row g-3 mb-4">
+                            <div class="col-6">
+                                <div class="p-3 bg-light rounded">
+                                    <div class="text-muted small">Available Space</div>
+                                    <div class="fw-bold">
+                                        <span class="driveRemainSpace">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-6">
+                                <div class="p-3 bg-light rounded">
+                                    <div class="text-muted small">Used Space</div>
+                                    <div class="fw-bold">
+                                        <span class="driveSpaceUsed">-</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!--
+                        <button class="btn btn-primary w-100">
+                            <i class="fas fa-play me-2"></i>
+                            Start Transfer
+                        </button>
+                        -->
+                    </div>
+                </div>
+
+                <!-- Transfer Status Card -->
+                <div class="card mt-3">
+
+                    <div class="card-header bg-transparent border-0">
+                        <h5 class="card-title mb-0">
+                            <i class="fas fa-exchange-alt me-2"></i>
+                            Transfer Status
+                        </h5>
+                    </div>
+
+                    <div class="card-body">
+                        <div id="transferStatusDiv" class="p-3 bg-secondary bg-opacity-10 rounded mb-3 d-flex justify-content-between align-items-center">
+                            <div class="d-flex align-items-center">
+                                <span id="driveStatusIcon">
+                                    <i class="fas fa-check-circle text-success me-2"></i>
+                                </span>
+                                Drive
+                            </div>
+                            <span id="connectedDriveStatusText" class="badge bg-secondary">Waiting</span>
+                        </div>
+
+                        <div class="p-3 bg-light rounded mb-3">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <div class="text-muted">Current Transfer</div>
+                                <span id="currentTransferStatus" class="badge bg-secondary">idle</span>
+                            </div>
+                            <div class="text-truncate">
+                                <i class="fas fa-file me-2"></i>
+                                <span id="statusMessages">-</span>
+                            </div>
+                        </div>
+
+                        <!-- Transfer Progress Card -->
+                        <div class="row mb-4" id="transferProgressSection">
+                            <div class="col-12">
+                                <div class="card">
+                                    <div class="card-header bg-transparent border-0">
+                                        <h5 class="card-title mb-0">
+                                            <i class="fas fa-chart-line me-2"></i>
+                                            Real-time Transfer Progress
+                                        </h5>
+                                    </div>
+                                    <div class="card-body">
+                                        <!-- Current Job Info -->
+                                        <div class="mb-3" id="currentJobInfo">
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="text-muted">Current Job</span>
+                                                <span class="badge bg-info" id="currentJobId">-</span>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Image Transfer Progress -->
+                                        <div class="mb-4" id="imageTransferProgress" >
+                                            <h6 class="mb-3">
+                                                <i class="fas fa-image me-2 text-primary"></i>
+                                                Image Transfer Progress
+                                            </h6>
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-medium">Files Processed</span>
+                                                <span class="text-muted">
+                                                    <span id="imageProcessedCount">0</span> / <span id="imageTotalCount">0</span>
+                                                    (<span id="imageProgressPercentage">0</span>%)
+                                                </span>
+                                            </div>
+                                            <div class="progress mb-2" style="height: 8px;">
+                                                <div class="progress-bar bg-primary progress-bar-striped progress-bar-animated" id="imageProgressBar" style="width: 0%"></div>
+                                            </div>
+                                            <div class="row g-2 mb-2">
+                                                <div class="col-md-8">
+                                                    <div class="small text-muted">
+                                                        <i class="fas fa-file me-1"></i>
+                                                        <span id="imageCurrentFile">Ready...</span>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <div class="small text-muted text-md-end">
+                                                        <i class="fas fa-exclamation-triangle me-1 text-warning" id="imageFailedIcon" style="display: none;"></i>
+                                                        Failed: <span id="imageFailedCount">0</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="row g-2 text-center" id="imagePerformanceStats" style="display: none;">
+                                                <div class="col-4">
+                                                    <div class="p-2 bg-light rounded">
+                                                        <div class="text-muted small">Throughput</div>
+                                                        <div class="fw-bold small" id="imageThroughputValue">-</div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-4">
+                                                    <div class="p-2 bg-light rounded">
+                                                        <div class="text-muted small">Duration</div>
+                                                        <div class="fw-bold small" id="imageBatchDuration">-</div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-4">
+                                                    <div class="p-2 bg-light rounded">
+                                                        <div class="text-muted small">Success Rate</div>
+                                                        <div class="fw-bold small" id="imageSuccessRate">-</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Video Transfer Progress -->
+                                        <div class="mb-4" id="videoTransferProgress" >
+                                            <h6 class="mb-3">
+                                                <i class="fas fa-video me-2 text-success"></i>
+                                                Video Transfer Progress
+                                            </h6>
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-medium">Camera Processing</span>
+                                                <span class="text-muted" id="videoCameraStatus">Ready...</span>
+                                            </div>
+                                            <div class="progress mb-2" style="height: 8px;">
+                                                <div class="progress-bar bg-success progress-bar-striped progress-bar-animated" id="videoProgressBar" style="width: 0%"></div>
+                                            </div>
+                                            <div class="small text-muted mb-3">
+                                                <i class="fas fa-video me-1"></i>
+                                                <span id="videoCurrentFile">Ready...</span>
+                                            </div>
+                                            <div class="row g-2" id="videoCameraGrid">
+                                                <!-- Camera progress will be populated here -->
+                                            </div>
+                                        </div>
+                                        
+                                        <!-- Overall Progress Summary -->
+                                        <div class="alert alert-secondary mb-0" id="transferSummary">
+                                            <i class="fas fa-info-circle me-2"></i>
+                                            <span id="transferSummaryText">No active transfers - system ready</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-warning">
+                            <i class="fas fa-exclamation-triangle"></i>
+                                Transfer will stop at 100% capacity
+                            </div>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </div>
+
+        
+
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="notificationToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="toast-header">
+                <i class="fas fa-info-circle me-2"></i>
+                <strong class="me-auto" id="toastTitle">Notification</strong>
+                <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+            <div class="toast-body" id="toastMessage"></div>
+        </div>
+    </div>
+
+{% endblock %}
+
+{% block script %}
+    <script>
+        $('.auto-transfer').addClass('active');
+    </script>
+
+    <script>
+        const AUTO_TRANSFER_SERVICE_URL = 'http://localhost:8454';
+        const AUTO_TRANSFER_WS_URL = 'ws://localhost:8454';
+        let isDriveConnected = false;
+        let isSaveConfigDriveTested = false;
+        let connectedDevices = [];
+        let savedConfig = null;
+        let configLoaded = false;
+        let devicesLoaded = false;
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            const value = (bytes / Math.pow(1024, i)).toFixed(2);
+            return `${value} ${sizes[i]}`;
+        }
+
+        // Toast notification function
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('notificationToast');
+            const toastTitle = document.getElementById('toastTitle');
+            const toastBody = document.getElementById('toastBody');
+
+            // Set toast type
+            toast.className = `toast align-items-center text-white bg-${type} border-0`;
+            
+            // Set toast content
+            toastTitle.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+            toastBody.textContent = message;
+
+            // Show toast
+            const bsToast = new bootstrap.Toast(toast);
+            bsToast.show();
+        }
+
+        function toggleFormControls(isTransferActive) {
+            const form = document.getElementById('autoTransferForm');
+            const formElements = form.querySelectorAll('input:not(#transferActiveToggle), select');
+            
+            // When transfer is active, disable form. When inactive, enable form
+            formElements.forEach(element => {
+                element.disabled = isTransferActive;
+            });
+
+            // Special handling for save and test buttons
+            const saveButton = document.getElementById('saveConfig');
+            const testButton = document.getElementById('testConnection');
+            
+            if (isTransferActive) {
+                // When transfer is active, disable both buttons
+                testButton.disabled = true;
+                saveButton.disabled = true;
+            } else {
+                // When transfer is inactive, enable test button
+                testButton.disabled = false;
+                // Enable save button only if drive is tested or in 'any USB' mode
+                const transferMode = $('input[name="transferMode"]:checked').val();
+                saveButton.disabled = !(transferMode === 'any' || isSaveConfigDriveTested);
+            }
+        }
+
+        function updateDriveStatus(status) {
+            const statusDiv = document.getElementById('transferStatusDiv');
+            const statusIcon = document.getElementById('driveStatusIcon');
+            const statusText = document.getElementById('connectedDriveStatusText');
+            const saveButton = document.getElementById('saveConfig');
+
+            statusDiv.classList.remove('bg-success', 'bg-danger', 'bg-secondary');
+            statusText.classList.remove('bg-success', 'bg-danger', 'bg-secondary');
+
+            if (status === 'DRIVE_NOT_CONNECTED') {
+                isDriveConnected = false;
+                statusDiv.classList.add('bg-danger');
+                statusText.classList.add('bg-danger');
+                statusText.textContent = 'disconnected';
+                statusIcon.innerHTML = '<i class="fas fa-times-circle text-danger me-2"></i>';
+                // saveButton.disabled = true;
+            } else if (status === 'TRANSFER_STOPPED') {
+                isDriveConnected = false;
+                statusDiv.classList.add('bg-secondary');
+                statusText.classList.add('bg-secondary');
+                statusText.textContent = 'stopped';
+                statusIcon.innerHTML = '<i class="fas fa-stop-circle text-secondary me-2"></i>';
+                // saveButton.disabled = true;
+            } else {
+                isDriveConnected = true;
+                isSaveConfigDriveTested = true;
+                statusDiv.classList.add('bg-success');
+                statusText.classList.add('bg-success');
+                statusText.textContent = 'connected';
+                statusIcon.innerHTML = '<i class="fas fa-check-circle text-success me-2"></i>';
+                saveButton.disabled = false;  
+            }
+        }
+
+        function updateTransferStatus(status) {
+            const statusBadge = document.getElementById('currentTransferStatus');
+            const statusMessage = document.getElementById('statusMessages');
+            const saveButton = document.getElementById('saveConfig');
+            
+            statusBadge.classList.remove('bg-success', 'bg-danger', 'bg-warning', 'bg-secondary');
+            
+            switch(status.return_event) {
+                case 'COPY_SUCCESS':
+                    statusBadge.classList.add('bg-success');
+                    statusBadge.textContent = 'Success';
+                    saveButton.disabled = true;
+                    break;
+                case 'COPY_ERROR':
+                    statusBadge.classList.add('bg-danger');
+                    statusBadge.textContent = 'Error';
+                    break;
+                case 'COPY_PAUSE':
+                    statusBadge.classList.add('bg-warning');
+                    statusBadge.textContent = 'Paused';
+                    break;
+                case 'DRIVE_NOT_CONNECTED':
+                    statusBadge.classList.add('bg-danger');
+                    statusBadge.textContent = 'Drive Error';
+                    break;
+                case 'TRANSFER_STOPPED':
+                    statusBadge.classList.add('bg-secondary');
+                    statusBadge.textContent = 'Stopped';
+                    break;
+                default:
+                    statusBadge.classList.add('bg-secondary');
+                    statusBadge.textContent = 'Idle';
+            }
+
+            if (status.msg) {
+                statusMessage.textContent = status.msg.slice(0, 100);
+            }
+        }
+
+        function updateDriveInfo(driveInfo) {
+            if (!driveInfo) return;
+
+            const totalSpace = driveInfo.totalSpace;
+            const usedSpace = driveInfo.usedSpace;
+            const remainingSpace = driveInfo.remainingSpace;
+            const usedPercentage = (usedSpace / totalSpace * 100).toFixed(2);
+
+            $('.driveTotalSpace').html(formatFileSize(totalSpace));
+            $('.driveSpaceUsed').html(formatFileSize(usedSpace));
+            $('.driveRemainSpace').html(formatFileSize(remainingSpace));
+            document.getElementById('driveUsedSpacePercentage').style.width = usedPercentage + '%';
+        }
+
+        function updateConnectedDrives(devices) {
+            connectedDevices = devices || [];
+            const driveSelect = document.getElementById('driveSelect');
+            const driveMessage = document.getElementById('driveSelectionMessage');
+            const currentValue = driveSelect.value;
+            
+            // Clear existing options
+            driveSelect.innerHTML = '';
+            
+            if (connectedDevices.length === 0) {
+                driveSelect.innerHTML = '<option value="">No USB drives connected</option>';
+                driveSelect.disabled = true;
+                driveMessage.innerHTML = '<div class="alert alert-warning mb-0"><i class="fas fa-exclamation-triangle me-2"></i>No external USB drives are currently connected. Please connect a USB drive to continue.</div>';
+            } else {
+                driveSelect.disabled = false;
+                driveMessage.innerHTML = '';
+                
+                // Add default option
+                driveSelect.innerHTML = '<option value="">Select a USB drive</option>';
+                
+                // Add connected drives
+                connectedDevices.forEach(device => {
+                    const option = document.createElement('option');
+                    option.value = device.drive.replace(':', ''); // Remove colon from drive letter
+                    // Convert space values from GB strings to bytes for formatFileSize
+                    const remainingSpaceBytes = parseFloat(device.remainingspace) * 1024 * 1024 * 1024;
+                    option.textContent = `Drive ${device.drive} (${device.label || 'Unnamed'}) - ${formatFileSize(remainingSpaceBytes)} free`;
+                    driveSelect.appendChild(option);
+                });
+                
+                // Add change event listener to drive selection
+                driveSelect.onchange = function() {
+                    if (savedConfig) {
+                        savedConfig.drive = this.value;
+                        evaluateDriveStatus();
+                    }
+                };
+                
+                // Restore previous selection if still available
+                let selectionRestored = false;
+                if (currentValue && Array.from(driveSelect.options).some(opt => opt.value === currentValue)) {
+                    driveSelect.value = currentValue;
+                    selectionRestored = true;
+                } else if (savedConfig && savedConfig.drive && savedConfig.drive !== 'ANY' && Array.from(driveSelect.options).some(opt => opt.value === savedConfig.drive)) {
+                    // Restore saved configuration drive if available
+                    driveSelect.value = savedConfig.drive;
+                    selectionRestored = true;
+                }
+                
+                let successMessage = `<div class="alert alert-success mb-0"><i class="fas fa-check-circle me-2"></i>Found ${connectedDevices.length} connected USB drive(s)`;
+                if (selectionRestored && driveSelect.value) {
+                    const selectedOption = Array.from(driveSelect.options).find(opt => opt.value === driveSelect.value);
+                    if (selectedOption) {
+                        successMessage += ` (Selected: ${selectedOption.textContent})`;
+                    }
+                } else if (savedConfig && savedConfig.drive && savedConfig.drive !== 'ANY' && !Array.from(driveSelect.options).some(opt => opt.value === savedConfig.drive)) {
+                    // Saved drive is not available
+                    successMessage += ` - <span class="text-warning">Previously selected drive "${savedConfig.drive}" is not connected</span>`;
+                }
+                successMessage += '</div>';
+                driveMessage.innerHTML = successMessage;
+            }
+        }
+
+        function evaluateDriveStatus() {
+            if (!configLoaded || !devicesLoaded) return;
+            
+            const transferMode = (savedConfig && savedConfig.transferMode) || 'specific';
+            const configuredDrive = savedConfig && savedConfig.drive;
+            
+            console.log('🔍 Evaluating drive status:', { transferMode, configuredDrive, connectedDevices: connectedDevices.length });
+            
+            if (transferMode === 'any' || configuredDrive === 'ANY') {
+                // For "any USB" mode, check if any drives are connected
+                if (connectedDevices.length > 0) {
+                    updateDriveStatus('CONNECTED');
+                    updateTransferStatus({
+                        return_event: 'COPY_SUCCESS',
+                        msg: `Ready for auto-transfer (${connectedDevices.length} drive(s) available)`
+                    });
+                } else {
+                    updateDriveStatus('DRIVE_NOT_CONNECTED');
+                    updateTransferStatus({
+                        return_event: 'DRIVE_NOT_CONNECTED',
+                        msg: 'No USB drives connected'
+                    });
+                }
+            } else if (configuredDrive) {
+                // For specific USB mode, check if the configured drive is connected
+                const isDriveConnected = connectedDevices.some(device => 
+                    device.drive.replace(':', '') === configuredDrive
+                );
+                
+                if (isDriveConnected) {
+                    const connectedDevice = connectedDevices.find(device => 
+                        device.drive.replace(':', '') === configuredDrive
+                    );
+                    updateDriveStatus('CONNECTED');
+                    updateTransferStatus({
+                        return_event: 'COPY_SUCCESS',
+                        msg: `Drive ${configuredDrive}: ready for auto-transfer`
+                    });
+                    if (connectedDevice) {
+                        updateDriveInfo({
+                            totalSpace: parseFloat(connectedDevice.totalspace) * 1024 * 1024 * 1024,
+                            usedSpace: parseFloat(connectedDevice.usedspace) * 1024 * 1024 * 1024,
+                            remainingSpace: parseFloat(connectedDevice.remainingspace) * 1024 * 1024 * 1024,
+                            usedPercentage: connectedDevice.usedpercentage
+                        });
+                    }
+                } else {
+                    updateDriveStatus('DRIVE_NOT_CONNECTED');
+                    updateTransferStatus({
+                        return_event: 'DRIVE_NOT_CONNECTED',
+                        msg: `Configured drive ${configuredDrive}: not connected`
+                    });
+                }
+            } else {
+                // No drive configured yet
+                updateDriveStatus('TRANSFER_STOPPED');
+                updateTransferStatus({
+                    return_event: 'TRANSFER_STOPPED',
+                    msg: 'No USB drive configured'
+                });
+            }
+        }
+
+        function loadConnectedDevices() {
+            fetch(`${AUTO_TRANSFER_SERVICE_URL}/devices`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        updateConnectedDrives(data.devices);
+                        devicesLoaded = true;
+                        evaluateDriveStatus();
+                    } else {
+                        console.error('Failed to load devices:', data.error);
+                        updateConnectedDrives([]);
+                        devicesLoaded = true;
+                        evaluateDriveStatus();
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading devices:', error);
+                    updateConnectedDrives([]);
+                    devicesLoaded = true;
+                    evaluateDriveStatus();
+                });
+        }
+
+        // ===== TRANSFER METRICS FUNCTIONS =====
+        
+        function showTransferProgress() {
+            console.log('DEBUG: showTransferProgress called - progress UI is always visible');
+            // Progress section is always visible now, no need to show/hide
+        }
+        
+        function hideTransferProgress() {
+            console.log('DEBUG: hideTransferProgress called - resetting to idle state');
+            setTimeout(() => {
+                // Instead of hiding, reset to idle state
+                resetProgressToIdle();
+            }, 5000);
+        }
+        
+        function resetProgressToIdle() {
+            console.log('DEBUG: Resetting progress displays to idle state');
+            
+            // Reset image progress to idle
+            const imageProgressSection = document.getElementById('imageTransferProgress');
+            /*
+            if (imageProgressSection) {
+                imageProgressSection.style.display = 'none';
+            }
+            
+            // Reset video progress to idle
+            const videoProgressSection = document.getElementById('videoTransferProgress');
+            if (videoProgressSection) {
+                videoProgressSection.style.display = 'none';
+            }
+            */
+            
+            // Reset job info to idle
+            document.getElementById('currentJobId').textContent = '-';
+            
+            // Hide transfer summary or show idle message
+            const transferSummary = document.getElementById('transferSummary');
+            const transferSummaryText = document.getElementById('transferSummaryText');
+            if (transferSummary && transferSummaryText) {
+                transferSummary.style.display = 'block';
+                transferSummary.className = 'alert alert-secondary mb-0';
+                transferSummaryText.textContent = 'No active transfers - system ready';
+            }
+        }
+
+        function updateImageTransferMetrics(metricsData) {
+            console.log('DEBUG: updateImageTransferMetrics called with:', metricsData);
+            
+            // Handle nested data structure: metricsData.data contains the actual metrics
+            const { serviceType, type, data } = metricsData.data || metricsData;
+            const imageProgressSection = document.getElementById('imageTransferProgress');
+            
+            console.log('DEBUG: Extracted - type:', type, 'data:', data);
+            
+            if (type === 'batch_start') {
+                console.log('DEBUG: Processing batch_start for images');
+                showTransferProgress();
+                imageProgressSection.style.display = 'block';
+                
+                // Safety checks for elements
+                const currentJobIdElement = document.getElementById('currentJobId');
+                const imageTotalCountElement = document.getElementById('imageTotalCount');
+                
+                if (!currentJobIdElement) {
+                    console.error('DEBUG: currentJobId element not found!');
+                    return;
+                }
+                if (!imageTotalCountElement) {
+                    console.error('DEBUG: imageTotalCount element not found!');
+                    return;
+                }
+                
+                currentJobIdElement.textContent = data.jobId;
+                imageTotalCountElement.textContent = data.totalFiles;
+                document.getElementById('imageProcessedCount').textContent = '0';
+                document.getElementById('imageProgressPercentage').textContent = '0';
+                document.getElementById('imageProgressBar').style.width = '0%';
+                document.getElementById('imageCurrentFile').textContent = 'Starting batch...';
+                document.getElementById('imageFailedCount').textContent = '0';
+                document.getElementById('imageFailedIcon').style.display = 'none';
+                document.getElementById('imagePerformanceStats').style.display = 'flex';
+                
+                // Update transfer summary
+                const transferSummary = document.getElementById('transferSummary');
+                transferSummary.className = 'alert alert-info mb-0';
+                document.getElementById('transferSummaryText').textContent = `Processing ${data.totalFiles} image files...`;
+            } 
+            else if (type === 'batch_progress') {
+                document.getElementById('imageProcessedCount').textContent = data.processedCount;
+                document.getElementById('imageProgressPercentage').textContent = data.progressPercentage;
+                document.getElementById('imageProgressBar').style.width = data.progressPercentage + '%';
+                document.getElementById('imageCurrentFile').textContent = `Processing: ${data.currentFile}`;
+                document.getElementById('imageFailedCount').textContent = data.failedCount;
+                document.getElementById('transferSummaryText').textContent = `Processing ${data.processedCount}/${data.totalFiles} images (${data.progressPercentage}%)`;
+                
+                if (data.failedCount > 0) {
+                    document.getElementById('imageFailedIcon').style.display = 'inline';
+                }
+                
+                if (data.hasError) {
+                    document.getElementById('imageCurrentFile').textContent = `Error: ${data.lastError}`;
+                    document.getElementById('imageCurrentFile').className = 'small text-danger';
+                } else {
+                    document.getElementById('imageCurrentFile').className = 'small text-muted';
+                }
+
+                if (data.throughput) {
+                    document.getElementById('imageThroughputValue').textContent = `${data.throughput.toFixed(1)} files/sec`;
+                }
+            }
+            else if (type === 'batch_complete') {
+                document.getElementById('imageProgressBar').style.width = '100%';
+                document.getElementById('imageCurrentFile').textContent = `Completed: ${data.processedCount} files`;
+                document.getElementById('imageThroughputValue').textContent = `${data.throughput} files/sec`;
+                document.getElementById('imageBatchDuration').textContent = `${data.duration}ms`;
+                document.getElementById('imageSuccessRate').textContent = `${data.successRate}%`;
+                
+                // Update transfer summary to success
+                const transferSummary = document.getElementById('transferSummary');
+                transferSummary.className = 'alert alert-success mb-0';
+                document.getElementById('transferSummaryText').textContent = `Image transfer completed: ${data.processedCount}/${data.totalFiles} files (${data.successRate}% success rate)`;
+                
+                // Reset to idle state if no video processing
+                if (document.getElementById('videoTransferProgress').style.display === 'none') {
+                    hideTransferProgress();
+                }
+            }
+        }
+
+        function updateVideoTransferMetrics(metricsData) {
+            console.log('DEBUG: updateVideoTransferMetrics called with:', metricsData);
+            
+            // Handle nested data structure: metricsData.data contains the actual metrics
+            const { serviceType, type, data } = metricsData.data || metricsData;
+            const videoProgressSection = document.getElementById('videoTransferProgress');
+            const videoCameraGrid = document.getElementById('videoCameraGrid');
+            
+            console.log('DEBUG: Extracted - type:', type, 'data:', data);
+            
+            if (type === 'job_start') {
+                showTransferProgress();
+                videoProgressSection.style.display = 'block';
+                document.getElementById('currentJobId').textContent = data.jobId;
+                document.getElementById('videoCameraStatus').textContent = `Processing ${data.totalCameras} cameras`;
+                document.getElementById('videoCurrentFile').textContent = 'Initializing video processing...';
+                
+                // Update transfer summary
+                const transferSummary = document.getElementById('transferSummary');
+                transferSummary.className = 'alert alert-info mb-0';
+                document.getElementById('transferSummaryText').textContent = `Processing videos for ${data.totalCameras} cameras...`;
+                
+                // Initialize camera grid
+                videoCameraGrid.innerHTML = '';
+                for (let i = 1; i <= data.totalCameras; i++) {
+                    videoCameraGrid.innerHTML += `
+                        <div class="col-md-6">
+                            <div class="p-2 bg-light rounded">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="small fw-medium">Camera ${i}</span>
+                                    <span class="badge bg-secondary" id="camera${i}Status">Waiting</span>
+                                </div>
+                                <div class="progress mt-1" style="height: 4px;">
+                                    <div class="progress-bar bg-success" id="camera${i}Progress" style="width: 0%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+            else if (type === 'camera_progress') {
+                const cameraStatus = document.getElementById(`camera${data.cameraId}Status`);
+                const cameraProgress = document.getElementById(`camera${data.cameraId}Progress`);
+                
+                if (cameraStatus && cameraProgress) {
+                    cameraStatus.textContent = `${data.convertedGroupedCount}/${data.targetCount}`;
+                    cameraStatus.className = `badge ${data.progressPercentage >= 100 ? 'bg-success' : 'bg-info'}`;
+                    cameraProgress.style.width = data.progressPercentage + '%';
+                }
+                
+                document.getElementById('videoCameraStatus').textContent = `Camera ${data.cameraId}: ${data.convertedGroupedCount}/${data.targetCount} files`;
+                document.getElementById('videoCurrentFile').textContent = `Processing camera ${data.cameraId}...`;
+            }
+            else if (type === 'video_created') {
+                document.getElementById('videoCameraStatus').textContent = `Camera ${data.cameraId}: Video created`;
+                document.getElementById('videoCurrentFile').textContent = `Created: ${data.videoName}`;
+                
+                const cameraStatus = document.getElementById(`camera${data.cameraId}Status`);
+                if (cameraStatus) {
+                    cameraStatus.textContent = 'Video Created';
+                    cameraStatus.className = 'badge bg-primary';
+                }
+            }
+            else if (type === 'transfer_start') {
+                document.getElementById('videoCameraStatus').textContent = `Camera ${data.cameraId}: Transferring`;
+                document.getElementById('videoCurrentFile').textContent = `Transferring: ${data.fileName}`;
+                document.getElementById('videoProgressBar').style.width = '50%';
+                
+                const cameraStatus = document.getElementById(`camera${data.cameraId}Status`);
+                if (cameraStatus) {
+                    cameraStatus.textContent = 'Transferring';
+                    cameraStatus.className = 'badge bg-warning';
+                }
+            }
+            else if (type === 'transfer_complete') {
+                if (data.success) {
+                    document.getElementById('videoCameraStatus').textContent = `Camera ${data.cameraId}: Complete`;
+                    document.getElementById('videoCurrentFile').textContent = `Completed: ${data.fileName}`;
+                    document.getElementById('videoProgressBar').style.width = '100%';
+                    
+                    const cameraStatus = document.getElementById(`camera${data.cameraId}Status`);
+                    if (cameraStatus) {
+                        cameraStatus.textContent = 'Complete';
+                        cameraStatus.className = 'badge bg-success';
+                    }
+                } else {
+                    document.getElementById('videoCameraStatus').textContent = `Camera ${data.cameraId}: Error`;
+                    document.getElementById('videoCurrentFile').textContent = `Error: ${data.error}`;
+                    
+                    const cameraStatus = document.getElementById(`camera${data.cameraId}Status`);
+                    if (cameraStatus) {
+                        cameraStatus.textContent = 'Error';
+                        cameraStatus.className = 'badge bg-danger';
+                    }
+                }
+                
+                // Check if all cameras are complete
+                const allCameraStatuses = videoCameraGrid.querySelectorAll('[id$="Status"]');
+                const completedCameras = Array.from(allCameraStatuses).filter(status => 
+                    status.textContent === 'Complete' || status.textContent === 'Error'
+                );
+                
+                if (completedCameras.length === allCameraStatuses.length) {
+                    // Update transfer summary to success
+                    const transferSummary = document.getElementById('transferSummary');
+                    transferSummary.className = 'alert alert-success mb-0';
+                    document.getElementById('transferSummaryText').textContent = 'Video processing completed for all cameras';
+                    hideTransferProgress();
+                }
+            }
+        }
+
+        function updateTransferProgress(progressData) {
+            // Handle general transfer progress updates if needed
+            console.log('General transfer progress:', progressData);
+        }
+
+        function connectWebsocket() {
+            socket = new WebSocket(AUTO_TRANSFER_WS_URL);
+
+            socket.addEventListener('open', (event) => {
+                console.log('WebSocket connection opened:', event);
+                socket.send(JSON.stringify({action: 'subscribe', event: 'realtimeDashboard'}));
+                socket.send(JSON.stringify({action: 'subscribe', event: 'devices'}));
+                socket.send(JSON.stringify({action: 'subscribe', event: 'transferMetrics'}));
+            });
+
+            socket.addEventListener('message', (event) => {
+                let data = JSON.parse(event.data);
+                
+                if (data.event === "handleAutoTransfer") {
+                    const response = JSON.parse(data.data.response);
+                    console.log('Auto transfer response:', response);
+
+                    if (response.result) {
+                        updateTransferStatus(response.result);
+                        updateDriveStatus(response.result.return_event);
+                        
+                        if (response.result.data && response.result.data.driveInfo) {
+                            updateDriveInfo(response.result.data.driveInfo);
+                        }
+                    }
+
+                    if (data.data.error) {
+                        showToast(data.data.error, 'error');
+                    }
+                } else if (data.event === "devices") {
+                    console.log('Connected devices updated:', data.devices);
+                    updateConnectedDrives(data.devices);
+                    evaluateDriveStatus();
+                } else if (data.event === "imageTransferMetrics") {
+                    console.log('Image transfer metrics:', data);
+                    updateImageTransferMetrics(data);
+                } else if (data.event === "videoTransferMetrics") {
+                    console.log('Video transfer metrics:', data);
+                    updateVideoTransferMetrics(data);
+                } else if (data.event === "transferProgress") {
+                    console.log('Transfer progress:', data);
+                    updateTransferProgress(data);
+                }
+            });
+
+            socket.addEventListener('close', (event) => {
+                console.log('WebSocket connection closed:', event);
+                setTimeout(connectWebsocket, 5000);
+            });
+
+            socket.addEventListener('error', (error) => {
+                console.error('WebSocket error:', error);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            
+            // Load connected devices on page load
+            loadConnectedDevices();
+            
+            // Refresh drives button handler
+            document.getElementById('refreshDrives').addEventListener('click', function() {
+                const button = this;
+                const icon = button.querySelector('i');
+                
+                // Add spinning animation
+                icon.classList.add('fa-spin');
+                button.disabled = true;
+                
+                loadConnectedDevices();
+                
+                // Remove spinning animation after a short delay
+                setTimeout(() => {
+                    icon.classList.remove('fa-spin');
+                    button.disabled = false;
+                }, 1000);
+            });
+            
+            // Transfer mode change handler
+            $('input[name="transferMode"]').on('change', function() {
+                const isSpecificMode = $(this).val() === 'specific';
+                $('#driveSelectionSection').toggle(isSpecificMode);
+                
+                if (!isSpecificMode) {
+                    // Clear drive selection when switching to "any USB" mode
+                    $('#driveSelect').val('');
+                }
+                
+                // Update drive status when transfer mode changes
+                if (savedConfig) {
+                    savedConfig.transferMode = $(this).val();
+                    evaluateDriveStatus();
+                }
+            });
+
+            // Transfer schedule change handler
+            $('input[name="transferSchedule"]').on('change', function() {
+                const isScheduled = $(this).val() === 'scheduled';
+                $('#scheduleOptionsSection').toggle(isScheduled);
+            });
+
+            // Schedule type change handler
+            $('input[name="scheduleType"]').on('change', function() {
+                const scheduleType = $(this).val();
+                $('#hourlyOptions').toggle(scheduleType === 'hourly');
+                $('#weeklyOptions').toggle(scheduleType === 'weekly');
+            });
+            
+            // Enable save button when any form input changes
+            $('#autoTransferForm input, #autoTransferForm select').on('change', function() {
+                const saveButton = document.getElementById('saveConfig');
+                
+                // Only enable if drive is tested or we're in 'any USB' mode
+                const transferMode = $('input[name="transferMode"]:checked').val();
+                if (transferMode === 'any' || isSaveConfigDriveTested) {
+                    saveButton.disabled = false;
+                }
+            });
+            
+            function applyConfiguration(config) {
+                console.log('DEBUG: applyConfiguration called with:', config);
+                if (!config) {
+                    console.log('DEBUG: No config provided to applyConfiguration');
+                    return;
+                }
+                
+                savedConfig = config; // Store config for later use
+                
+                // Set transfer mode and drive
+                if (config.transferMode === 'any' || config.drive === 'ANY') {
+                    document.getElementById('anyUSB').checked = true;
+                    $('#driveSelectionSection').hide();
+                } else {
+                    document.getElementById('specificUSB').checked = true;
+                    $('#driveSelectionSection').show();
+                    // Set drive selection if drives are already loaded, otherwise it will be set in updateConnectedDrives
+                    const driveSelect = document.getElementById('driveSelect');
+                    if (driveSelect.options.length > 1 && config.drive) { // More than just the default option
+                        driveSelect.value = config.drive;
+                    }
+                }
+                
+                // Set data type selection
+                const dataType = config.dataType || 'both';
+                if (dataType === 'images') {
+                    document.getElementById('imagesOnly').checked = true;
+                } else if (dataType === 'videos') {
+                    document.getElementById('videosOnly').checked = true;
+                } else {
+                    document.getElementById('bothTypes').checked = true;
+                }
+                
+                // Set encryption settings
+                const useEncryption = (config.encryption && config.encryption.enabled) || false;
+                document.getElementById(useEncryption ? 'useEncryption' : 'noEncryption').checked = true;
+                
+                // Set transfer schedule settings
+                const scheduleType = (config.schedule && config.schedule.type) || 'continuous';
+                document.getElementById(scheduleType === 'continuous' ? 'continuousTransfer' : 'scheduledTransfer').checked = true;
+                $('#scheduleOptionsSection').toggle(scheduleType !== 'continuous');
+                
+                if (scheduleType !== 'continuous' && config.schedule) {
+                    const scheduleMode = config.schedule.mode || 'hourly';
+                    document.getElementById(scheduleMode === 'hourly' ? 'hourlySchedule' : 'weeklySchedule').checked = true;
+                    $('#hourlyOptions').toggle(scheduleMode === 'hourly');
+                    $('#weeklyOptions').toggle(scheduleMode === 'weekly');
+                    
+                    if (scheduleMode === 'hourly' && config.schedule.hour !== undefined) {
+                        document.getElementById('scheduleHour').value = config.schedule.hour;
+                    }
+                    
+                    if (scheduleMode === 'weekly') {
+                        if (config.schedule.dayOfWeek !== undefined) {
+                            document.getElementById('scheduleDayOfWeek').value = config.schedule.dayOfWeek;
+                        }
+                        if (config.schedule.hour !== undefined) {
+                            document.getElementById('scheduleWeeklyHour').value = config.schedule.hour;
+                        }
+                    }
+                }
+                
+                // Set transfer active status and toggle form
+                const isActive = config.isActive || false;
+                document.getElementById('transferActiveToggle').checked = isActive;
+                toggleFormControls(isActive);
+            }
+
+            // Load initial configuration
+            console.log('DEBUG: Loading configuration from:', `${AUTO_TRANSFER_SERVICE_URL}/auto-transfer/config`);
+            fetch(`${AUTO_TRANSFER_SERVICE_URL}/auto-transfer/config`)
+                .then(response => {
+                    console.log('DEBUG: Config response status:', response.status);
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('DEBUG: Config response data:', data);
+                    if (data.success && data.config) {
+                        console.log('DEBUG: Applying configuration:', data.config);
+                        applyConfiguration(data.config);
+                    } else {
+                        console.log('DEBUG: No valid config found in response');
+                    }
+                    configLoaded = true;
+                    evaluateDriveStatus();
+                })
+                .catch(error => {
+                    console.error('Error loading config:', error);
+                    showToast('Failed to load configuration', 'error');
+                    configLoaded = true;
+                    evaluateDriveStatus();
+                });
+
+            
+            // Test drive connection
+            document.getElementById('testConnection').addEventListener('click', async function() {
+                const transferMode = $('input[name="transferMode"]:checked').val();
+                
+                if (transferMode === 'any') {
+                    if (connectedDevices.length === 0) {
+                        showToast('No USB drives are currently connected. Please connect a USB drive first.', 'warning');
+                    } else {
+                        showToast(`Test connection: Found ${connectedDevices.length} connected USB drive(s). System will automatically use any connected drive for transfers.`, 'success');
+                        updateDriveStatus('CONNECTED');
+                    }
+                    return;
+                }
+                
+                const drive = document.getElementById('driveSelect').value;
+                if (!drive) {
+                    if (connectedDevices.length === 0) {
+                        showToast('No USB drives are connected. Please connect a USB drive first.', 'warning');
+                    } else {
+                        showToast('Please select a drive from the list', 'error');
+                    }
+                    return;
+                }
+
+                try {
+                    const response = await fetch(`${AUTO_TRANSFER_SERVICE_URL}/auto-transfer/test-drive`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ drive })
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showToast(data.message, 'success');
+                        if (data.driveInfo) {
+                            updateDriveInfo(data.driveInfo);
+                            updateDriveStatus('CONNECTED');
+                        }
+                    } else {
+                        showToast(data.error, 'error');
+                        updateDriveStatus('DRIVE_NOT_CONNECTED');
+                    }
+                } catch (error) {
+                    console.error('Error testing drive:', error);
+                    showToast('Failed to test drive connection', 'error');
+                    updateDriveStatus('DRIVE_NOT_CONNECTED');
+                }
+            });
+
+            // Save configuration
+            document.getElementById('saveConfig').addEventListener('click', async function() {
+                // Check if drive is connected before saving
+                console.log(isDriveConnected, isSaveConfigDriveTested);
+                /*
+                if (!isDriveConnected || !isSaveConfigDriveTested) {
+                    showToast('Please test drive connection first', 'error');
+                    return;
+                }
+                */
+
+                const transferMode = $('input[name="transferMode"]:checked').val();
+                const dataType = $('input[name="dataType"]:checked').val();
+                const scheduleType = $('input[name="transferSchedule"]:checked').val();
+                
+                const config = {
+                    transferMode: transferMode,
+                    drive: transferMode === 'any' ? 'ANY' : document.getElementById('driveSelect').value,
+                    dataType: dataType,
+                    encryption: {
+                        enabled: document.getElementById('useEncryption').checked
+                    },
+                    schedule: {
+                        type: scheduleType
+                    },
+                    isActive: document.getElementById('transferActiveToggle').checked
+                };
+
+                // Add schedule configuration if scheduled transfer is selected
+                if (scheduleType === 'scheduled') {
+                    const scheduleMode = $('input[name="scheduleType"]:checked').val();
+                    config.schedule.mode = scheduleMode;
+                    
+                    if (scheduleMode === 'hourly') {
+                        config.schedule.hour = parseInt(document.getElementById('scheduleHour').value);
+                    } else if (scheduleMode === 'weekly') {
+                        config.schedule.dayOfWeek = parseInt(document.getElementById('scheduleDayOfWeek').value);
+                        config.schedule.hour = parseInt(document.getElementById('scheduleWeeklyHour').value);
+                    }
+                }
+
+                try {
+                    const response = await fetch(`${AUTO_TRANSFER_SERVICE_URL}/auto-transfer/save-config`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(config)
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showToast('Configuration saved successfully', 'success');
+                        // Update saved config and apply it to maintain consistency
+                        savedConfig = config;
+                        applyConfiguration(config);
+                        evaluateDriveStatus(); // Update drive status immediately after saving
+                    } else {
+                        showToast(data.error || 'Failed to save configuration', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error saving config:', error);
+                    showToast('Failed to save configuration', 'error');
+                }
+            });
+
+            // Toggle transfer status
+            const transferToggle = document.getElementById('transferActiveToggle');
+            transferToggle.addEventListener('change', async function() {
+                const isActive = this.checked;
+                
+                // Get current schedule configuration when toggling
+                const scheduleType = $('input[name="transferSchedule"]:checked').val();
+                const toggleData = { isActive };
+                
+                if (scheduleType === 'scheduled') {
+                    const scheduleMode = $('input[name="scheduleType"]:checked').val();
+                    toggleData.schedule = {
+                        type: scheduleType,
+                        mode: scheduleMode
+                    };
+                    
+                    if (scheduleMode === 'hourly') {
+                        toggleData.schedule.hour = parseInt(document.getElementById('scheduleHour').value);
+                    } else if (scheduleMode === 'weekly') {
+                        toggleData.schedule.dayOfWeek = parseInt(document.getElementById('scheduleDayOfWeek').value);
+                        toggleData.schedule.hour = parseInt(document.getElementById('scheduleWeeklyHour').value);
+                    }
+                } else {
+                    toggleData.schedule = { type: 'continuous' };
+                }
+                
+                try {
+                    const response = await fetch(`${AUTO_TRANSFER_SERVICE_URL}/auto-transfer/toggle`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(toggleData)
+                    });
+
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showToast(`Auto transfer ${isActive ? 'activated' : 'deactivated'}`, 'success');
+                        updateDriveStatus(isActive ? 'CONNECTED' : 'TRANSFER_STOPPED');
+                        updateTransferStatus({
+                            return_event: isActive ? 'COPY_SUCCESS' : 'TRANSFER_STOPPED',
+                            msg: isActive ? 'Auto transfer activated' : 'Auto transfer deactivated'
+                        });
+                        toggleFormControls(isActive);
+                    } else {
+                        this.checked = !isActive;  // Revert the toggle
+                        showToast(data.error || 'Failed to toggle auto transfer', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error toggling transfer:', error);
+                    this.checked = !isActive;  // Revert the toggle
+                    showToast('Failed to toggle auto transfer', 'error');
+                }
+            });
+
+            // Initialize progress card to idle state
+            resetProgressToIdle();
+            
+            // Connect WebSocket
+            connectWebsocket();
+            
+            // DEBUG: Test the functions after page load
+            setTimeout(() => {
+                console.log('DEBUG: Testing transfer progress functions...');
+                
+                // Test if functions exist
+                console.log('DEBUG: updateImageTransferMetrics exists:', typeof updateImageTransferMetrics);
+                console.log('DEBUG: resetProgressToIdle exists:', typeof resetProgressToIdle);
+                
+                // Progress card is always visible and initialized to idle state
+                console.log('DEBUG: Progress card is always visible and ready');
+            }, 2000);
+        });
+    </script>
+{% endblock %}

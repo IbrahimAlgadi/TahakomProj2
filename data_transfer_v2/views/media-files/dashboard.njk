@@ -1,0 +1,633 @@
+{% extends '../layout/layout.njk' %}
+
+{% block content %}
+
+    <div class="container">
+        <!-- Header Section -->
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>Media Files Dashboard</h1>
+            <div class="text-secondary">
+                Real-time Media Archive Monitoring
+            </div>
+        </div>
+
+        <!-- Overview Cards -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-3">
+                <div class="card bg-primary text-white">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div>
+                                <h5 class="card-title mb-0">Total Files</h5>
+                                <h2 class="mb-0" id="totalFiles">Loading...</h2>
+                                <small class="opacity-75">Active files in archive</small>
+                            </div>
+                            <div class="ms-auto">
+                                <i class="fas fa-file-video fa-2x opacity-75"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="card bg-success text-white">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div>
+                                <h5 class="card-title mb-0">Total Storage</h5>
+                                <h2 class="mb-0" id="totalStorage">Loading...</h2>
+                                <small class="opacity-75">Total archive size</small>
+                            </div>
+                            <div class="ms-auto">
+                                <i class="fas fa-hdd fa-2x opacity-75"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="card bg-info text-white">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div>
+                                <h5 class="card-title mb-0">Active Cameras</h5>
+                                <h2 class="mb-0" id="activeCameras">Loading...</h2>
+                                <small class="opacity-75">Recording cameras</small>
+                            </div>
+                            <div class="ms-auto">
+                                <i class="fas fa-video fa-2x opacity-75"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-3">
+                <div class="card bg-warning text-white">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center">
+                            <div>
+                                <h5 class="card-title mb-0">Retention Period</h5>
+                                <h2 class="mb-0" id="retentionDays">7 Days</h2>
+                                <small class="opacity-75">Archive retention</small>
+                            </div>
+                            <div class="ms-auto">
+                                <i class="fas fa-calendar-alt fa-2x opacity-75"></i>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Real-time Monitoring Status -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Real-time Monitoring Status</h5>
+                <div class="badge bg-success" id="monitoringStatus">Active</div>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="metric-value" id="todayProcessed">0</div>
+                            <div class="metric-label">Files Processed Today</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="metric-value" id="historicalScanned">0</div>
+                            <div class="metric-label">Historical Files Scanned</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="metric-value" id="queueSize">0</div>
+                            <div class="metric-label">Real-time Queue Size</div>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="text-center">
+                            <div class="metric-value" id="lastProcessed">-</div>
+                            <div class="metric-label">Last File Processed</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Camera Statistics -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">Camera Archive Statistics</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>Camera ID</th>
+                                <th>Total Files</th>
+                                <th>Storage Size</th>
+                                <th>Active Files</th>
+                                <th>Oldest Recording</th>
+                                <th>Latest Recording</th>
+                                <th>Last Indexed</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="cameraStatsTable">
+                            <tr>
+                                <td colspan="8" class="text-center">Loading camera statistics...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Storage Trends -->
+        <div class="row g-4 mb-4">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Daily Storage Growth</h5>
+                        <small class="text-muted">Archive size and file count trends</small>
+                    </div>
+                    <div class="card-body">
+                        <div id="dailyGrowthChart" style="height: 300px;">
+                            <div class="text-center text-muted py-5">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <div class="mt-2">Loading chart data...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">Hourly File Activity</h5>
+                        <small class="text-muted">Files processed by hour</small>
+                    </div>
+                    <div class="card-body">
+                        <div id="hourlyActivityChart" style="height: 300px;">
+                            <div class="text-center text-muted py-5">
+                                <div class="spinner-border" role="status">
+                                    <span class="visually-hidden">Loading...</span>
+                                </div>
+                                <div class="mt-2">Loading chart data...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Retention Management -->
+        <div class="card mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">Retention Management</h5>
+                <small class="text-secondary">Files beyond retention period</small>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <div class="metric-item">
+                            <div class="metric-label">Files Beyond Retention</div>
+                            <div class="metric-value" id="filesBeyondRetention">0</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="metric-item">
+                            <div class="metric-label">Storage to Clean</div>
+                            <div class="metric-value" id="storageBeyondRetention">0 GB</div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="metric-item">
+                            <div class="metric-label">Cutoff Date</div>
+                            <div class="metric-value" id="retentionCutoffDate">-</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="progress mt-3">
+                    <div id="retentionProgress" class="progress-bar bg-warning" role="progressbar" style="width: 0%"></div>
+                </div>
+                <div class="text-secondary small mt-1">
+                    Files within retention period vs files needing cleanup
+                </div>
+            </div>
+        </div>
+
+        <!-- System Information -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">System Configuration</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <div class="info-group">
+                            <strong>Media Directory:</strong>
+                            <div class="text-secondary" id="mediaDirectory">Loading...</div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="info-group">
+                            <strong>Expected Files per Camera/Day:</strong>
+                            <div class="text-secondary" id="expectedFilesPerDay">42,000 files</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+{% endblock %}
+
+{% block script %}
+    <script src="/vendors/echarts/echarts.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('.media-files-dashboard').addClass('active');
+
+            // Auto-refresh data every 30 seconds
+            let refreshInterval;
+
+            // Load initial data
+            loadMediaFilesData();
+            loadMonitoringStatus();
+            loadSystemInfo();
+
+            // Set up auto-refresh
+            refreshInterval = setInterval(() => {
+                loadMediaFilesData();
+                loadMonitoringStatus();
+            }, 30000);
+
+            // Load media files statistics
+            async function loadMediaFilesData() {
+                try {
+                    const response = await fetch('/api/media-files/stats');
+                    const result = await response.json();
+
+                    if (result.success) {
+                        const data = result.data;
+                        
+                        // Update overview cards
+                        $('#totalFiles').text(parseInt(data.overall.active_files).toLocaleString());
+                        $('#totalStorage').text(formatBytes(parseInt(data.overall.total_size)));
+                        $('#activeCameras').text(data.overall.total_cameras);
+                        $('#retentionDays').text(data.retention.retentionDays + ' Days');
+
+                        // Update retention info
+                        $('#filesBeyondRetention').text(parseInt(data.retention.files_beyond_retention || 0).toLocaleString());
+                        $('#storageBeyondRetention').text(formatBytes(parseInt(data.retention.size_beyond_retention || 0)));
+                        $('#retentionCutoffDate').text(formatDate(data.retention.cutoffDate));
+
+                        // Calculate retention progress
+                        const totalFiles = parseInt(data.overall.active_files);
+                        const filesToClean = parseInt(data.retention.files_beyond_retention || 0);
+                        const retentionPercentage = totalFiles > 0 ? ((totalFiles - filesToClean) / totalFiles * 100) : 100;
+                        $('#retentionProgress').css('width', retentionPercentage + '%');
+
+                        // Update camera statistics table
+                        updateCameraTable(data.cameras);
+
+                        // Debug log for chart data
+                        console.log('Daily data for chart:', data.daily);
+                        console.log('Hourly data for chart:', data.hourly);
+
+                        // Update charts
+                        updateDailyGrowthChart(data.daily);
+                        updateHourlyActivityChart(data.hourly);
+
+                    } else {
+                        console.error('Failed to load media files data:', result.error);
+                    }
+                } catch (error) {
+                    console.error('Error loading media files data:', error);
+                }
+            }
+
+            // Load monitoring status
+            async function loadMonitoringStatus() {
+                try {
+                    const response = await fetch('/api/media-files/monitoring-status');
+                    const result = await response.json();
+
+                    if (result.success && result.data) {
+                        const data = result.data;
+                        
+                        $('#todayProcessed').text((data.realTimeMonitoring?.filesProcessedToday || 0).toLocaleString());
+                        $('#historicalScanned').text((data.historicalScan?.totalFilesScanned || 0).toLocaleString());
+                        $('#queueSize').text(data.realTimeQueue?.size || 0);
+                        
+                        const lastProcessed = data.realTimeMonitoring?.lastFileTime;
+                        $('#lastProcessed').text(lastProcessed ? formatDateTime(lastProcessed) : 'None');
+
+                        // Update monitoring status badge
+                        const isActive = data.realTimeMonitoring?.filesProcessedToday > 0 || 
+                                       data.historicalScan?.totalFilesScanned > 0;
+                        $('#monitoringStatus')
+                            .removeClass('bg-success bg-warning bg-danger')
+                            .addClass(isActive ? 'bg-success' : 'bg-warning')
+                            .text(isActive ? 'Active' : 'Idle');
+                    }
+                } catch (error) {
+                    console.error('Error loading monitoring status:', error);
+                    $('#monitoringStatus')
+                        .removeClass('bg-success bg-warning')
+                        .addClass('bg-danger')
+                        .text('Error');
+                }
+            }
+
+            // Load system information
+            async function loadSystemInfo() {
+                try {
+                    const response = await fetch('/api/media-files/filesystem-info');
+                    const result = await response.json();
+
+                    if (result.success) {
+                        const data = result.data;
+                        $('#mediaDirectory').text(data.mediaDirectory);
+                        $('#expectedFilesPerDay').text(data.expectedFilesPerCameraPerDay.toLocaleString() + ' files');
+                    }
+                } catch (error) {
+                    console.error('Error loading system info:', error);
+                }
+            }
+
+            // Update camera statistics table
+            function updateCameraTable(cameras) {
+                const tbody = $('#cameraStatsTable');
+                tbody.empty();
+
+                if (!cameras || cameras.length === 0) {
+                    tbody.append('<tr><td colspan="8" class="text-center">No camera data available</td></tr>');
+                    return;
+                }
+
+                cameras.forEach(camera => {
+                    const statusBadge = camera.active_files > 0 ? 
+                        '<span class="badge bg-success">Active</span>' : 
+                        '<span class="badge bg-secondary">Inactive</span>';
+
+                    const row = `
+                        <tr>
+                            <td><strong>Camera ${camera.camera_id}</strong></td>
+                            <td>${parseInt(camera.file_count).toLocaleString()}</td>
+                            <td>${formatBytes(parseInt(camera.total_size))}</td>
+                            <td>${parseInt(camera.active_files).toLocaleString()}</td>
+                            <td>${formatDate(camera.oldest_file)}</td>
+                            <td>${formatDate(camera.newest_file)}</td>
+                            <td>${formatDateTime(camera.last_indexed)}</td>
+                            <td>${statusBadge}</td>
+                        </tr>
+                    `;
+                    tbody.append(row);
+                });
+            }
+
+            // Update daily growth chart using ECharts
+            function updateDailyGrowthChart(dailyData) {
+                const chartContainer = document.getElementById('dailyGrowthChart');
+                
+                if (!dailyData || dailyData.length === 0) {
+                    chartContainer.innerHTML = '<div class="text-center text-muted py-5"><i class="fas fa-chart-line fa-2x mb-2"></i><br>No data available for chart display</div>';
+                    return;
+                }
+
+                // Sort data by date for proper line chart
+                const sortedData = dailyData.sort((a, b) => new Date(a.recording_date) - new Date(b.recording_date));
+                
+                const dates = sortedData.map(d => d.recording_date);
+                const sizes = sortedData.map(d => (parseInt(d.total_size) / (1024 * 1024 * 1024)).toFixed(2)); // Convert to GB
+                const files = sortedData.map(d => parseInt(d.files_count));
+
+                const chart = echarts.init(chartContainer);
+                
+                const option = {
+                    title: {
+                        text: 'Storage & Files Trend',
+                        textStyle: { fontSize: 14, fontWeight: 'normal' }
+                    },
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'cross' }
+                    },
+                    legend: {
+                        data: ['Storage (GB)', 'Files Count'],
+                        top: 30
+                    },
+                    grid: {
+                        left: '10%',
+                        right: '10%',
+                        bottom: '15%',
+                        top: '20%',
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        data: dates,
+                        axisPointer: { type: 'shadow' }
+                    },
+                    yAxis: [
+                        {
+                            type: 'value',
+                            name: 'Storage (GB)',
+                            position: 'left',
+                            axisLabel: { formatter: '{value} GB' }
+                        },
+                        {
+                            type: 'value',
+                            name: 'Files Count',
+                            position: 'right',
+                            axisLabel: { formatter: '{value}' }
+                        }
+                    ],
+                    series: [
+                        {
+                            name: 'Storage (GB)',
+                            type: 'line',
+                            yAxisIndex: 0,
+                            data: sizes,
+                            smooth: true,
+                            lineStyle: { color: '#007bff', width: 3 },
+                            itemStyle: { color: '#007bff' },
+                            areaStyle: { opacity: 0.1, color: '#007bff' }
+                        },
+                        {
+                            name: 'Files Count',
+                            type: 'line',
+                            yAxisIndex: 1,
+                            data: files,
+                            smooth: true,
+                            lineStyle: { color: '#28a745', width: 3 },
+                            itemStyle: { color: '#28a745' }
+                        }
+                    ]
+                };
+
+                chart.setOption(option);
+                
+                // Make chart responsive
+                window.addEventListener('resize', function() {
+                    chart.resize();
+                });
+            }
+
+            // Update hourly activity chart
+            function updateHourlyActivityChart(hourlyData) {
+                const chartContainer = document.getElementById('hourlyActivityChart');
+                
+                if (!hourlyData || hourlyData.length === 0) {
+                    // Show message when no data available
+                    chartContainer.innerHTML = '<div class="text-center text-muted py-5"><i class="fas fa-clock fa-2x mb-2"></i><br>No hourly data available<br><small>Files will appear here as they are processed</small></div>';
+                    return;
+                }
+
+                const hours = Array.from({ length: 24 }, (_, i) => i);
+                const fileCounts = hours.map(hour => {
+                    const data = hourlyData.find(d => parseInt(d.hour) === hour);
+                    return data ? parseInt(data.files_count) : 0;
+                });
+
+                // Get the date being displayed for the chart title
+                const chartDate = hourlyData.length > 0 ? formatDate(hourlyData[0].recording_date) : 'Today';
+
+                const chart = echarts.init(chartContainer);
+                
+                const option = {
+                    title: {
+                        text: `Hourly Activity - ${chartDate}`,
+                        textStyle: { fontSize: 14, fontWeight: 'normal' }
+                    },
+                    tooltip: {
+                        trigger: 'axis',
+                        axisPointer: { type: 'shadow' },
+                        formatter: function(params) {
+                            const data = params[0];
+                            return `Hour: ${data.name}<br/>Files: ${data.value.toLocaleString()}`;
+                        }
+                    },
+                    grid: {
+                        left: '10%',
+                        right: '10%',
+                        bottom: '15%',
+                        top: '15%',
+                        containLabel: true
+                    },
+                    xAxis: {
+                        type: 'category',
+                        data: hours.map(h => String(h).padStart(2, '0') + ':00'),
+                        name: 'Hour of Day',
+                        nameLocation: 'middle',
+                        nameGap: 25
+                    },
+                    yAxis: {
+                        type: 'value',
+                        name: 'Files Count',
+                        axisLabel: { 
+                            formatter: function(value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    },
+                    series: [{
+                        name: 'Files per Hour',
+                        type: 'bar',
+                        data: fileCounts,
+                        itemStyle: {
+                            color: '#17a2b8',
+                            borderColor: '#138496',
+                            borderWidth: 1
+                        },
+                        emphasis: {
+                            itemStyle: {
+                                color: '#138496'
+                            }
+                        }
+                    }]
+                };
+
+                chart.setOption(option);
+                
+                // Make chart responsive
+                window.addEventListener('resize', function() {
+                    chart.resize();
+                });
+            }
+
+            // Utility functions
+            function formatBytes(bytes) {
+                if (bytes === 0) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+
+            function formatDate(dateString) {
+                if (!dateString) return '-';
+                return new Date(dateString).toLocaleDateString();
+            }
+
+            function formatDateTime(dateTimeString) {
+                if (!dateTimeString) return '-';
+                return new Date(dateTimeString).toLocaleString();
+            }
+
+            // Cleanup on page unload
+            $(window).on('beforeunload', function() {
+                if (refreshInterval) {
+                    clearInterval(refreshInterval);
+                }
+            });
+        });
+    </script>
+
+    <style>
+        .metric-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .metric-label {
+            font-size: 0.875rem;
+            color: #6c757d;
+            margin-top: 0.25rem;
+        }
+
+        .info-group {
+            margin-bottom: 1rem;
+        }
+
+        .info-group strong {
+            display: block;
+            margin-bottom: 0.25rem;
+        }
+
+        .card {
+            box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+            border: 1px solid rgba(0, 0, 0, 0.125);
+        }
+
+        .metric-item {
+            text-align: center;
+            padding: 1rem;
+            background-color: #f8f9fa;
+            border-radius: 0.375rem;
+        }
+    </style>
+{% endblock %}
