@@ -1,5 +1,5 @@
 const fs = require('fs-extra');
-const \{ createLogger \} = require('../../../utils/logger');
+const { createLogger } = require('../../../utils/logger');
 
 const logger = createLogger({ service: 'CompleteBufferManager' });
 const path = require('path');

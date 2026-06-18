@@ -1,5 +1,5 @@
 const { v4: uuidv4 } = require('uuid');
-const \{ createLogger \} = require('../../../utils/logger');
+const { createLogger } = require('../../../utils/logger');
 
 const logger = createLogger({ service: 'JobManager' });
 const fs = require('fs-extra');
