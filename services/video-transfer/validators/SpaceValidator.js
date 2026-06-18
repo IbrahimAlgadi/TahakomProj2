@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'SpaceValidator' });
 class SpaceValidator {
     constructor(eventEmitter, config) {
         this.eventEmitter = eventEmitter;
@@ -26,12 +29,12 @@ class SpaceValidator {
         }
         
         const freeSpaceGB = parseFloat(this.driveInfo.remainingSpace || 0);
-        console.log(`[ESTIMATE] Free space: ${freeSpaceGB}GB`);
+        logger.info(`[ESTIMATE] Free space: ${freeSpaceGB}GB`);
         const freeSpaceMB = freeSpaceGB * 1024;
-        console.log(`[ESTIMATE] Free space: ${freeSpaceMB}MB`);
+        logger.info(`[ESTIMATE] Free space: ${freeSpaceMB}MB`);
         const bufferMB = 120;
         const totalRequired = estimatedSizeMB + bufferMB;
-        console.log(`[ESTIMATE] Total required: ${totalRequired}MB`);
+        logger.info(`[ESTIMATE] Total required: ${totalRequired}MB`);
         
         return freeSpaceMB >= totalRequired;
     }
@@ -41,12 +44,12 @@ class SpaceValidator {
      */
     getEstimatedProcessingSize() {
         const avgFileSizeMB = this.ISS_MEDIA_FILE_SIZE / 1024;
-        console.log(`[ESTIMATE] Avg file size: ${avgFileSizeMB}MB`);
+        logger.info(`[ESTIMATE] Avg file size: ${avgFileSizeMB}MB`);
         const tempMp4SizeMB = avgFileSizeMB * this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT;
-        console.log(`[ESTIMATE] Temp MP4 size: ${tempMp4SizeMB}MB`);
+        logger.info(`[ESTIMATE] Temp MP4 size: ${tempMp4SizeMB}MB`);
         const bufferSpaceForFinalVideo = tempMp4SizeMB * 0.25;
         const finalVideoSizeMB = tempMp4SizeMB + bufferSpaceForFinalVideo;
-        console.log(`[ESTIMATE] Final video size: ${finalVideoSizeMB}MB`);
+        logger.info(`[ESTIMATE] Final video size: ${finalVideoSizeMB}MB`);
         return finalVideoSizeMB;
     }
 
@@ -58,7 +61,7 @@ class SpaceValidator {
         const hasSpace = this.hasSpaceForProcessing(estimatedSpaceMB);
         
         if (!hasSpace) {
-            console.log(`[SPACE_VALIDATOR] Insufficient space for processing (${estimatedSpaceMB}MB needed)`);
+            logger.info(`[SPACE_VALIDATOR] Insufficient space for processing (${estimatedSpaceMB}MB needed)`);
             return {
                 canProceed: false,
                 estimatedSpaceMB,

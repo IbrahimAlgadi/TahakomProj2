@@ -8,6 +8,9 @@ const ImageSpaceValidator = require('./services/image-transfer/validators/ImageS
 const ImageProcessor = require('./services/image-transfer/processors/ImageProcessor');
 const TransferUtils = require('./services/shared/TransferUtils');
 const config = require('./utils/envConfig');
+const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
+
+const logger = createLogger({ service: 'autoFTPImageTransferService' });
 
 // Database Configuration
 let DB_USER = "postgres";
@@ -68,7 +71,7 @@ async function publishImageTransferMetrics(metrics) {
         await redis.set(FTP_IMAGE_METRICS_KEY, JSON.stringify(metricsData), 'EX', 300); // 5 min expiry
         
     } catch (error) {
-        console.error('[FTP_IMAGE] Error publishing metrics:', error);
+        logger.error('[FTP_IMAGE] Error publishing metrics:', { error: error.message });
     }
 }
 
@@ -97,7 +100,7 @@ async function updateAndPublishMetrics(processedCount, failedCount, totalFiles, 
         await publishImageTransferMetrics(metrics);
         
     } catch (error) {
-        console.error('[FTP_IMAGE] Error updating metrics:', error);
+        logger.error('[FTP_IMAGE] Error updating metrics:', { error: error.message });
     }
 }
 
@@ -108,15 +111,14 @@ function readConfig() {
             const configData = JSON.parse(fs.readFileSync(config.CONFIG_FILE_PATH, 'utf8'));
             return configData;
         }
-        console.log('[FTP_IMAGE] Config file not found:', config.CONFIG_FILE_PATH);
+        logger.warn('[FTP_IMAGE] Config file not found:', { path: config.CONFIG_FILE_PATH });
         return null;
     } catch (error) {
-        console.error('[FTP_IMAGE] Error reading config file:', error);
+        logger.error('[FTP_IMAGE] Error reading config file:', { error: error.message });
         return null;
     }
 }
 
-// Function to read FTP config from file
 function readFtpConfig() {
     try {
         const FTP_CONFIG_FILE_PATH = './config/ftp-transfer.json';
@@ -124,31 +126,29 @@ function readFtpConfig() {
             const ftpConfigData = JSON.parse(fs.readFileSync(FTP_CONFIG_FILE_PATH, 'utf8'));
             return ftpConfigData;
         }
-        console.log('[FTP_IMAGE] FTP config file not found:', FTP_CONFIG_FILE_PATH);
+        logger.warn('[FTP_IMAGE] FTP config file not found:', { path: FTP_CONFIG_FILE_PATH });
         return null;
     } catch (error) {
-        console.error('[FTP_IMAGE] Error reading FTP config file:', error);
+        logger.error('[FTP_IMAGE] Error reading FTP config file:', { error: error.message });
         return null;
     }
 }
 
-// Update FTP configuration
 function updateFtpConfig() {
     try {
         const ftpConfig = readFtpConfig();
         if (ftpConfig) {
             FTP_CONFIG = ftpConfig;
             IS_FTP_CONNECTED = ftpConfig.connection && ftpConfig.connection.status === 'connected';
-            
             ftpImageTransferManager.setFtpConfig(ftpConfig);
-            console.log(`[FTP_IMAGE] FTP config updated - Connected: ${IS_FTP_CONNECTED}`);
+            logger.info(`[FTP_IMAGE] FTP config updated`, { connected: IS_FTP_CONNECTED });
         } else {
             FTP_CONFIG = {};
             IS_FTP_CONNECTED = false;
-            console.log('[FTP_IMAGE] No FTP config available');
+            logger.warn('[FTP_IMAGE] No FTP config available');
         }
     } catch (error) {
-        console.error('[FTP_IMAGE] Error updating FTP config:', error);
+        logger.error('[FTP_IMAGE] Error updating FTP config:', { error: error.message });
         FTP_CONFIG = {};
         IS_FTP_CONNECTED = false;
     }
@@ -157,9 +157,9 @@ function updateFtpConfig() {
 // Redis PubSub Listeners
 redisPubSub.subscribe(CONFIG_FTP_STATE_KEY + '_update', (err, count) => {
     if (err) {
-        console.error('[FTP_IMAGE] Failed to subscribe: %s', err.message);
+        logger.error('[FTP_IMAGE] Failed to subscribe:', { error: err.message });
     } else {
-        console.log(`[FTP_IMAGE] Subscribed successfully! Listening on ${count} channel(s).`);
+        logger.info(`[FTP_IMAGE] Subscribed successfully! Listening on ${count} channel(s).`);
     }
 });
 
@@ -176,10 +176,10 @@ redisPubSub.on('message', async (channel, message) => {
             IS_AUTO_TRANSFER_ACTIVE = CONFIG_STATE && CONFIG_STATE.transfer && CONFIG_STATE.transfer.startTransfer || false;
             
             if (IS_AUTO_TRANSFER_ACTIVE && !wasActive) {
-                console.log("[FTP_IMAGE] Auto transfer reactivated - resuming paused FTP jobs");
+                logger.info("[FTP_IMAGE] Auto transfer reactivated - resuming paused FTP jobs");
                 await ftpImageJobManager.resumeActiveJobs();
             } else if (!IS_AUTO_TRANSFER_ACTIVE && wasActive) {
-                console.log("[FTP_IMAGE] Auto transfer stopped - pausing active FTP jobs");
+                logger.info("[FTP_IMAGE] Auto transfer stopped - pausing active FTP jobs");
                 await ftpImageJobManager.pauseActiveJobs('Auto transfer disabled');
             }
             
@@ -187,141 +187,124 @@ redisPubSub.on('message', async (channel, message) => {
             updateFtpConfig();
         }
     } catch (error) {
-        console.error('[FTP_IMAGE] Error processing Redis message:', error);
+        logger.error('[FTP_IMAGE] Error processing Redis message:', { error: error.message });
     }
 });
 
 // Main FTP Image Transfer Consumer
 async function consumer() {
-    console.log('[FTP_IMAGE] FTP Image Transfer Service started...');   
+    logger.info('[FTP_IMAGE] FTP Image Transfer Service started...');   
     
     while (true) {
         try {
             if (!IS_AUTO_TRANSFER_ACTIVE) {
-                console.log("[FTP_IMAGE] Auto transfer disabled - pausing active FTP jobs");
+                logger.info("[FTP_IMAGE] Auto transfer disabled - pausing active FTP jobs");
                 await ftpImageJobManager.pauseActiveJobs('Auto transfer disabled');
                 await sleep(5000);
                 continue;
             }
 
             if (!IS_FTP_CONNECTED || !ftpImageTransferManager.isFtpReady()) {
-                console.log("[FTP_IMAGE] FTP not ready - service paused");
+                logger.info("[FTP_IMAGE] FTP not ready - service paused");
                 await sleep(5000);
                 continue;
             }
 
-            // Resume paused jobs when conditions are met
             const activeJob = await ftpImageJobManager.getOrCreateActiveJob();
             if (!activeJob) {
-                console.log("[FTP_IMAGE] No active job and no files to process");
+                logger.info("[FTP_IMAGE] No active job and no files to process");
                 await sleep(2000);
                 continue;
             }
 
-            console.log(`[FTP_IMAGE] Processing job: ${activeJob.batch_id} (status: ${activeJob.status})`);
+            await runWithTrace({ traceId: newTraceId(), jobId: activeJob.batch_id, jobStatus: activeJob.status }, async () => {
+                logger.info(`[FTP_IMAGE] Processing job: ${activeJob.batch_id}`, { jobId: activeJob.batch_id, status: activeJob.status });
 
-            // Update FTP config periodically
-            updateFtpConfig();
+                updateFtpConfig();
 
-            // Log status
-            console.log(`[FTP_IMAGE] Status: Active=${IS_AUTO_TRANSFER_ACTIVE}, FTP_Connected=${IS_FTP_CONNECTED}, Server=${FTP_CONFIG.server && FTP_CONFIG.server.host || 'N/A'}`);
+                logger.info(`[FTP_IMAGE] Status: Active=${IS_AUTO_TRANSFER_ACTIVE}, FTP_Connected=${IS_FTP_CONNECTED}, Server=${FTP_CONFIG.server && FTP_CONFIG.server.host || 'N/A'}`);
 
-            // Get pending files for processing (smaller batches for FTP)
-            const filesToProcess = await ftpImageTransferManager.getPendingFiles(50);
-            console.log(`[FTP_IMAGE] Found ${filesToProcess.length} pending FTP image files`);
+                const filesToProcess = await ftpImageTransferManager.getPendingFiles(50);
+                logger.info(`[FTP_IMAGE] Found ${filesToProcess.length} pending FTP image files`, { count: filesToProcess.length });
 
-            if (filesToProcess.length === 0) {
-                await sleep(3000); // Slightly longer delay for FTP
-                continue;
-            }
+                if (filesToProcess.length === 0) {
+                    await sleep(3000);
+                    return;
+                }
 
-            console.log(`[FTP_IMAGE] Processing FTP batch of ${filesToProcess.length} image files`);
+                logger.info(`[FTP_IMAGE] Processing FTP batch of ${filesToProcess.length} image files`, { count: filesToProcess.length });
 
-            // Process files batch
-            const startTime = process.hrtime();
-            let processedCount = 0;
-            let failedCount = 0;
+                const startTime = process.hrtime();
+                let processedCount = 0;
+                let failedCount = 0;
 
-            for (const file of filesToProcess) {
-                try {
-                    // Check conditions before processing each file
-                    if (!IS_AUTO_TRANSFER_ACTIVE || !IS_FTP_CONNECTED) {
-                        const reason = !IS_AUTO_TRANSFER_ACTIVE ? 'auto transfer disabled' : 'FTP disconnected';
-                        console.log(`[FTP_IMAGE] Transfer stopped (${reason}) - pausing remaining files`);
-                        break;
-                    }
+                for (const file of filesToProcess) {
+                    try {
+                        if (!IS_AUTO_TRANSFER_ACTIVE || !IS_FTP_CONNECTED) {
+                            const reason = !IS_AUTO_TRANSFER_ACTIVE ? 'auto transfer disabled' : 'FTP disconnected';
+                            logger.info(`[FTP_IMAGE] Transfer stopped (${reason}) - pausing remaining files`);
+                            break;
+                        }
 
-                    // Validate the image file first
-                    if (!imageProcessor.isImageExtensionSupported(file.file_path)) {
-                        console.log(`[FTP_IMAGE] Unsupported image format for file ${file.id}, skipping`);
-                        await TransferUtils.handleImageTransferError(pool, file, 
-                            new Error('Unsupported image format'), 'ftp_image_transfer_queue');
-                        continue;
-                    }
+                        if (!imageProcessor.isImageExtensionSupported(file.file_path)) {
+                            logger.warn(`[FTP_IMAGE] Unsupported image format for file ${file.id}, skipping`, { fileId: file.id });
+                            await TransferUtils.handleImageTransferError(pool, file, new Error('Unsupported image format'), 'ftp_image_transfer_queue');
+                            continue;
+                        }
 
-                    // Process the FTP image file
-                    await ftpImageTransferManager.processImageFile(file);
-                    processedCount++;
-                    
-                    // Log progress every 5 files (smaller batches for FTP)
-                    if (processedCount % 5 === 0) {
-                        console.log(`[FTP_IMAGE] FTP batch progress: ${processedCount}/${filesToProcess.length} images uploaded`);
-                    }
-                    
-                    // Small delay between FTP uploads to prevent overwhelming the server
-                    await sleep(100);
-                    
-                } catch (error) {
-                    console.error(`[FTP_IMAGE] Error processing FTP image file ${file.id}:`, error);
-                    failedCount++;
-                    
-                    // Handle different types of errors
-                    if (TransferUtils.isFileNotFoundError(error)) {
-                        console.log(`[FTP_IMAGE] File ${file.id} not found - marking as failed`);
-                        await ftpImageTransferManager.updateTransferStatus(file.id, 'failed', 'File not found');
-                        continue;
-                    }
-                    
-                    // Check if it's an FTP connection error
-                    if (ftpImageTransferManager.isFtpConnectionError && ftpImageTransferManager.isFtpConnectionError(error)) {
-                        console.log(`[FTP_IMAGE] FTP connection error - stopping batch`);
-                        IS_FTP_CONNECTED = false;
-                        await ftpImageTransferManager.handleTransferError(file, error);
-                        break;
-                    } else {
-                        // Handle with retry logic
-                        await TransferUtils.handleImageTransferError(pool, file, error, 'ftp_image_transfer_queue');
+                        await ftpImageTransferManager.processImageFile(file);
+                        processedCount++;
+                        
+                        if (processedCount % 5 === 0) {
+                            logger.info(`[FTP_IMAGE] FTP batch progress: ${processedCount}/${filesToProcess.length} images uploaded`);
+                        }
+                        
+                        await sleep(100);
+                        
+                    } catch (error) {
+                        logger.error(`[FTP_IMAGE] Error processing FTP image file ${file.id}:`, { error: error.message, fileId: file.id });
+                        failedCount++;
+                        
+                        if (TransferUtils.isFileNotFoundError(error)) {
+                            logger.warn(`[FTP_IMAGE] File ${file.id} not found - marking as failed`, { fileId: file.id });
+                            await ftpImageTransferManager.updateTransferStatus(file.id, 'failed', 'File not found');
+                            continue;
+                        }
+                        
+                        if (ftpImageTransferManager.isFtpConnectionError && ftpImageTransferManager.isFtpConnectionError(error)) {
+                            logger.warn(`[FTP_IMAGE] FTP connection error - stopping batch`);
+                            IS_FTP_CONNECTED = false;
+                            await ftpImageTransferManager.handleTransferError(file, error);
+                            break;
+                        } else {
+                            await TransferUtils.handleImageTransferError(pool, file, error, 'ftp_image_transfer_queue');
+                        }
                     }
                 }
-            }
-            
-            const endTime = process.hrtime(startTime);
-            const duration = endTime[0] * 1000 + endTime[1] / 1000000;
-            const throughput = processedCount > 0 ? (processedCount / (duration / 1000)).toFixed(2) : 0;
-            
-            console.log(`[FTP_IMAGE] FTP batch completed: ${processedCount} uploaded, ${failedCount} failed in ${duration.toFixed(2)}ms (${throughput} files/sec)`);
+                
+                const endTime = process.hrtime(startTime);
+                const duration = endTime[0] * 1000 + endTime[1] / 1000000;
+                const throughput = processedCount > 0 ? (processedCount / (duration / 1000)).toFixed(2) : 0;
+                
+                logger.info(`[FTP_IMAGE] FTP batch completed: ${processedCount} uploaded, ${failedCount} failed in ${duration.toFixed(2)}ms (${throughput} files/sec)`, { processedCount, failedCount, duration: duration.toFixed(2), throughput });
 
-            // Publish metrics
-            await updateAndPublishMetrics(processedCount, failedCount, filesToProcess.length, duration, throughput);
+                await updateAndPublishMetrics(processedCount, failedCount, filesToProcess.length, duration, throughput);
+                await ftpImageTransferManager.checkAndUpdateCompletedJobs();
 
-            // Check for completed jobs
-            await ftpImageTransferManager.checkAndUpdateCompletedJobs();
-
-            // Longer delay before next batch for FTP
-            if (processedCount > 0) {
-                await sleep(1000);
-            }
+                if (processedCount > 0) {
+                    await sleep(1000);
+                }
+            });
 
         } catch (error) {
-            console.error('[FTP_IMAGE] Error in FTP transfer consumer:', error);
+            logger.error('[FTP_IMAGE] Error in FTP transfer consumer:', { error: error.message, stack: error.stack });
             
-            // If it's a connection error, mark as disconnected
             if (ftpImageTransferManager.isFtpConnectionError && ftpImageTransferManager.isFtpConnectionError(error)) {
                 IS_FTP_CONNECTED = false;
                 await ftpImageTransferManager.disconnectFtp();
             }
             
-            await sleep(10000); // Longer delay on errors for FTP
+            await sleep(10000);
         }
     }
 }
@@ -329,15 +312,14 @@ async function consumer() {
 // Initialize and start service
 async function runService() {
     try {
-        console.log('[FTP_IMAGE] Initializing FTP Image Transfer Service...');
+        logger.info('[FTP_IMAGE] Initializing FTP Image Transfer Service...');
         
-        // Load initial config
         let configLoaded = false;
         
         const fileConfig = readConfig();
         if (fileConfig) {
             CONFIG_STATE = fileConfig;
-            console.log('[FTP_IMAGE] Loaded main config from file');
+            logger.info('[FTP_IMAGE] Loaded main config from file');
             configLoaded = true;
         }
         
@@ -345,35 +327,32 @@ async function runService() {
             const redisConfig = await redis.get(CONFIG_FTP_STATE_KEY);
             if (redisConfig) {
                 CONFIG_STATE = JSON.parse(redisConfig);
-                console.log('[FTP_IMAGE] Loaded main config from Redis');
+                logger.info('[FTP_IMAGE] Loaded main config from Redis');
                 configLoaded = true;
             }
         }
         
         if (!configLoaded) {
-            console.log('[FTP_IMAGE] No main config found - using defaults');
+            logger.warn('[FTP_IMAGE] No main config found - using defaults');
         }
         
-        // Load FTP configuration
         updateFtpConfig();
         
         if (!IS_FTP_CONNECTED) {
-            console.warn('[FTP_IMAGE] FTP not connected - service will wait for connection');
+            logger.warn('[FTP_IMAGE] FTP not connected - service will wait for connection');
         }
         
-        // Start consumer
-        console.log('[FTP_IMAGE] Starting FTP consumer...');
+        logger.info('[FTP_IMAGE] Starting FTP consumer...');
         consumer();
         
     } catch (error) {
-        console.error('[FTP_IMAGE] Service initialization error:', error);
+        logger.error('[FTP_IMAGE] Service initialization error:', { error: error.message, stack: error.stack });
         process.exit(1);
     }
 }
 
-// Graceful shutdown
 process.on('SIGINT', async () => {
-    console.log('[FTP_IMAGE] Shutting down FTP Image Transfer Service...');
+    logger.info('[FTP_IMAGE] Shutting down FTP Image Transfer Service...');
     await ftpImageTransferManager.cleanup();
     await imageProcessor.cleanup();
     process.exit(0);

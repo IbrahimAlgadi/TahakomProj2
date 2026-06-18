@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'ImageProcessor' });
 const fs = require('fs-extra');
 const path = require('path');
 
@@ -37,11 +40,11 @@ class ImageProcessor {
                 throw new Error(`Invalid or corrupted image file: ${filePath}`);
             }
 
-            console.log(`[IMAGE_PROCESSOR] Validated image file: ${path.basename(filePath)} (${(stats.size / 1024).toFixed(1)} KB)`);
+            logger.info(`[IMAGE_PROCESSOR] Validated image file: ${path.basename(filePath)} (${(stats.size / 1024).toFixed(1)} KB)`);
             return true;
 
         } catch (error) {
-            console.error(`[IMAGE_PROCESSOR] Image validation failed for ${filePath}:`, error.message);
+            logger.error(`[IMAGE_PROCESSOR] Image validation failed for ${filePath}:`, error.message);
             throw error;
         }
     }
@@ -72,7 +75,7 @@ class ImageProcessor {
             }
 
         } catch (error) {
-            console.warn(`[IMAGE_PROCESSOR] Could not validate image header for ${filePath}:`, error.message);
+            logger.warn(`[IMAGE_PROCESSOR] Could not validate image header for ${filePath}:`, error.message);
             return true; // Assume valid if we can't read header
         }
     }
@@ -89,11 +92,11 @@ class ImageProcessor {
             // Normalize path separators for the target platform
             const normalizedPath = path.normalize(destinationPath);
             
-            console.log(`[IMAGE_PROCESSOR] Prepared destination: ${path.basename(sourcePath)} -> ${relativePath}`);
+            logger.info(`[IMAGE_PROCESSOR] Prepared destination: ${path.basename(sourcePath)} -> ${relativePath}`);
             return normalizedPath;
 
         } catch (error) {
-            console.error(`[IMAGE_PROCESSOR] Error preparing destination path:`, error);
+            logger.error(`[IMAGE_PROCESSOR] Error preparing destination path:`, error);
             throw error;
         }
     }
@@ -107,7 +110,7 @@ class ImageProcessor {
         }
 
         try {
-            console.log(`[IMAGE_PROCESSOR] Encrypting image: ${path.basename(sourcePath)}`);
+            logger.info(`[IMAGE_PROCESSOR] Encrypting image: ${path.basename(sourcePath)}`);
             
             // Generate AES key and IV for this file
             const { key: aesKey, iv: aesIv } = this.encryptionService.generateAESKey();
@@ -123,11 +126,11 @@ class ImageProcessor {
                 encrypted: true
             };
             
-            console.log(`[IMAGE_PROCESSOR] Successfully encrypted image: ${path.basename(destPath)}`);
+            logger.info(`[IMAGE_PROCESSOR] Successfully encrypted image: ${path.basename(destPath)}`);
             return encryptionMetadata;
 
         } catch (error) {
-            console.error(`[IMAGE_PROCESSOR] Encryption failed for ${sourcePath}:`, error);
+            logger.error(`[IMAGE_PROCESSOR] Encryption failed for ${sourcePath}:`, error);
             throw error;
         }
     }
@@ -161,7 +164,7 @@ class ImageProcessor {
             return metadata;
 
         } catch (error) {
-            console.error(`[IMAGE_PROCESSOR] Error generating metadata for file ${file.id}:`, error);
+            logger.error(`[IMAGE_PROCESSOR] Error generating metadata for file ${file.id}:`, error);
             // Return basic metadata even if enhanced metadata fails
             return {
                 fileId: file.id,
@@ -194,7 +197,7 @@ class ImageProcessor {
      * Validate batch of image files
      */
     async validateImageBatch(files) {
-        console.log(`[IMAGE_PROCESSOR] Validating batch of ${files.length} image files...`);
+        logger.info(`[IMAGE_PROCESSOR] Validating batch of ${files.length} image files...`);
         
         const results = {
             valid: [],
@@ -208,7 +211,7 @@ class ImageProcessor {
                 results.valid.push(file);
                 results.totalSize += file.file_size || 0;
             } catch (error) {
-                console.warn(`[IMAGE_PROCESSOR] File validation failed: ${file.file_path} - ${error.message}`);
+                logger.warn(`[IMAGE_PROCESSOR] File validation failed: ${file.file_path} - ${error.message}`);
                 results.invalid.push({
                     file: file,
                     error: error.message
@@ -216,7 +219,7 @@ class ImageProcessor {
             }
         }
 
-        console.log(`[IMAGE_PROCESSOR] Batch validation complete: ${results.valid.length} valid, ${results.invalid.length} invalid`);
+        logger.info(`[IMAGE_PROCESSOR] Batch validation complete: ${results.valid.length} valid, ${results.invalid.length} invalid`);
         return results;
     }
 
@@ -240,7 +243,7 @@ class ImageProcessor {
      */
     async cleanup() {
         // Override in subclasses if needed
-        console.log('[IMAGE_PROCESSOR] Cleanup completed');
+        logger.info('[IMAGE_PROCESSOR] Cleanup completed');
     }
 }
 

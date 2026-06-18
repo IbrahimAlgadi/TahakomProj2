@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'ImageSpaceValidator' });
 class ImageSpaceValidator {
     constructor(config) {
         this.config = config;
@@ -16,7 +19,7 @@ class ImageSpaceValidator {
         
         if (this.driveInfo && this.shouldStopTransfer) {
             const freeSpaceMB = this.getFreeSpaceMB();
-            console.log(`[IMAGE_SPACE_VALIDATOR] Drive space check: ${freeSpaceMB.toFixed(1)}MB free, threshold: ${this.minRequiredSpaceMB}MB`);
+            logger.info(`[IMAGE_SPACE_VALIDATOR] Drive space check: ${freeSpaceMB.toFixed(1)}MB free, threshold: ${this.minRequiredSpaceMB}MB`);
         }
     }
 
@@ -49,7 +52,7 @@ class ImageSpaceValidator {
      */
     hasSpaceForFile(fileSizeBytes) {
         if (!this.driveInfo) {
-            console.warn('[IMAGE_SPACE_VALIDATOR] Drive info not available for space check');
+            logger.warn('[IMAGE_SPACE_VALIDATOR] Drive info not available for space check');
             return !this.shouldStopTransfer;
         }
         
@@ -57,14 +60,14 @@ class ImageSpaceValidator {
         const freeSpaceMB = this.getFreeSpaceMB();
         
         if (freeSpaceMB === 0) {
-            console.warn('[IMAGE_SPACE_VALIDATOR] No free space information available in drive info');
+            logger.warn('[IMAGE_SPACE_VALIDATOR] No free space information available in drive info');
             return !this.shouldStopTransfer;
         }
         
         const hasSpace = freeSpaceMB > (fileSizeMB + this.bufferMB);
         
         if (!hasSpace) {
-            console.log(`[IMAGE_SPACE_VALIDATOR] Insufficient space: need ${fileSizeMB.toFixed(1)}MB + ${this.bufferMB}MB buffer, only ${freeSpaceMB.toFixed(1)}MB available`);
+            logger.info(`[IMAGE_SPACE_VALIDATOR] Insufficient space: need ${fileSizeMB.toFixed(1)}MB + ${this.bufferMB}MB buffer, only ${freeSpaceMB.toFixed(1)}MB available`);
         }
         
         return hasSpace;
@@ -75,7 +78,7 @@ class ImageSpaceValidator {
      */
     hasSpaceForBatch(files) {
         if (!this.driveInfo) {
-            console.warn('[IMAGE_SPACE_VALIDATOR] Drive info not available for batch space check');
+            logger.warn('[IMAGE_SPACE_VALIDATOR] Drive info not available for batch space check');
             return !this.shouldStopTransfer;
         }
         
@@ -84,16 +87,16 @@ class ImageSpaceValidator {
         const freeSpaceMB = this.getFreeSpaceMB();
         
         if (freeSpaceMB === 0) {
-            console.warn('[IMAGE_SPACE_VALIDATOR] No free space information available for batch check');
+            logger.warn('[IMAGE_SPACE_VALIDATOR] No free space information available for batch check');
             return !this.shouldStopTransfer;
         }
         
         const hasSpace = freeSpaceMB > (totalSizeMB + this.bufferMB);
         
-        console.log(`[IMAGE_SPACE_VALIDATOR] Batch space check: ${files.length} files (${totalSizeMB.toFixed(1)}MB) vs ${freeSpaceMB.toFixed(1)}MB free`);
+        logger.info(`[IMAGE_SPACE_VALIDATOR] Batch space check: ${files.length} files (${totalSizeMB.toFixed(1)}MB) vs ${freeSpaceMB.toFixed(1)}MB free`);
         
         if (!hasSpace) {
-            console.log(`[IMAGE_SPACE_VALIDATOR] Insufficient space for batch: need ${totalSizeMB.toFixed(1)}MB + ${this.bufferMB}MB buffer, only ${freeSpaceMB.toFixed(1)}MB available`);
+            logger.info(`[IMAGE_SPACE_VALIDATOR] Insufficient space for batch: need ${totalSizeMB.toFixed(1)}MB + ${this.bufferMB}MB buffer, only ${freeSpaceMB.toFixed(1)}MB available`);
         }
         
         return hasSpace;
@@ -119,7 +122,7 @@ class ImageSpaceValidator {
             return true;
             
         } catch (error) {
-            console.error(`[IMAGE_SPACE_VALIDATOR] Destination path validation failed for ${destinationPath}:`, error);
+            logger.error(`[IMAGE_SPACE_VALIDATOR] Destination path validation failed for ${destinationPath}:`, error);
             return false;
         }
     }

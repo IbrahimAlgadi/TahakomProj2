@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'FtpImageJobManager' });
 const ImageJobManager = require('./ImageJobManager');
 const { v4: uuidv4 } = require('uuid');
 
@@ -22,7 +25,7 @@ class FtpImageJobManager extends ImageJobManager {
             RETURNING *
         `, [batchId, origin, JSON.stringify(this.config.ftpConfig || {})]);
         
-        console.log(`[FTP_IMAGE_JOB] Created new FTP image transfer job: ${batchId} (ID: ${result.rows[0].id})`);
+        logger.info(`[FTP_IMAGE_JOB] Created new FTP image transfer job: ${batchId} (ID: ${result.rows[0].id})`);
         return result.rows[0];
     }
 
@@ -69,7 +72,7 @@ class FtpImageJobManager extends ImageJobManager {
         // Update job statistics
         await this.updateJobStats(job.id);
         
-        console.log(`[FTP_IMAGE_JOB] Created FTP transfer batch for job ${job.id} with ${filesToCopy.length} groups`);
+        logger.info(`[FTP_IMAGE_JOB] Created FTP transfer batch for job ${job.id} with ${filesToCopy.length} groups`);
         return job.batch_id;
     }
 
@@ -96,7 +99,7 @@ class FtpImageJobManager extends ImageJobManager {
             .trim();
         const remotePath = `/images/${site_id}/${date_folder}/${time_folder}/${sanitizedPlateNum}/${sanitizedFileName}`;
         
-        console.log(remotePath);
+        logger.info(remotePath);
 
         return remotePath;
     }
@@ -115,12 +118,12 @@ class FtpImageJobManager extends ImageJobManager {
         
         if (result.rows.length > 0) {
             const activeJob = result.rows[0];
-            console.log(`[IMAGE_JOB] Found active job: ${activeJob.batch_id} (status: ${activeJob.status})`);
+            logger.info(`[IMAGE_JOB] Found active job: ${activeJob.batch_id} (status: ${activeJob.status})`);
             
             // If paused, resume it
             if (activeJob.status === 'paused') {
                 await this.updateJobStatus(activeJob.id, 'transferring');
-                console.log(`[IMAGE_JOB] Resumed paused job: ${activeJob.batch_id}`);
+                logger.info(`[IMAGE_JOB] Resumed paused job: ${activeJob.batch_id}`);
             }
             
             return activeJob;
@@ -133,12 +136,12 @@ class FtpImageJobManager extends ImageJobManager {
         }
         
         // Create new job and batch
-        console.log(`[IMAGE_JOB] Creating new job for ${filesToTransfer.length} file groups`);
+        logger.info(`[IMAGE_JOB] Creating new job for ${filesToTransfer.length} file groups`);
         const newJob = await this.createTransferJob(origin);
         await this.createTransferBatch(filesToTransfer, newJob);
         await this.updateJobStatus(newJob.id, 'transferring');
         
-        console.log(`[IMAGE_JOB] ✓ Created and started new job: ${newJob.batch_id} (ID: ${newJob.id})`);
+        logger.info(`[IMAGE_JOB] ✓ Created and started new job: ${newJob.batch_id} (ID: ${newJob.id})`);
         return newJob;
     }
 
@@ -155,7 +158,7 @@ class FtpImageJobManager extends ImageJobManager {
         `, [reason]);
 
         if (result.rows.length > 0) {
-            console.log(`[FTP_IMAGE_JOB] Paused ${result.rows.length} FTP image jobs: ${result.rows.map(j => j.batch_id).join(', ')}`);
+            logger.info(`[FTP_IMAGE_JOB] Paused ${result.rows.length} FTP image jobs: ${result.rows.map(j => j.batch_id).join(', ')}`);
         }
     }
 
@@ -171,7 +174,7 @@ class FtpImageJobManager extends ImageJobManager {
         `);
 
         if (result.rows.length > 0) {
-            console.log(`[FTP_IMAGE_JOB] Resumed ${result.rows.length} FTP image jobs: ${result.rows.map(j => j.batch_id).join(', ')}`);
+            logger.info(`[FTP_IMAGE_JOB] Resumed ${result.rows.length} FTP image jobs: ${result.rows.map(j => j.batch_id).join(', ')}`);
         }
     }
 
@@ -206,7 +209,7 @@ class FtpImageJobManager extends ImageJobManager {
             `);
             return parseInt(result.rows[0].count) || 0;
         } catch (error) {
-            console.error('[FTP_IMAGE_JOB] Error getting pending files count:', error);
+            logger.error('[FTP_IMAGE_JOB] Error getting pending files count:', error);
             return 0;
         }
     }
@@ -225,7 +228,7 @@ class FtpImageJobManager extends ImageJobManager {
             `);
             return parseInt(result.rows[0].count) || 0;
         } catch (error) {
-            console.error('[FTP_IMAGE_JOB] Error getting completed files count:', error);
+            logger.error('[FTP_IMAGE_JOB] Error getting completed files count:', error);
             return 0;
         }
     }

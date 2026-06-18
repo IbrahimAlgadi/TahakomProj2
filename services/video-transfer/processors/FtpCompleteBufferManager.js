@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'FtpCompleteBufferManager' });
 const path = require('path');
 const fs = require('fs-extra');
 const TransferUtils = require('../../shared/TransferUtils');
@@ -41,7 +44,7 @@ class FtpCompleteBufferManager {
      * Store file in FTP buffer as pending
      */
     async storeFileInBufferAsPending(file, groupKey, intervalStart, intervalEnd, jobId, groupIntervalEnd) {
-        console.log(`[FTP_BUFFER] storeFileInBufferAsPending: Adding file ${file.id} to FTP buffer for job ${jobId}`);
+        logger.info(`[FTP_BUFFER] storeFileInBufferAsPending: Adding file ${file.id} to FTP buffer for job ${jobId}`);
 
         const insertQuery = `
             INSERT INTO ${this.bufferTable} (
@@ -68,7 +71,7 @@ class FtpCompleteBufferManager {
             'pending'
         ]);
 
-        console.log(`[FTP_BUFFER] storeFileInBufferAsPending: ✓ Stored file ${file.id} in FTP buffer with ID: ${rows[0].id}`);
+        logger.info(`[FTP_BUFFER] storeFileInBufferAsPending: ✓ Stored file ${file.id} in FTP buffer with ID: ${rows[0].id}`);
         return rows[0];
     }
 
@@ -76,14 +79,14 @@ class FtpCompleteBufferManager {
      * Convert single file and update FTP buffer
      */
     async convertSingleFile(file, bufferRecord, group) {
-        console.log(`[FTP_BUFFER] convertSingleFile: Converting file ${file.file_path} for FTP buffer record ${bufferRecord.id}`);
+        logger.info(`[FTP_BUFFER] convertSingleFile: Converting file ${file.file_path} for FTP buffer record ${bufferRecord.id}`);
 
         try {
             // Construct temporary group directory path using bufferRecord since group might be null
             const cameraId = (group && group.camera_id) || bufferRecord.camera_id || 'unknown';
             const jobId = (group && group.job_id) || bufferRecord.job_id || 'unknown';
             
-            console.log(`[FTP_BUFFER] convertSingleFile: Debug - VIDEO_TEMP_DIR: ${this.videoProcessor.VIDEO_TEMP_DIR}, cameraId: ${cameraId}, jobId: ${jobId}`);
+            logger.info(`[FTP_BUFFER] convertSingleFile: Debug - VIDEO_TEMP_DIR: ${this.videoProcessor.VIDEO_TEMP_DIR}, cameraId: ${cameraId}, jobId: ${jobId}`);
             
             // Ensure VIDEO_TEMP_DIR is defined
             const videoTempDir = this.videoProcessor.VIDEO_TEMP_DIR || path.join(__dirname, '../../../temp_video_processing_ftp');
@@ -93,7 +96,7 @@ class FtpCompleteBufferManager {
                 `ftp_cam_${cameraId}_job_${jobId}_${Date.now()}`
             );
             
-            console.log(`[FTP_BUFFER] convertSingleFile: Using tempGroupDir: ${tempGroupDir}`);
+            logger.info(`[FTP_BUFFER] convertSingleFile: Using tempGroupDir: ${tempGroupDir}`);
 
             // Use video processor to convert the file
             const convertedPath = await this.videoProcessor.convertSingleFile(file, bufferRecord, tempGroupDir);
@@ -128,11 +131,11 @@ class FtpCompleteBufferManager {
                 bufferRecord.id
             ]);
 
-            console.log(`[FTP_BUFFER] convertSingleFile: ✓ Updated FTP buffer record ${bufferRecord.id} with converted file info`);
+            logger.info(`[FTP_BUFFER] convertSingleFile: ✓ Updated FTP buffer record ${bufferRecord.id} with converted file info`);
             return convertedFile;
 
         } catch (error) {
-            console.error(`[FTP_BUFFER] convertSingleFile: Failed to convert file ${file.id}:`, error);
+            logger.error(`[FTP_BUFFER] convertSingleFile: Failed to convert file ${file.id}:`, error);
             await this.markBufferEntryAsFailed(bufferRecord.id, error.message);
             throw error;
         }
@@ -150,7 +153,7 @@ class FtpCompleteBufferManager {
             WHERE id = $1
         `, [bufferRecordId]);
 
-        console.log(`[FTP_BUFFER] markBufferEntryAsFailed: ❌ Marked FTP buffer record ${bufferRecordId} as failed: ${errorMessage}`);
+        logger.info(`[FTP_BUFFER] markBufferEntryAsFailed: ❌ Marked FTP buffer record ${bufferRecordId} as failed: ${errorMessage}`);
     }
 
 
@@ -158,11 +161,11 @@ class FtpCompleteBufferManager {
         // Check if file already exists return it directly
         try {
             await fs.access(finalVideoPath);
-            console.log(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: Found existing file: ${finalVideoPath}`);
+            logger.info(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: Found existing file: ${finalVideoPath}`);
             const stats = await fs.stat(finalVideoPath);
             const fileSize = stats.size;
             
-            console.log(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: ✓ Found: ${finalVideoName} (${(fileSize/1024/1024).toFixed(2)} MB)`);
+            logger.info(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: ✓ Found: ${finalVideoName} (${(fileSize/1024/1024).toFixed(2)} MB)`);
             
             return {
                 videoPath: finalVideoPath,
@@ -171,7 +174,7 @@ class FtpCompleteBufferManager {
                 convertedFilePaths: convertedFilePaths
             };
         } catch (error) {
-            console.log(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: File not found: ${finalVideoPath}`);
+            logger.info(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: File not found: ${finalVideoPath}`);
             return null;
         }
     }
@@ -181,7 +184,7 @@ class FtpCompleteBufferManager {
      * Create video from FTP buffer for specific job and camera
      */
     async createVideoFromBuffer(jobId, cameraId) {
-        console.log(`[FTP_BUFFER] createVideoFromBuffer: Creating video for FTP job ${jobId}, camera ${cameraId}`);
+        logger.info(`[FTP_BUFFER] createVideoFromBuffer: Creating video for FTP job ${jobId}, camera ${cameraId}`);
 
         try {
             // Get converted files for this camera and job
@@ -192,13 +195,13 @@ class FtpCompleteBufferManager {
                 AND status = 'grouped'
                 ORDER BY recording_date, recording_time
             `, [jobId, cameraId]);
-            // console.log(groupedFiles);
+            // logger.info(groupedFiles);
 
             if (groupedFiles.length === 0) {
                 throw new Error(`No grouped files found in FTP buffer for job ${jobId}, camera ${cameraId}`);
             }
 
-            console.log(`[FTP_BUFFER] createVideoFromBuffer: Found ${groupedFiles.length} grouped files for video creation`);
+            logger.info(`[FTP_BUFFER] createVideoFromBuffer: Found ${groupedFiles.length} grouped files for video creation`);
 
             // Extract file paths for concatenation
             const groupKey = groupedFiles[0].group_key;
@@ -226,7 +229,7 @@ class FtpCompleteBufferManager {
                 );
             }
 
-            // console.log({
+            // logger.info({
             //     videoResult
             // });
 
@@ -251,12 +254,12 @@ class FtpCompleteBufferManager {
                 group_key: groupKey
             };
 
-            console.log(`[FTP_BUFFER] createVideoFromBuffer: ✓ Created FTP video: ${finalVideoName} (${videoResult.fileSize} bytes) in ${processingTime}ms`);
+            logger.info(`[FTP_BUFFER] createVideoFromBuffer: ✓ Created FTP video: ${finalVideoName} (${videoResult.fileSize} bytes) in ${processingTime}ms`);
             return videoData;
 
         } catch (error) {
             this.videoStats.errorsCount++;
-            console.error(`[FTP_BUFFER] createVideoFromBuffer: Failed to create video for FTP job ${jobId}, camera ${cameraId}:`, error);
+            logger.error(`[FTP_BUFFER] createVideoFromBuffer: Failed to create video for FTP job ${jobId}, camera ${cameraId}:`, error);
             throw error;
         }
     }
@@ -265,7 +268,7 @@ class FtpCompleteBufferManager {
      * Process files to FTP buffer (similar to existing buffer manager)
      */
     async processFilesToBuffer(group, jobId) {
-        console.log(`[FTP_BUFFER] processFilesToBuffer: Processing ${group.files.length} files for FTP job ${jobId}, camera ${group.camera_id}`);
+        logger.info(`[FTP_BUFFER] processFilesToBuffer: Processing ${group.files.length} files for FTP job ${jobId}, camera ${group.camera_id}`);
 
         for (const file of group.files) {
             try {
@@ -283,19 +286,19 @@ class FtpCompleteBufferManager {
                 await this.convertSingleFile(file, bufferRecord, group);
 
             } catch (error) {
-                console.error(`[FTP_BUFFER] processFilesToBuffer: Failed to process file ${file.id}:`, error);
+                logger.error(`[FTP_BUFFER] processFilesToBuffer: Failed to process file ${file.id}:`, error);
                 // Continue with other files
             }
         }
 
-        console.log(`[FTP_BUFFER] processFilesToBuffer: ✓ Completed processing files for FTP job ${jobId}, camera ${group.camera_id}`);
+        logger.info(`[FTP_BUFFER] processFilesToBuffer: ✓ Completed processing files for FTP job ${jobId}, camera ${group.camera_id}`);
     }
 
     /**
      * Check for ready groups in FTP buffer
      */
     async checkReadyGroupsInBuffer() {
-        console.log('[FTP_BUFFER] checkReadyGroupsInBuffer: Checking for ready groups in FTP buffer');
+        logger.info('[FTP_BUFFER] checkReadyGroupsInBuffer: Checking for ready groups in FTP buffer');
 
         try {
             // Find groups that have enough converted files
@@ -312,7 +315,7 @@ class FtpCompleteBufferManager {
                 HAVING COUNT(*) >= $1
             `, [this.config.ISS_VIDEO_TRANSFER_CONVERSION_COUNT || 10]);
 
-            console.log(`[FTP_BUFFER] checkReadyGroupsInBuffer: Found ${readyGroups.length} ready groups in FTP buffer`);
+            logger.info(`[FTP_BUFFER] checkReadyGroupsInBuffer: Found ${readyGroups.length} ready groups in FTP buffer`);
 
             for (const group of readyGroups) {
                 try {
@@ -326,15 +329,15 @@ class FtpCompleteBufferManager {
                         AND status = 'converted'
                     `, [group.job_id, group.camera_id, group.group_key]);
 
-                    console.log(`[FTP_BUFFER] checkReadyGroupsInBuffer: ✓ Marked group ${group.group_key} as ready for FTP job ${group.job_id}, camera ${group.camera_id}`);
+                    logger.info(`[FTP_BUFFER] checkReadyGroupsInBuffer: ✓ Marked group ${group.group_key} as ready for FTP job ${group.job_id}, camera ${group.camera_id}`);
 
                 } catch (error) {
-                    console.error(`[FTP_BUFFER] checkReadyGroupsInBuffer: Failed to mark group as ready:`, error);
+                    logger.error(`[FTP_BUFFER] checkReadyGroupsInBuffer: Failed to mark group as ready:`, error);
                 }
             }
 
         } catch (error) {
-            console.error('[FTP_BUFFER] checkReadyGroupsInBuffer: Error:', error);
+            logger.error('[FTP_BUFFER] checkReadyGroupsInBuffer: Error:', error);
         }
     }
 
@@ -350,11 +353,11 @@ class FtpCompleteBufferManager {
                 RETURNING id
             `);
 
-            console.log(`[FTP_BUFFER] cleanupOldBufferEntries: ✓ Cleaned up ${rows.length} old FTP buffer entries`);
+            logger.info(`[FTP_BUFFER] cleanupOldBufferEntries: ✓ Cleaned up ${rows.length} old FTP buffer entries`);
             return rows.length;
 
         } catch (error) {
-            console.error('[FTP_BUFFER] cleanupOldBufferEntries: Error:', error);
+            logger.error('[FTP_BUFFER] cleanupOldBufferEntries: Error:', error);
             return 0;
         }
     }
@@ -389,7 +392,7 @@ class FtpCompleteBufferManager {
             return stats;
 
         } catch (error) {
-            console.error('[FTP_BUFFER] getBufferStatistics: Error:', error);
+            logger.error('[FTP_BUFFER] getBufferStatistics: Error:', error);
             return null;
         }
     }

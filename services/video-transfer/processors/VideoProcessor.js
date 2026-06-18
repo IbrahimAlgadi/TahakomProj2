@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'VideoProcessor' });
 const fs = require('fs-extra');
 const path = require('path');
 const { spawn } = require('child_process');
@@ -44,17 +47,17 @@ class VideoProcessor {
                         await this.waitForFileAccess(outputFile, this.waitFileAccessTimeout);
                         resolve(true);
                     } catch (error) {
-                        console.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: File access check failed for ${outputFile}: ${error.message}`);
+                        logger.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: File access check failed for ${outputFile}: ${error.message}`);
                         reject(error);
                     }
                 } else {
-                    console.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: Error converting ${inputFile}: ${stderr}`);
+                    logger.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: Error converting ${inputFile}: ${stderr}`);
                     reject(new Error(`FFmpeg process exited with code ${code}`));
                 }
             });
 
             ffmpeg.on('error', (error) => {
-                console.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: Exception while converting ${inputFile}: ${error.message}`);
+                logger.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: Exception while converting ${inputFile}: ${error.message}`);
                 reject(error);
             });
         });
@@ -65,7 +68,7 @@ class VideoProcessor {
      */
     async concatenateMp4Files(mp4Files, outputFile) {
         try {
-            // console.log(`[VIDEO] VideoProcessor.concatenateMp4Files: Concatenating files: ${mp4Files.length} to ${outputFile}`);
+            // logger.info(`[VIDEO] VideoProcessor.concatenateMp4Files: Concatenating files: ${mp4Files.length} to ${outputFile}`);
             const outputDir = path.dirname(outputFile);
             const concatListPath = path.join(outputDir, `concat_list_${Date.now()}.txt`);
             
@@ -76,7 +79,7 @@ class VideoProcessor {
                 try {
                     await this.waitForFileAccess(file, 3000);
                 } catch (error) {
-                    console.error(`[VIDEO] VideoProcessor.concatenateMp4Files Input file not accessible: ${file} - ${error.message}`);
+                    logger.error(`[VIDEO] VideoProcessor.concatenateMp4Files Input file not accessible: ${file} - ${error.message}`);
                     return false;
                 }
             }
@@ -128,24 +131,24 @@ class VideoProcessor {
                             await this.waitForFileAccess(outputFile, 3000);
                             resolve(true);
                         } catch (error) {
-                            console.error(`[VIDEO] VideoProcessor.concatenateMp4Files: Output file verification failed: ${error.message}`);
+                            logger.error(`[VIDEO] VideoProcessor.concatenateMp4Files: Output file verification failed: ${error.message}`);
                             resolve(false);
                         }
                     } else {
-                        console.error(`[VIDEO_CONCAT_ERROR] VideoProcessor.concatenateMp4Files: Error concatenating files: ${stderr}`);
+                        logger.error(`[VIDEO_CONCAT_ERROR] VideoProcessor.concatenateMp4Files: Error concatenating files: ${stderr}`);
                         resolve(false);
                     }
                 });
 
                 ffmpeg.on('error', (error) => {
-                    console.error(`[VIDEO_CONCAT_ERROR] VideoProcessor.concatenateMp4Files: Exception while concatenating files: ${error.message}`);
+                    logger.error(`[VIDEO_CONCAT_ERROR] VideoProcessor.concatenateMp4Files: Exception while concatenating files: ${error.message}`);
                     resolve(false);
                 });
             });
             
             // Clean up temporary concat list file
             try {
-                console.log(`[VIDEO] VideoProcessor.concatenateMp4Files: Removing temporary concat list file: ${concatListPath.length}`);
+                logger.info(`[VIDEO] VideoProcessor.concatenateMp4Files: Removing temporary concat list file: ${concatListPath.length}`);
                 await fs.unlink(concatListPath);
             } catch (error) {
                 // Ignore cleanup errors
@@ -153,7 +156,7 @@ class VideoProcessor {
             
             return success;
         } catch (error) {
-            console.error(`[VIDEO_CONCAT_ERROR] VideoProcessor.concatenateMp4Files: Exception while concatenating files: ${error.message}`);
+            logger.error(`[VIDEO_CONCAT_ERROR] VideoProcessor.concatenateMp4Files: Exception while concatenating files: ${error.message}`);
             return false;
         }
     }
@@ -200,15 +203,15 @@ class VideoProcessor {
         const mp4Path = path.join(tempGroupDir, outputFilename);
         
         try {
-            console.log(`[VIDEO_CONVERT] VideoProcessor.convertSingleFile: Converting: ${file.file_name} to ${mp4Path}`);
+            logger.info(`[VIDEO_CONVERT] VideoProcessor.convertSingleFile: Converting: ${file.file_name} to ${mp4Path}`);
             await this.convertToMp4(file.file_path, mp4Path);
-            console.log(`[VIDEO_CONVERT] VideoProcessor.convertSingleFile: Converted: ${file.file_name} to ${mp4Path}`);
+            logger.info(`[VIDEO_CONVERT] VideoProcessor.convertSingleFile: Converted: ${file.file_name} to ${mp4Path}`);
             
             await sleep(100);
             return mp4Path;
             
         } catch (error) {
-            console.error(`[VIDEO_CONVERT] VideoProcessor.convertSingleFile: Failed to convert: ${file.file_name}`, error.message);
+            logger.error(`[VIDEO_CONVERT] VideoProcessor.convertSingleFile: Failed to convert: ${file.file_name}`, error.message);
             throw error;
         }
     }
@@ -218,7 +221,7 @@ class VideoProcessor {
      */
     async createFinalVideo(convertedFilePaths, finalVideoPath, finalVideoName, groupKey='') {
         try {
-            console.log(`[VIDEO] VideoProcessor.createFinalVideo: Starting concatenation to: ${finalVideoName}`);
+            logger.info(`[VIDEO] VideoProcessor.createFinalVideo: Starting concatenation to: ${finalVideoName}`);
 
             const success = await this.concatenateMp4Files(convertedFilePaths, finalVideoPath);
             
@@ -226,7 +229,7 @@ class VideoProcessor {
                 const stats = await fs.stat(finalVideoPath);
                 const fileSize = stats.size;
                 
-                console.log(`[VIDEO] VideoProcessor.createFinalVideo: ✓ Created: ${finalVideoName} (${(fileSize/1024/1024).toFixed(2)} MB)`);
+                logger.info(`[VIDEO] VideoProcessor.createFinalVideo: ✓ Created: ${finalVideoName} (${(fileSize/1024/1024).toFixed(2)} MB)`);
                 
                 return {
                     videoPath: finalVideoPath,
@@ -235,12 +238,12 @@ class VideoProcessor {
                     convertedFilePaths: convertedFilePaths
                 };
             } else {
-                console.error(`[VIDEO] VideoProcessor.createFinalVideo: ✗ Failed to concatenate files for group ${groupKey}`);
+                logger.error(`[VIDEO] VideoProcessor.createFinalVideo: ✗ Failed to concatenate files for group ${groupKey}`);
                 return null;
             }
             
         } catch (error) {
-            console.error(`[VIDEO] VideoProcessor.createFinalVideo: Error creating final video:`, error);
+            logger.error(`[VIDEO] VideoProcessor.createFinalVideo: Error creating final video:`, error);
             return null;
         }
     }

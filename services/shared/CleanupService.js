@@ -1,3 +1,6 @@
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger({ service: 'CleanupService' });
 const fs = require('fs-extra');
 const path = require('path');
 
@@ -38,7 +41,7 @@ class CleanupService {
      * Run all cleanup tasks
      */
     async runAllCleanupTasks() {
-        console.log('[CLEANUP] Running all cleanup tasks');
+        logger.info('[CLEANUP] Running all cleanup tasks');
         
         try {
             await this.cleanupOldFailedJobs();
@@ -47,9 +50,9 @@ class CleanupService {
             await this.cleanupStaleProcessingMarkers();
             await this.cleanupTempVideoFiles();
             
-            console.log('[CLEANUP] All cleanup tasks completed successfully');
+            logger.info('[CLEANUP] All cleanup tasks completed successfully');
         } catch (error) {
-            console.error('[CLEANUP] Error during cleanup tasks:', error);
+            logger.error('[CLEANUP] Error during cleanup tasks:', error);
             throw error;
         }
     }
@@ -67,10 +70,10 @@ class CleanupService {
             `);
             
             if (result.rows.length > 0) {
-                console.log(`[CLEANUP] Removed ${result.rows.length} old failed jobs`);
+                logger.info(`[CLEANUP] Removed ${result.rows.length} old failed jobs`);
             }
         } catch (error) {
-            console.error('[CLEANUP] Error during cleanup of old failed jobs:', error);
+            logger.error('[CLEANUP] Error during cleanup of old failed jobs:', error);
             throw error;
         }
     }
@@ -101,10 +104,10 @@ class CleanupService {
             }
             
             if (cleanedCount > 0) {
-                console.log(`[CLEANUP] Marked ${cleanedCount} corrupted buffer entries as failed`);
+                logger.info(`[CLEANUP] Marked ${cleanedCount} corrupted buffer entries as failed`);
             }
         } catch (error) {
-            console.error('[CLEANUP] Failed to cleanup corrupted buffer entries:', error);
+            logger.error('[CLEANUP] Failed to cleanup corrupted buffer entries:', error);
             throw error;
         }
     }
@@ -127,10 +130,10 @@ class CleanupService {
                 try {
                     if (await fs.pathExists(file.converted_file_path)) {
                         await fs.unlink(file.converted_file_path);
-                        console.log(`[CLEANUP] Removed old converted file: ${file.converted_file_path}`);
+                        logger.info(`[CLEANUP] Removed old converted file: ${file.converted_file_path}`);
                     }
                 } catch (fileError) {
-                    console.warn(`[CLEANUP] Failed to remove file ${file.converted_file_path}:`, fileError.message);
+                    logger.warn(`[CLEANUP] Failed to remove file ${file.converted_file_path}:`, fileError.message);
                 }
             }
             
@@ -143,10 +146,10 @@ class CleanupService {
             `);
             
             if (result.rows.length > 0) {
-                console.log(`[CLEANUP] Removed ${result.rows.length} stale buffer entries`);
+                logger.info(`[CLEANUP] Removed ${result.rows.length} stale buffer entries`);
             }
         } catch (error) {
-            console.error('[CLEANUP] Failed to cleanup stale buffer entries:', error);
+            logger.error('[CLEANUP] Failed to cleanup stale buffer entries:', error);
             throw error;
         }
     }
@@ -182,10 +185,10 @@ class CleanupService {
             }
             
             if (cleanedCount > 0) {
-                console.log(`[CLEANUP] Removed ${cleanedCount} stale processing markers`);
+                logger.info(`[CLEANUP] Removed ${cleanedCount} stale processing markers`);
             }
         } catch (error) {
-            console.error('[CLEANUP] Failed to cleanup stale processing markers:', error);
+            logger.error('[CLEANUP] Failed to cleanup stale processing markers:', error);
             throw error;
         }
     }
@@ -213,10 +216,10 @@ class CleanupService {
                         if (hoursSinceModified > 4) {
                             await this.removeDirectoryRecursive(dirPath);
                             cleanedCount++;
-                            console.log(`[CLEANUP] Removed old temp directory: ${entry.name}`);
+                            logger.info(`[CLEANUP] Removed old temp directory: ${entry.name}`);
                         }
                     } catch (error) {
-                        console.warn(`[CLEANUP_ERROR] Failed to remove temp directory ${entry.name}:`, error.message);
+                        logger.warn(`[CLEANUP_ERROR] Failed to remove temp directory ${entry.name}:`, error.message);
                     }
                 } else if (entry.isFile()) {
                     const filePath = path.join(this.VIDEO_TEMP_DIR, entry.name);
@@ -228,19 +231,19 @@ class CleanupService {
                         if (hoursSinceModified > 2) {
                             await fs.unlink(filePath);
                             cleanedCount++;
-                            console.log(`[CLEANUP] Removed old temp file: ${entry.name}`);
+                            logger.info(`[CLEANUP] Removed old temp file: ${entry.name}`);
                         }
                     } catch (error) {
-                        console.warn(`[CLEANUP] Failed to remove temp file ${entry.name}:`, error.message);
+                        logger.warn(`[CLEANUP] Failed to remove temp file ${entry.name}:`, error.message);
                     }
                 }
             }
 
             if (cleanedCount > 0) {
-                console.log(`[CLEANUP] Removed ${cleanedCount} old temporary files/directories`);
+                logger.info(`[CLEANUP] Removed ${cleanedCount} old temporary files/directories`);
             }
         } catch (error) {
-            console.error('[CLEANUP] Failed to cleanup temporary video files:', error);
+            logger.error('[CLEANUP] Failed to cleanup temporary video files:', error);
             throw error;
         }
     }
@@ -251,16 +254,16 @@ class CleanupService {
     async cleanupTempVideo(videoPath) {
         try {
             await fs.unlink(videoPath);
-            console.log(`[CLEANUP] Deleted temporary video: ${videoPath}`);
+            logger.info(`[CLEANUP] Deleted temporary video: ${videoPath}`);
             
             const parentDir = path.dirname(videoPath);
             const files = await fs.readdir(parentDir);
             if (files.length === 0) {
                 await fs.rmdir(parentDir);
-                console.log(`[CLEANUP] Removed empty temporary directory: ${parentDir}`);
+                logger.info(`[CLEANUP] Removed empty temporary directory: ${parentDir}`);
             }
         } catch (error) {
-            console.warn(`[CLEANUP] Could not clean up temporary file/directory: ${videoPath}`, error.message);
+            logger.warn(`[CLEANUP] Could not clean up temporary file/directory: ${videoPath}`, error.message);
         }
     }
 
@@ -280,15 +283,15 @@ class CleanupService {
                         cleanedCount++;
                     }
                 } catch (error) {
-                    console.warn(`[CLEANUP] Failed to check/remove Redis key ${key}:`, error.message);
+                    logger.warn(`[CLEANUP] Failed to check/remove Redis key ${key}:`, error.message);
                 }
             }
             
             if (cleanedCount > 0) {
-                console.log(`[CLEANUP] Removed ${cleanedCount} Redis cache entries matching pattern: ${pattern}`);
+                logger.info(`[CLEANUP] Removed ${cleanedCount} Redis cache entries matching pattern: ${pattern}`);
             }
         } catch (error) {
-            console.error(`[CLEANUP] Failed to cleanup Redis cache for pattern ${pattern}:`, error);
+            logger.error(`[CLEANUP] Failed to cleanup Redis cache for pattern ${pattern}:`, error);
             throw error;
         }
     }
@@ -306,7 +309,7 @@ class CleanupService {
             `);
             
             if (orphanedVideos.rows.length > 0) {
-                console.log(`[CLEANUP] Removed ${orphanedVideos.rows.length} orphaned video transfer entries`);
+                logger.info(`[CLEANUP] Removed ${orphanedVideos.rows.length} orphaned video transfer entries`);
             }
             
             // Clean up buffer entries for files that no longer exist
@@ -317,11 +320,11 @@ class CleanupService {
             `);
             
             if (orphanedBuffer.rows.length > 0) {
-                console.log(`[CLEANUP] Removed ${orphanedBuffer.rows.length} orphaned buffer entries`);
+                logger.info(`[CLEANUP] Removed ${orphanedBuffer.rows.length} orphaned buffer entries`);
             }
             
         } catch (error) {
-            console.error('[CLEANUP] Failed to cleanup orphaned entries:', error);
+            logger.error('[CLEANUP] Failed to cleanup orphaned entries:', error);
             throw error;
         }
     }

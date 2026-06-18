@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'ProcessingStateManager' });
 class ProcessingStateManager {
     constructor(eventEmitter, pool, redis, config) {
         this.eventEmitter = eventEmitter;
@@ -52,7 +55,7 @@ class ProcessingStateManager {
             
             return filteredFiles;
         } catch (error) {
-            console.error('[ERROR] Error fetching unprocessed files:', error);
+            logger.error('[ERROR] Error fetching unprocessed files:', error);
             return [];
         }
     }
@@ -61,7 +64,7 @@ class ProcessingStateManager {
      * Group files by camera for video creation
      */
     async groupFilesByCamera(cameraId, jobId, dbName='video_converted_buffer') {
-        console.log(`[PROCESSING] ProcessingStateManager.groupFilesByCamera: Grouping files for camera ${cameraId} in job ${jobId}`);
+        logger.info(`[PROCESSING] ProcessingStateManager.groupFilesByCamera: Grouping files for camera ${cameraId} in job ${jobId}`);
         // Check if file already exists in buffer for this job
         const convertedFilesReadyForGrouping = await this.pool.query(`
             SELECT 
@@ -77,7 +80,7 @@ class ProcessingStateManager {
         `, [cameraId, jobId]);
 
         if (convertedFilesReadyForGrouping.rows.length < this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
-            console.log(`[PROCESSING] ProcessingStateManager.groupFilesByCamera: Found ${convertedFilesReadyForGrouping.rows.length} converted files ready for grouping, but need ${this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT} files`);
+            logger.info(`[PROCESSING] ProcessingStateManager.groupFilesByCamera: Found ${convertedFilesReadyForGrouping.rows.length} converted files ready for grouping, but need ${this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT} files`);
             return null;
         }
 
@@ -89,7 +92,7 @@ class ProcessingStateManager {
         const groupFileName = `cam_${cameraId}_${firstFile.recording_date.toISOString().split('T')[0]}___${formattedFirstFileTime}--${formattedLastFileTime}`;
 
         const REQUIRED_FILES_PER_GROUP = this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT;
-        console.log(`[PROCESSING] ProcessingStateManager.groupFilesByCamera: Grouping files for camera ${cameraId} in job ${jobId} - ${convertedFilesReadyForGrouping.rows.length} files, ${REQUIRED_FILES_PER_GROUP} files per group`);
+        logger.info(`[PROCESSING] ProcessingStateManager.groupFilesByCamera: Grouping files for camera ${cameraId} in job ${jobId} - ${convertedFilesReadyForGrouping.rows.length} files, ${REQUIRED_FILES_PER_GROUP} files per group`);
         
         // Get client from pool and start transaction
         const client = await this.pool.connect();
@@ -128,9 +131,9 @@ class ProcessingStateManager {
                     startedAt: new Date().toISOString()
                 }));
             }
-            console.log(`[PROCESSING] Marked ${files.length} files as being processed`);
+            logger.info(`[PROCESSING] Marked ${files.length} files as being processed`);
         } catch (error) {
-            console.error('[PROCESSING] Failed to mark files as processing:', error);
+            logger.error('[PROCESSING] Failed to mark files as processing:', error);
         }
     }
 
@@ -143,9 +146,9 @@ class ProcessingStateManager {
                 const processingKey = `video_processing_in_progress:${file.id}`;
                 await this.redis.del(processingKey);
             }
-            console.log(`[PROCESSING] Removed processing markers for ${files.length} files`);
+            logger.info(`[PROCESSING] Removed processing markers for ${files.length} files`);
         } catch (error) {
-            console.error('[PROCESSING] Failed to remove processing markers:', error);
+            logger.error('[PROCESSING] Failed to remove processing markers:', error);
         }
     }
 
@@ -160,15 +163,15 @@ class ProcessingStateManager {
                 FROM video_converted_buffer vcb  
                 WHERE job_id = $1 AND camera_id = $2 
             `, [jobId, group.camera_id]);
-            console.log(`[DUPLICATE] ProcessingStateManager.checkDuplicateVideo: videos for camera ${group.camera_id} found ${JSON.stringify(result.rows)}`);
+            logger.info(`[DUPLICATE] ProcessingStateManager.checkDuplicateVideo: videos for camera ${group.camera_id} found ${JSON.stringify(result.rows)}`);
             
             if (result.rows.count > 0) {
-                console.log(`[DUPLICATE] ProcessingStateManager.checkDuplicateVideo: Found existing video for camera ${group.camera_id}, interval ${group.interval_start}-${group.interval_end}: ${result.rows[0].count}`);
+                logger.info(`[DUPLICATE] ProcessingStateManager.checkDuplicateVideo: Found existing video for camera ${group.camera_id}, interval ${group.interval_start}-${group.interval_end}: ${result.rows[0].count}`);
                 return true;
             }
             return false;
         } catch (error) {
-            console.error('[DUPLICATE] ProcessingStateManager.checkDuplicateVideo: Error checking for duplicate video:', error);
+            logger.error('[DUPLICATE] ProcessingStateManager.checkDuplicateVideo: Error checking for duplicate video:', error);
             return false;
         }
     }
@@ -189,7 +192,7 @@ class ProcessingStateManager {
             `);
             
             if (jobResult.rows.length === 0) {
-                console.log(`[CAMERA_CHECK] No active job found`);
+                logger.info(`[CAMERA_CHECK] No active job found`);
                 return false;
             }
             
@@ -200,7 +203,7 @@ class ProcessingStateManager {
             const isAlreadyProcessed = processedCameras.includes(cameraId.toString());
             
             if (isAlreadyProcessed) {
-                console.log(`[CAMERA_CHECK] Camera ${cameraId} already processed in job ${currentJob.id} (processed_cameras: [${processedCameras.join(', ')}])`);
+                logger.info(`[CAMERA_CHECK] Camera ${cameraId} already processed in job ${currentJob.id} (processed_cameras: [${processedCameras.join(', ')}])`);
                 return true;
             }
             
@@ -215,15 +218,15 @@ class ProcessingStateManager {
             `, [currentJob.id, cameraId]);
             
             if (videoResult.rows.length > 0) {
-                console.log(`[CAMERA_CHECK] Camera ${cameraId} already has video in transfer queue for job ${currentJob.id}: ${videoResult.rows[0].video_file_name}`);
+                logger.info(`[CAMERA_CHECK] Camera ${cameraId} already has video in transfer queue for job ${currentJob.id}: ${videoResult.rows[0].video_file_name}`);
                 return true;
             }
             
-            console.log(`[CAMERA_CHECK] Camera ${cameraId} has not yet contributed to job ${currentJob.id}`);
+            logger.info(`[CAMERA_CHECK] Camera ${cameraId} has not yet contributed to job ${currentJob.id}`);
             return false;
             
         } catch (error) {
-            console.error(`[CAMERA_CHECK] Error checking if camera ${cameraId} already processed in current job:`, error);
+            logger.error(`[CAMERA_CHECK] Error checking if camera ${cameraId} already processed in current job:`, error);
             return false; // Default to allowing processing if check fails
         }
     }
@@ -259,10 +262,10 @@ class ProcessingStateManager {
             }
             
             if (cleanedCount > 0) {
-                console.log(`[CLEANUP] Removed ${cleanedCount} stale processing markers`);
+                logger.info(`[CLEANUP] Removed ${cleanedCount} stale processing markers`);
             }
         } catch (error) {
-            console.error('[CLEANUP] Failed to cleanup stale processing markers:', error);
+            logger.error('[CLEANUP] Failed to cleanup stale processing markers:', error);
         }
     }
 }

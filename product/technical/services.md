@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18 (shared logger + trace IDs added)
+Last updated: 2026-06-18 (full logger rollout — all services migrated)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -84,6 +84,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | Dependencies | None |
 | Redis keys | `CONFIG_STATE_KEY` |
 | Redis channels | `CONFIG_STATE_KEY_update` (publish on change) |
+| Logging | `utils/logger.js` `createLogger({ service: 'ConfigStateServiceRedis' })` |
 | Purpose | Reads `dataTransferConfig.json` from disk, writes to Redis, publishes change notifications. Acts as the single source of config truth for all other services. |
 
 ### monitorConnectedExternalDrivesMicroservice.js
@@ -95,6 +96,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | Redis keys | `CONNECTED_DRIVE_STATE`, `CONNECTED_DRIVE_LIST` |
 | Redis channels | `CONNECTED_DRIVE_LIST_UPDATE` |
 | DB writes | `device_connections` (INSERT on connect, UPDATE on disconnect) |
+| Logging | `utils/logger.js` `createLogger({ service: 'monitorConnectedExternalDrives' })` |
 | Purpose | Polls connected drives via `systeminformation`; persists drive history to DB; publishes state to Redis for transfer services to consume |
 
 ### monitorSpecialProcessesMicroservice.js
@@ -104,6 +106,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | PM2 name | `monitorSpecialProcessesMicroservice` |
 | Dependencies | None |
 | Redis channels | `PROCESS_MONITOR_UPDATE` (publish) |
+| Logging | `utils/logger.js` `createLogger({ service: 'monitorSpecialProcesses' })` |
 | Purpose | Monitors PM2 process health; publishes state for the dashboard process monitor page |
 
 ### monitorISSMediaFilesOptimizedMicroservice.js
@@ -114,6 +117,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | Dependencies | ConfigStateServiceRedis, monitorConnectedExternalDrivesMicroservice |
 | DB writes | `iss_media_files` (INSERT new files, UPDATE sizes, soft-delete removed files) |
 | Key lib | chokidar (file watcher) |
+| Logging | `utils/logger.js` `createLogger({ service: 'monitorISSMediaFilesOptimized' })`; per-camera historical scans wrapped in `runWithTrace({ traceId, camera })` |
 | Purpose | Watches ISS NVR media directories; indexes MP4 segments into `iss_media_files` table so video transfer services can discover them |
 
 ### refactored_autoVideoTransferEDAMicroservice.js
@@ -137,6 +141,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | DB reads | `iss_media_files` |
 | DB writes | `ftp_video_transfer_queue_job`, `ftp_video_transfer_queue`, `ftp_video_converted_buffer`; UPDATE `iss_media_files.is_ftp_transferred` |
 | Key services | `services/video-transfer/state/FtpJobManager.js`, `transfer/FtpTransferManager.js` |
+| Logging | `utils/logger.js` `createLogger({ service: 'autoFtpVideoTransferService' })`; job cycles wrapped in `runWithTrace({ traceId, jobId, camera })` |
 | Purpose | Uploads ISS video segments to a configured FTP/FTPS server |
 
 ### autoUSBImageTransferService.js
@@ -148,6 +153,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | DB reads | `files` |
 | DB writes | `transfer_queue_job`, `transfer_queue`; UPDATE `files.is_auto_transferred` |
 | Key services | `services/image-transfer/state/ImageJobManager.js`, `transfer/ImageTransferManager.js` |
+| Logging | `utils/logger.js` `createLogger({ service: 'autoUSBImageTransferService' })`; per-batch cycle wrapped in `runWithTrace({ traceId, jobId })` |
 | Purpose | Transfers ALPR plate images to a connected USB drive; picks up files where `file_size > 0` and `is_auto_transferred = false` |
 
 ### autoFTPImageTransferService.js
@@ -159,6 +165,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | DB reads | `files` |
 | DB writes | `ftp_image_transfer_queue_job`, `ftp_image_transfer_queue`; UPDATE `files.is_ftp_transferred` |
 | Key services | `services/image-transfer/state/FtpImageJobManager.js`, `transfer/FtpImageTransferManager.js` |
+| Logging | `utils/logger.js` `createLogger({ service: 'autoFTPImageTransferService' })`; per-batch cycle wrapped in `runWithTrace({ traceId, jobId })` |
 | Purpose | Uploads ALPR plate images to a configured FTP/FTPS server |
 
 ### DashboardReportingBackend.js

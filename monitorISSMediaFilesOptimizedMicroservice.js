@@ -6,6 +6,9 @@ const chokidar = require('chokidar');
 const pLimit = require('p-limit');
 const { sleep } = require('./utils.js');
 const { MEDIA_INDEX_STATUS, MEDIA_INDEX_UPDATE, CONFIG_STATE_KEY } = require('./redisKeyStore.js');
+const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
+
+const logger = createLogger({ service: 'monitorISSMediaFilesOptimized' });
 
 // Configuration
 const config = require('./utils/envConfig');
@@ -191,7 +194,7 @@ async function getCurrentSiteId() {
             return (config && config.storage && config.storage.siteId) || '';
         }
     } catch (error) {
-        console.error('[ERROR] Error getting site ID from Redis:', error);
+        logger.error('[ERROR] Error getting site ID from Redis:', { error: error.message });
     }
     return '';
 }
@@ -223,7 +226,7 @@ async function checkFileExistsInDB(filePaths) {
         return existingFiles;
         
     } catch (error) {
-        console.error('[ERROR] Error checking file existence in batch:', error);
+        logger.error('[ERROR] Error checking file existence in batch:', { error: error.message });
         return new Set();
     }
 }
@@ -234,21 +237,19 @@ async function checkFileExistsInDB(filePaths) {
 async function bulkInsertFiles(files) {
     if (files.length === 0) return { inserted: 0, duplicates: 0 };
 
-    console.log(`[BULK INSERT] Processing ${files.length} files for database insert...`);
+    logger.info(`[BULK INSERT] Processing ${files.length} files for database insert...`);
 
-    // First, check which files already exist
     const filePaths = files.map(f => f.filePath);
-    console.log(`[BULK INSERT] Checking ${filePaths.length} files for duplicates in database...`);
+    logger.info(`[BULK INSERT] Checking ${filePaths.length} files for duplicates in database...`);
     const existingFiles = await checkFileExistsInDB(filePaths);
 
-    // Filter out existing files
     const newFiles = files.filter(f => !existingFiles.has(f.filePath));
     const duplicateCount = files.length - newFiles.length;
 
-    console.log(`[BULK INSERT] Found ${duplicateCount} existing files, ${newFiles.length} new files to insert`);
+    logger.info(`[BULK INSERT] Found ${duplicateCount} existing files, ${newFiles.length} new files to insert`);
 
     if (newFiles.length === 0) {
-        console.log(`[BULK INSERT] All ${files.length} files already exist in database`);
+        logger.info(`[BULK INSERT] All ${files.length} files already exist in database`);
         performanceStats.database.duplicatesSkipped += duplicateCount;
         return { inserted: 0, duplicates: duplicateCount };
     }
@@ -258,13 +259,12 @@ async function bulkInsertFiles(files) {
     const startTime = Date.now();
 
     try {
-        console.log(`[BULK INSERT] Starting database transaction for ${newFiles.length} new files`);
+        logger.info(`[BULK INSERT] Starting database transaction for ${newFiles.length} new files`);
         await client.query('BEGIN');
 
-        // Process in batches to avoid memory issues
         for (let i = 0; i < newFiles.length; i += PERFORMANCE_CONFIG.BULK_INSERT_BATCH_SIZE) {
             const batch = newFiles.slice(i, i + PERFORMANCE_CONFIG.BULK_INSERT_BATCH_SIZE);
-            console.log(`[BULK INSERT] Processing batch ${Math.floor(i / PERFORMANCE_CONFIG.BULK_INSERT_BATCH_SIZE) + 1}: ${batch.length} files`);
+            logger.info(`[BULK INSERT] Processing batch ${Math.floor(i / PERFORMANCE_CONFIG.BULK_INSERT_BATCH_SIZE) + 1}: ${batch.length} files`);
             
             // Build VALUES clause for bulk insert
             const values = [];
@@ -294,7 +294,7 @@ async function bulkInsertFiles(files) {
             insertedCount += result.rows.length;
         }
 
-        console.log(`[BULK INSERT] Committing transaction...`);
+        logger.info(`[BULK INSERT] Committing transaction...`);
         await client.query('COMMIT');
 
         const duration = Date.now() - startTime;
@@ -304,14 +304,14 @@ async function bulkInsertFiles(files) {
             (performanceStats.database.averageQueryTime + duration) / performanceStats.database.totalQueries;
         performanceStats.database.duplicatesSkipped += duplicateCount;
 
-        console.log(`[BULK INSERT] Successfully inserted ${insertedCount} new files, skipped ${duplicateCount} duplicates in ${duration}ms`);
-        console.log(`[BULK INSERT] Average query time: ${Math.round(performanceStats.database.averageQueryTime)}ms, Total queries: ${performanceStats.database.totalQueries}`);
+        logger.info(`[BULK INSERT] Successfully inserted ${insertedCount} new files, skipped ${duplicateCount} duplicates in ${duration}ms`);
+        logger.info(`[BULK INSERT] Average query time: ${Math.round(performanceStats.database.averageQueryTime)}ms, Total queries: ${performanceStats.database.totalQueries}`);
 
         return { inserted: insertedCount, duplicates: duplicateCount };
 
     } catch (error) {
         await client.query('ROLLBACK');
-        console.error('[ERROR] Bulk insert failed:', error);
+        logger.error('[ERROR] Bulk insert failed:', { error: error.message });
         performanceStats.historicalScan.errors++;
         throw error;
     } finally {
@@ -363,7 +363,7 @@ async function scanDirectoryEfficiently(dirPath, dirName) {
         return files;
 
     } catch (error) {
-        console.error(`[ERROR] Failed to scan directory ${dirPath}:`, error);
+        logger.error(`[ERROR] Failed to scan directory ${dirPath}:`, { error: error.message, dir: dirPath });
         performanceStats.historicalScan.errors++;
         return [];
     }
@@ -390,7 +390,7 @@ async function getLatestIndexedDateTime(cameraId) {
             };
         }
     } catch (error) {
-        console.error('[ERROR] Error getting latest indexed datetime:', error);
+        logger.error('[ERROR] Error getting latest indexed datetime:', { error: error.message });
     }
     return null;
 }
@@ -400,7 +400,7 @@ async function getLatestIndexedDateTime(cameraId) {
  */
 async function removeDuplicateRecords() {
     try {
-        console.log('[CLEANUP] Running optimized duplicate removal...');
+        logger.info('[CLEANUP] Running optimized duplicate removal...');
         
         // Use a more efficient approach with CTE and window functions
         const result = await pool.query(`
@@ -416,12 +416,12 @@ async function removeDuplicateRecords() {
         `);
         
         if (result.rowCount > 0) {
-            console.log(`[CLEANUP] Removed ${result.rowCount} duplicate records`);
+            logger.info(`[CLEANUP] Removed ${result.rowCount} duplicate records`);
         }
         
         return result.rowCount;
     } catch (error) {
-        console.error('[ERROR] Error removing duplicate records:', error);
+        logger.error('[ERROR] Error removing duplicate records:', { error: error.message });
         return 0;
     }
 }
@@ -441,13 +441,13 @@ function updatePoolStats() {
  * Historical scan for one camera with performance tracking
  */
 async function performHistoricalScanForCamera(cameraId) {
+    await runWithTrace({ traceId: newTraceId(), camera: cameraId, phase: 'historical-scan' }, async () => {
     const cameraPath = path.join(ISS_MEDIA_DIR, cameraId);
 
-    console.log(`[HISTORICAL] Starting scan for camera: ${cameraId}`);
-    console.log(`[HISTORICAL] Camera path: ${cameraPath}`);
+    logger.info(`[HISTORICAL] Starting scan for camera: ${cameraId}`, { camera: cameraId, path: cameraPath });
 
     if (!await fs.pathExists(cameraPath)) {
-        console.warn(`[WARN] Camera directory not found: ${cameraPath}`);
+        logger.warn(`[WARN] Camera directory not found: ${cameraPath}`, { camera: cameraId, path: cameraPath });
         return;
     }
 
@@ -457,22 +457,20 @@ async function performHistoricalScanForCamera(cameraId) {
     let cameraDirectories = 0;
 
     try {
-        console.log(`[HISTORICAL] Reading directory contents for ${cameraId}...`);
+        logger.info(`[HISTORICAL] Reading directory contents for ${cameraId}...`, { camera: cameraId });
         const items = await fs.readdir(cameraPath, { withFileTypes: true });
-        console.log(`[HISTORICAL] Found ${items.length} total items in ${cameraId} directory`);
+        logger.info(`[HISTORICAL] Found ${items.length} total items in ${cameraId} directory`, { camera: cameraId, count: items.length });
 
         const dateDirs = items.filter(item =>
             item.isDirectory() &&
             /^\d{4}-\d{2}-\d{2}T\d{2}\+0300$/.test(item.name) &&
-            !todayPatterns.todayRegex.test(item.name) // Skip today's directories
+            !todayPatterns.todayRegex.test(item.name)
         );
 
-        console.log(`[HISTORICAL] Found ${dateDirs.length} historical directories for ${cameraId}`);
-        console.log(`[HISTORICAL] Sample directories: ${dateDirs.slice(0, 3).map(d => d.name).join(', ')}${dateDirs.length > 3 ? '...' : ''}`);
+        logger.info(`[HISTORICAL] Found ${dateDirs.length} historical directories for ${cameraId}`, { camera: cameraId, count: dateDirs.length });
 
-        // Show retention info
         const retentionDays = ISS_MEDIA_RETENTION;
-        console.log(`[HISTORICAL] Processing directories within ${retentionDays} day retention period`);
+        logger.info(`[HISTORICAL] Processing directories within ${retentionDays} day retention period`, { camera: cameraId, retentionDays });
 
         let allFiles = [];
         let dirCount = 0;
@@ -481,64 +479,56 @@ async function performHistoricalScanForCamera(cameraId) {
             dirCount++;
             const dateDirPath = path.join(cameraPath, dateDir.name);
 
-            console.log(`[HISTORICAL] [${dirCount}/${dateDirs.length}] Scanning directory: ${dateDir.name}`);
+            logger.info(`[HISTORICAL] [${dirCount}/${dateDirs.length}] Scanning directory: ${dateDir.name}`, { camera: cameraId, dir: dateDir.name });
 
             const files = await scanDirectoryEfficiently(dateDirPath, dateDir.name);
 
             if (files.length > 0) {
-                console.log(`[HISTORICAL] Found ${files.length} .issvd files in ${dateDir.name}`);
-                console.log(`[HISTORICAL] Sample files: ${files.slice(0, 3).map(f => f.fileName).join(', ')}${files.length > 3 ? '...' : ''}`);
-            } else {
-                console.log(`[HISTORICAL] No .issvd files found in ${dateDir.name}`);
+                logger.info(`[HISTORICAL] Found ${files.length} .issvd files in ${dateDir.name}`, { camera: cameraId, dir: dateDir.name, count: files.length });
             }
 
             allFiles.push(...files);
             cameraFilesScanned += files.length;
             cameraDirectories++;
 
-            // Log progress every 10 directories
             if (dirCount % 10 === 0) {
-                console.log(`[PROGRESS] ${cameraId}: Processed ${dirCount}/${dateDirs.length} directories, ${cameraFilesScanned} files so far`);
+                logger.info(`[PROGRESS] ${cameraId}: Processed ${dirCount}/${dateDirs.length} directories, ${cameraFilesScanned} files so far`, { camera: cameraId });
             }
 
-            // Bulk insert when we reach threshold to manage memory
             if (allFiles.length >= PERFORMANCE_CONFIG.MEMORY_CLEANUP_THRESHOLD) {
-                console.log(`[HISTORICAL] Memory threshold reached (${allFiles.length} files), performing bulk insert...`);
+                logger.info(`[HISTORICAL] Memory threshold reached (${allFiles.length} files), performing bulk insert...`, { camera: cameraId, count: allFiles.length });
                 const result = await bulkInsertFiles(allFiles);
                 cameraFilesInserted += result.inserted;
-                allFiles = []; // Clear memory
+                allFiles = [];
 
-                console.log(`[BULK INSERT] Inserted ${result.inserted} files, skipped ${result.duplicates} duplicates`);
+                logger.info(`[BULK INSERT] Inserted ${result.inserted} files, skipped ${result.duplicates} duplicates`, { camera: cameraId });
 
-                // Log progress
                 if (cameraFilesScanned % PERFORMANCE_CONFIG.STATS_LOG_INTERVAL === 0) {
-                    console.log(`[PROGRESS] ${cameraId}: Scanned ${cameraFilesScanned} files, inserted ${cameraFilesInserted}`);
+                    logger.info(`[PROGRESS] ${cameraId}: Scanned ${cameraFilesScanned} files, inserted ${cameraFilesInserted}`, { camera: cameraId });
                     updatePoolStats();
                 }
             }
         }
 
-        // Insert remaining files
         if (allFiles.length > 0) {
-            console.log(`[HISTORICAL] Inserting remaining ${allFiles.length} files...`);
+            logger.info(`[HISTORICAL] Inserting remaining ${allFiles.length} files...`, { camera: cameraId, count: allFiles.length });
             const result = await bulkInsertFiles(allFiles);
             cameraFilesInserted += result.inserted;
-            console.log(`[BULK INSERT] Final batch: Inserted ${result.inserted} files, skipped ${result.duplicates} duplicates`);
+            logger.info(`[BULK INSERT] Final batch: Inserted ${result.inserted} files, skipped ${result.duplicates} duplicates`, { camera: cameraId });
         }
 
-        console.log(`[HISTORICAL COMPLETE] ${cameraId}: ${cameraFilesScanned} files scanned, ${cameraFilesInserted} inserted, ${cameraDirectories} directories`);
-        console.log(`[HISTORICAL COMPLETE] Average files per directory: ${Math.round(cameraFilesScanned / cameraDirectories)}`);
+        logger.info(`[HISTORICAL COMPLETE] ${cameraId}: ${cameraFilesScanned} files scanned, ${cameraFilesInserted} inserted, ${cameraDirectories} directories`, { camera: cameraId, scanned: cameraFilesScanned, inserted: cameraFilesInserted, directories: cameraDirectories });
 
-        // Update global stats
         performanceStats.historicalScan.totalFilesScanned += cameraFilesScanned;
         performanceStats.historicalScan.totalFilesInserted += cameraFilesInserted;
         performanceStats.historicalScan.totalDirectoriesScanned += cameraDirectories;
         performanceStats.historicalScan.camerasCompleted++;
 
     } catch (error) {
-        console.error(`[ERROR] Historical scan failed for ${cameraId}:`, error);
+        logger.error(`[ERROR] Historical scan failed for ${cameraId}:`, { error: error.message, camera: cameraId });
         performanceStats.historicalScan.errors++;
     }
+    }); // end runWithTrace
 }
 
 /**
@@ -571,33 +561,23 @@ function getExpectedFileCounts() {
 async function performHistoricalScan() {
     const fileEstimates = getExpectedFileCounts();
 
-    console.log('[HISTORICAL SCAN] Starting comprehensive historical scan...');
-    console.log(`[CONFIG] Cameras: ${ISS_MEDIA_CAMERAS.join(', ')}`);
-    console.log(`[CONFIG] Retention: ${ISS_MEDIA_RETENTION} days`);
-    console.log(`[CONFIG] Media Directory: ${ISS_MEDIA_DIR}`);
-    console.log(`[STRUCTURE] Each day has 24 hourly directories (T00+0300 to T23+0300)`);
-    console.log(`[STRUCTURE] Each hour contains ~${fileEstimates.filesPerCameraPerHour} files (MM-SS-mmm_C.issvd)`);
-    console.log(`[ESTIMATE] Expected historical files: ~${fileEstimates.expectedHistorical.toLocaleString()}`);
-    console.log(`[ESTIMATE] Expected historical directories: ~${fileEstimates.totalHistoricalDirectories.toLocaleString()}`);
+    logger.info('[HISTORICAL SCAN] Starting comprehensive historical scan...', { cameras: ISS_MEDIA_CAMERAS, retentionDays: ISS_MEDIA_RETENTION, mediaDir: ISS_MEDIA_DIR, filesPerHour: fileEstimates.filesPerCameraPerHour, estimatedFiles: fileEstimates.expectedHistorical, estimatedDirs: fileEstimates.totalHistoricalDirectories });
 
     performanceStats.historicalScan.startTime = new Date();
 
-    // Get current site ID
     currentSiteId = await getCurrentSiteId();
-    console.log(`[CONFIG] Site ID: ${currentSiteId || 'Not set'}`);
+    logger.info(`[CONFIG] Site ID: ${currentSiteId || 'Not set'}`, { siteId: currentSiteId });
 
-    // Create parallel processing limit
     const limit = pLimit(PERFORMANCE_CONFIG.PARALLEL_CAMERAS);
-    console.log(`[PARALLEL] Processing up to ${PERFORMANCE_CONFIG.PARALLEL_CAMERAS} cameras simultaneously`);
+    logger.info(`[PARALLEL] Processing up to ${PERFORMANCE_CONFIG.PARALLEL_CAMERAS} cameras simultaneously`);
 
-    // Process cameras in parallel
-    console.log(`[PARALLEL] Starting parallel processing of ${ISS_MEDIA_CAMERAS.length} cameras...`);
+    logger.info(`[PARALLEL] Starting parallel processing of ${ISS_MEDIA_CAMERAS.length} cameras...`);
     const scanPromises = ISS_MEDIA_CAMERAS.map(cameraId =>
         limit(() => performHistoricalScanForCamera(cameraId))
     );
 
     await Promise.all(scanPromises);
-    console.log(`[PARALLEL] All camera processing completed`);
+    logger.info(`[PARALLEL] All camera processing completed`);
     
     performanceStats.historicalScan.endTime = new Date();
     const duration = performanceStats.historicalScan.endTime - performanceStats.historicalScan.startTime;
@@ -609,29 +589,27 @@ async function performHistoricalScan() {
     const scanEstimates = getExpectedFileCounts();
     const completionPercentage = ((performanceStats.historicalScan.totalFilesScanned / scanEstimates.expectedHistorical) * 100).toFixed(1);
     
-    console.log('='.repeat(80));
-    console.log('[HISTORICAL SCAN COMPLETE] Performance Summary:');
-    console.log(`Duration: ${Math.round(durationSeconds)} seconds (${Math.round(durationSeconds/60)} minutes)`);
-    console.log(`Total Files Scanned: ${performanceStats.historicalScan.totalFilesScanned.toLocaleString()} (${completionPercentage}% of estimated)`);
-    console.log(`Total Files Inserted: ${performanceStats.historicalScan.totalFilesInserted.toLocaleString()}`);
-    console.log(`Total Directories: ${performanceStats.historicalScan.totalDirectoriesScanned.toLocaleString()}`);
-    console.log(`Processing Speed: ${Math.round(performanceStats.historicalScan.averageFilesPerSecond)} files/second`);
-    console.log(`Database Duplicates Skipped: ${performanceStats.database.duplicatesSkipped.toLocaleString()}`);
-    console.log(`Cameras Completed: ${performanceStats.historicalScan.camerasCompleted}/${ISS_MEDIA_CAMERAS.length}`);
-    console.log(`Database Pool - Total: ${performanceStats.database.connectionPoolStats.totalConnections}, Idle: ${performanceStats.database.connectionPoolStats.idleConnections}`);
-    console.log(`Errors: ${performanceStats.historicalScan.errors}`);
-    console.log('='.repeat(80));
+    logger.info('[HISTORICAL SCAN COMPLETE] Performance Summary', {
+        durationSeconds: Math.round(durationSeconds),
+        durationMinutes: Math.round(durationSeconds / 60),
+        totalFilesScanned: performanceStats.historicalScan.totalFilesScanned,
+        completionPercentage,
+        totalFilesInserted: performanceStats.historicalScan.totalFilesInserted,
+        totalDirectories: performanceStats.historicalScan.totalDirectoriesScanned,
+        filesPerSecond: Math.round(performanceStats.historicalScan.averageFilesPerSecond),
+        duplicatesSkipped: performanceStats.database.duplicatesSkipped,
+        camerasCompleted: performanceStats.historicalScan.camerasCompleted,
+        errors: performanceStats.historicalScan.errors
+    });
 
-    // Clean up any duplicate records that might have been inserted (async, non-blocking)
-    console.log('[CLEANUP] Starting async duplicate cleanup (non-blocking)...');
     removeDuplicateRecords().then(removedCount => {
         if (removedCount > 0) {
-            console.log(`[CLEANUP] Async cleanup completed - removed ${removedCount} duplicates`);
+            logger.info(`[CLEANUP] Async cleanup completed - removed ${removedCount} duplicates`);
         } else {
-            console.log('[CLEANUP] Async cleanup completed - no duplicates found');
+            logger.info('[CLEANUP] Async cleanup completed - no duplicates found');
         }
     }).catch(error => {
-        console.error('[CLEANUP] Async cleanup failed:', error.message);
+        logger.error('[CLEANUP] Async cleanup failed:', { error: error.message });
     });
 
     isHistoricalScanComplete = true;
@@ -649,7 +627,7 @@ function addToRealtimeQueue(filePath, cameraId) {
         const parsedFile = parseISSVDFilename(fileName);
         
         if (!dirInfo || !parsedFile) {
-            console.warn(`[REALTIME] Invalid file format: ${filePath}`);
+            logger.warn(`[REALTIME] Invalid file format: ${filePath}`);
             return;
         }
 
@@ -678,14 +656,14 @@ function addToRealtimeQueue(filePath, cameraId) {
         
         // Prevent memory overflow
         if (realtimeFileQueue.length > REALTIME_CONFIG.MAX_QUEUE_SIZE) {
-            console.warn(`[REALTIME] Queue size exceeded ${REALTIME_CONFIG.MAX_QUEUE_SIZE}, forcing batch process`);
+            logger.warn(`[REALTIME] Queue size exceeded ${REALTIME_CONFIG.MAX_QUEUE_SIZE}, forcing batch process`);
             setImmediate(processRealtimeBatch);
         }
         
-        console.log(`[REALTIME] File queued: ${fileName} (Camera: ${cameraId}) - Queue size: ${realtimeFileQueue.length}`);
+        logger.info(`[REALTIME] File queued: ${fileName} (Camera: ${cameraId}) - Queue size: ${realtimeFileQueue.length}`, { file: fileName, camera: cameraId, queueSize: realtimeFileQueue.length });
 
     } catch (error) {
-        console.error(`[ERROR] Failed to add file to realtime queue ${filePath}:`, error);
+        logger.error(`[ERROR] Failed to add file to realtime queue ${filePath}:`, { error: error.message, filePath });
         performanceStats.realTimeMonitoring.errors++;
     }
 }
@@ -701,23 +679,13 @@ async function processRealtimeBatch() {
     const filesToProcess = realtimeFileQueue.splice(0, batchSize);
     
     try {
-        console.log(`[REALTIME BATCH] Processing ${filesToProcess.length} files...`);
+        logger.info(`[REALTIME BATCH] Processing ${filesToProcess.length} files...`);
         
         const result = await bulkInsertFiles(filesToProcess);
         
         if (result.inserted > 0) {
             performanceStats.realTimeMonitoring.filesProcessedToday += result.inserted;
-            console.log(`[REALTIME BATCH] Successfully inserted ${result.inserted} files, skipped ${result.duplicates} duplicates`);
-            
-            // Log sample of inserted files
-            const sampleFiles = filesToProcess.slice(0, Math.min(5, filesToProcess.length));
-            sampleFiles.forEach(file => {
-                console.log(`  └─ ${file.fileName} (Camera: ${file.cameraId}) - ${file.date} ${file.preciseTime}`);
-            });
-            
-            if (filesToProcess.length > 5) {
-                console.log(`  └─ ... and ${filesToProcess.length - 5} more files`);
-            }
+            logger.info(`[REALTIME BATCH] Successfully inserted ${result.inserted} files, skipped ${result.duplicates} duplicates`, { inserted: result.inserted, duplicates: result.duplicates });
         }
 
         const processingTime = Date.now() - startTime;
@@ -728,10 +696,8 @@ async function processRealtimeBatch() {
         lastBatchProcessTime = Date.now();
 
     } catch (error) {
-        console.error(`[ERROR] Failed to process realtime batch:`, error);
+        logger.error(`[ERROR] Failed to process realtime batch:`, { error: error.message });
         performanceStats.realTimeMonitoring.errors++;
-        
-        // Put files back in queue for retry
         realtimeFileQueue.unshift(...filesToProcess);
     }
 }
@@ -740,7 +706,7 @@ async function processRealtimeBatch() {
  * Validate directory structure and provide diagnostic information
  */
 async function validateDirectoryStructure() {
-    console.log('[VALIDATION] Checking directory structure...');
+    logger.info('[VALIDATION] Checking directory structure...');
     
     const todayPatterns = getTodayPatterns();
     let validationSummary = {
@@ -781,23 +747,22 @@ async function validateDirectoryStructure() {
                     validationSummary.sampleFilesFound += issvdFiles.length;
                     
                     if (issvdFiles.length > 0) {
-                        console.log(`[VALIDATION] ${cameraId}: Sample directory ${directories[0].name} contains ${issvdFiles.length} .issvd files`);
-                        console.log(`[VALIDATION] ${cameraId}: Sample file: ${issvdFiles[0]} to ${issvdFiles[issvdFiles.length-1]}`);
+                        logger.info(`[VALIDATION] ${cameraId}: Sample dir ${directories[0].name} contains ${issvdFiles.length} .issvd files`, { camera: cameraId, dir: directories[0].name, count: issvdFiles.length });
                     }
                 }
                 
             } catch (error) {
-                console.error(`[VALIDATION] Error reading ${cameraId}:`, error.message);
+                logger.error(`[VALIDATION] Error reading ${cameraId}:`, { error: error.message, camera: cameraId });
             }
         } else {
-            console.warn(`[VALIDATION] Camera directory missing: ${cameraPath}`);
+            logger.warn(`[VALIDATION] Camera directory missing: ${cameraPath}`, { camera: cameraId, path: cameraPath });
         }
     }
     
-    console.log(`[VALIDATION] Found ${validationSummary.camerasFound}/${ISS_MEDIA_CAMERAS.length} camera directories`);
-    console.log(`[VALIDATION] Found ${validationSummary.todayDirectoriesFound} today directories (expected: ${ISS_MEDIA_CAMERAS.length * 24})`);
-    console.log(`[VALIDATION] Found ${validationSummary.historicalDirectoriesFound} historical directories`);
-    console.log(`[VALIDATION] Sample files found: ${validationSummary.sampleFilesFound}`);
+    logger.info(`[VALIDATION] Found ${validationSummary.camerasFound}/${ISS_MEDIA_CAMERAS.length} camera directories`);
+    logger.info(`[VALIDATION] Found ${validationSummary.todayDirectoriesFound} today directories`);
+    logger.info(`[VALIDATION] Found ${validationSummary.historicalDirectoriesFound} historical directories`);
+    logger.info(`[VALIDATION] Sample files found: ${validationSummary.sampleFilesFound}`);
     
     return validationSummary;
 }
@@ -806,7 +771,7 @@ async function validateDirectoryStructure() {
  * Setup chokidar file watching for today's files only
  */
 async function setupRealtimeMonitoring() {
-    console.log('[REALTIME] Setting up file watchers for today\'s directories...');
+    logger.info('[REALTIME] Setting up file watchers for today\'s directories...');
     
     // Validate directory structure first
     await validateDirectoryStructure();
@@ -818,18 +783,15 @@ async function setupRealtimeMonitoring() {
         const cameraPath = path.join(ISS_MEDIA_DIR, cameraId);
         
         if (!await fs.pathExists(cameraPath)) {
-            console.warn(`[WARN] Camera directory not found: ${cameraPath}`);
+            logger.warn(`[WARN] Camera directory not found: ${cameraPath}`, { camera: cameraId });
             continue;
         }
 
-        // Watch all 24 hourly directories for today
-        // Pattern: CAM_1/2025-09-09T00+0300/*.issvd through CAM_1/2025-09-09T23+0300/*.issvd
         const watchPatterns = todayPattern.hourlyPatterns.map(hourPattern => 
             path.join(cameraPath, hourPattern, '*.issvd')
         );
         
-        console.log(`[REALTIME] Setting up watchers for ${cameraId} - ${watchPatterns.length} hourly directories`);
-        console.log(`[REALTIME] Today's pattern: ${todayPattern.basePattern}[00-23]+0300`);
+        logger.info(`[REALTIME] Setting up watchers for ${cameraId} - ${watchPatterns.length} hourly directories`, { camera: cameraId, patternCount: watchPatterns.length });
         
         const watcher = chokidar.watch(watchPatterns, {
             persistent: true,
@@ -847,44 +809,39 @@ async function setupRealtimeMonitoring() {
         });
 
         watcher.on('error', (error) => {
-            console.error(`[ERROR] File watcher error for ${cameraId}:`, error);
+            logger.error(`[ERROR] File watcher error for ${cameraId}:`, { error: error.message, camera: cameraId });
             performanceStats.realTimeMonitoring.errors++;
         });
 
         fileWatchers.set(cameraId, watcher);
-        console.log(`[REALTIME] File watcher active for camera: ${cameraId}`);
+        logger.info(`[REALTIME] File watcher active for camera: ${cameraId}`, { camera: cameraId });
     }
 
     isRealTimeMonitoring = true;
-    console.log('[REALTIME] All file watchers are active');
+    logger.info('[REALTIME] All file watchers are active');
 }
 
 /**
  * Main execution function
  */
 async function runOptimizedMonitoring() {
-    console.log('Starting Optimized ISS Media Files Microservice...');
-    console.log(`Process ID: ${process.pid}`);
+    logger.info('Starting Optimized ISS Media Files Microservice...', { pid: process.pid });
     
     try {
-        // Phase 1: Historical scan
         await performHistoricalScan();
         
-        // Phase 2: Real-time monitoring
-        console.log('[REALTIME] Historical scan complete, starting real-time monitoring setup...');
+        logger.info('[REALTIME] Historical scan complete, starting real-time monitoring setup...');
         await setupRealtimeMonitoring();
-        console.log('[REALTIME] Real-time monitoring is now active!');
+        logger.info('[REALTIME] Real-time monitoring is now active!');
         
-        // Phase 3: Status reporting loop
         let lastStatsReport = Date.now();
         let lastCleanupTime = new Date();
-        const STATS_REPORT_INTERVAL = 60000; // Report every minute
-        const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000; // Once per day
+        const STATS_REPORT_INTERVAL = 60000;
+        const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000;
 
         while (true) {
             const now = Date.now();
             
-            // Process real-time batch if timeout reached or batch is full
             const timeSinceLastBatch = now - lastBatchProcessTime;
             if (realtimeFileQueue.length > 0 && 
                 (realtimeFileQueue.length >= REALTIME_CONFIG.BATCH_SIZE || 
@@ -892,17 +849,18 @@ async function runOptimizedMonitoring() {
                 await processRealtimeBatch();
             }
             
-            // Periodic status reporting
             if (now - lastStatsReport >= STATS_REPORT_INTERVAL) {
                 updatePoolStats();
                 
-                console.log(`[STATUS] Realtime files processed today: ${performanceStats.realTimeMonitoring.filesProcessedToday}`);
-                console.log(`[STATUS] Real-time queue size: ${realtimeFileQueue.length}`);
-                console.log(`[STATUS] Average batch processing time: ${Math.round(performanceStats.realTimeMonitoring.averageProcessingTime)}ms`);
-                console.log(`[STATUS] Last file processed: ${performanceStats.realTimeMonitoring.lastFileTime || 'None'}`);
-                console.log(`[STATUS] DB Pool - Active: ${performanceStats.database.connectionPoolStats.totalConnections - performanceStats.database.connectionPoolStats.idleConnections}/${performanceStats.database.connectionPoolStats.totalConnections}`);
+                logger.info('[STATUS] Real-time monitoring stats', {
+                    filesToday: performanceStats.realTimeMonitoring.filesProcessedToday,
+                    queueSize: realtimeFileQueue.length,
+                    avgBatchMs: Math.round(performanceStats.realTimeMonitoring.averageProcessingTime),
+                    lastFile: performanceStats.realTimeMonitoring.lastFileTime || 'None',
+                    dbPoolActive: performanceStats.database.connectionPoolStats.totalConnections - performanceStats.database.connectionPoolStats.idleConnections,
+                    dbPoolTotal: performanceStats.database.connectionPoolStats.totalConnections
+                });
                 
-                // Update Redis status with queue info
                 const statusWithQueue = {
                     ...performanceStats,
                     realTimeQueue: {
@@ -917,69 +875,61 @@ async function runOptimizedMonitoring() {
                 lastStatsReport = now;
             }
             
-            // Check for site ID changes
             const newSiteId = await getCurrentSiteId();
             if (newSiteId !== currentSiteId) {
-                console.log(`[UPDATE] Site ID changed from '${currentSiteId}' to '${newSiteId}'`);
+                logger.info(`[UPDATE] Site ID changed from '${currentSiteId}' to '${newSiteId}'`, { oldSiteId: currentSiteId, newSiteId });
                 currentSiteId = newSiteId;
             }
             
-            // Daily cleanup
             const timeSinceLastCleanup = now - lastCleanupTime.getTime();
             if (timeSinceLastCleanup >= CLEANUP_INTERVAL) {
-                console.log('[CLEANUP] Running daily duplicate cleanup...');
-                // await removeDuplicateRecords();
+                logger.info('[CLEANUP] Running daily duplicate cleanup...');
                 lastCleanupTime = new Date();
             }
             
-            await sleep(2000); // Check every 2 seconds for more responsive batch processing
+            await sleep(2000);
         }
 
     } catch (error) {
-        console.error('[FATAL ERROR] Monitoring failed:', error);
+        logger.error('[FATAL ERROR] Monitoring failed:', { error: error.message, stack: error.stack });
         process.exit(1);
     }
 }
 
-// Graceful shutdown
 process.on('SIGINT', async () => {
-    console.log('[SHUTDOWN] Shutting down optimized media indexing microservice...');
+    logger.info('[SHUTDOWN] Shutting down optimized media indexing microservice...');
     
-    // Close file watchers
     for (const [cameraId, watcher] of fileWatchers) {
         await watcher.close();
-        console.log(`[SHUTDOWN] Closed watcher for ${cameraId}`);
+        logger.info(`[SHUTDOWN] Closed watcher for ${cameraId}`, { camera: cameraId });
     }
     
-    // Process any remaining files in queue before shutdown
     if (realtimeFileQueue.length > 0) {
-        console.log(`[SHUTDOWN] Processing final ${realtimeFileQueue.length} files in queue...`);
+        logger.info(`[SHUTDOWN] Processing final ${realtimeFileQueue.length} files in queue...`);
         await processRealtimeBatch();
     }
     
-    // Close connections
     await redis.quit();
     await pool.end();
     
-    console.log('[SHUTDOWN] Final Statistics:');
-    console.log(`[SHUTDOWN] Historical files scanned: ${performanceStats.historicalScan.totalFilesScanned.toLocaleString()}`);
-    console.log(`[SHUTDOWN] Historical files inserted: ${performanceStats.historicalScan.totalFilesInserted.toLocaleString()}`);
-    console.log(`[SHUTDOWN] Today's files processed: ${performanceStats.realTimeMonitoring.filesProcessedToday}`);
-    console.log(`[SHUTDOWN] Final queue size: ${realtimeFileQueue.length}`);
-    console.log(`[SHUTDOWN] Total directories scanned: ${performanceStats.historicalScan.totalDirectoriesScanned}`);
-    console.log(`[SHUTDOWN] Database duplicates skipped: ${performanceStats.database.duplicatesSkipped.toLocaleString()}`);
-    console.log('[SHUTDOWN] Cleanup complete');
+    logger.info('[SHUTDOWN] Final Statistics', {
+        historicalScanned: performanceStats.historicalScan.totalFilesScanned,
+        historicalInserted: performanceStats.historicalScan.totalFilesInserted,
+        todayProcessed: performanceStats.realTimeMonitoring.filesProcessedToday,
+        finalQueueSize: realtimeFileQueue.length,
+        totalDirsScanned: performanceStats.historicalScan.totalDirectoriesScanned,
+        duplicatesSkipped: performanceStats.database.duplicatesSkipped
+    });
     process.exit(0);
 });
 
-// Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-    console.error('[UNCAUGHT EXCEPTION]', error);
+    logger.error('[UNCAUGHT EXCEPTION]', { error: error.message, stack: error.stack });
     process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('[UNHANDLED REJECTION] at:', promise, 'reason:', reason);
+    logger.error('[UNHANDLED REJECTION]', { reason: String(reason) });
     process.exit(1);
 });
 

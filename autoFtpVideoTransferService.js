@@ -6,6 +6,7 @@ const path = require('path');
 const { sleep } = require('./utils.js');
 const { CONFIG_FTP_STATE_KEY, FTP_VIDEO_METRICS_KEY } = require('./redisKeyStore.js');
 const ftp = require('basic-ftp');
+const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
 
 // Import shared classes (reused from USB service)
 const VideoProcessor = require('./services/video-transfer/processors/VideoProcessor.js');
@@ -16,6 +17,8 @@ const CleanupService = require('./services/shared/CleanupService.js');
 const FtpTransferManager = require('./services/video-transfer/transfer/FtpTransferManager.js');
 const FtpJobManager = require('./services/video-transfer/state/FtpJobManager.js');
 const FtpCompleteBufferManager = require('./services/video-transfer/processors/FtpCompleteBufferManager.js');
+
+const logger = createLogger({ service: 'autoFtpVideoTransferService' });
 
 class AutoFtpVideoTransferService extends EventEmitter {
     constructor(config) {
@@ -77,15 +80,10 @@ class AutoFtpVideoTransferService extends EventEmitter {
      * Initialize and start the service
      */
     async start() {
-        console.log('-------------------------------------------------------');
-        console.log('-------------------------------------------------------');
-        console.log('[AUTO_FTP_SERVICE] start: Starting FTP Video Transfer Service...');
-        console.log('-------------------------------------------------------');
-        console.log('-------------------------------------------------------');
+        logger.info('[AUTO_FTP_SERVICE] start: Starting FTP Video Transfer Service...');
         this.shouldStop = false;
 
         try {
-            // Initialize database connection
             this.pool = new Pool({
                 user: this.config.database.user,
                 host: this.config.database.host,
@@ -95,7 +93,7 @@ class AutoFtpVideoTransferService extends EventEmitter {
             });
 
             this.pool.on('error', (err) => {
-                console.error('[AUTO_FTP_DB_ERROR] start: Unexpected error on idle client', err);
+                logger.error('[AUTO_FTP_DB_ERROR] start: Unexpected error on idle client', { error: err.message });
                 this.emit('error', err);
             });
 
@@ -130,22 +128,17 @@ class AutoFtpVideoTransferService extends EventEmitter {
             this.emit('start');
 
         } catch (error) {
-            console.error('[AUTO_FTP_SERVICE] start: Failed to initialize:', error);
+            logger.error('[AUTO_FTP_SERVICE] start: Failed to initialize:', { error: error.message, stack: error.stack });
             this.emit('error', error);
         }
     }
 
-    /**
-     * Load FTP configuration from file
-     */
     async _loadFtpConfig() {
         try {
             const configPath = path.join(__dirname, 'config', 'ftp-transfer.json');
             this.ftpConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
-            // console.log(this.ftpConfig);
-            // console.log('[AUTO_FTP_SERVICE] _loadFtpConfig: ✓ FTP configuration loaded successfully');
         } catch (error) {
-            console.error('[AUTO_FTP_SERVICE] _loadFtpConfig: Failed to load FTP configuration:', error);
+            logger.error('[AUTO_FTP_SERVICE] _loadFtpConfig: Failed to load FTP configuration:', { error: error.message });
             this.ftpConfig = null;
         }
     }
@@ -169,14 +162,14 @@ class AutoFtpVideoTransferService extends EventEmitter {
             this.ftpTransferManager.setFtpConfig(this.ftpConfig);
         }
         
-        console.log('[AUTO_FTP_SERVICE] _initializeExternalServices: FTP external services initialized successfully');
+        logger.info('[AUTO_FTP_SERVICE] _initializeExternalServices: FTP external services initialized successfully');
     }
 
     /**
      * Stop the service gracefully
      */
     async stop() {
-        console.log('[AUTO_FTP_SERVICE] stop: Stopping FTP Video Transfer Service...');
+        logger.info('[AUTO_FTP_SERVICE] stop: Stopping FTP Video Transfer Service...');
         this.shouldStop = true;
         this.removeAllListeners();
 
@@ -184,7 +177,7 @@ class AutoFtpVideoTransferService extends EventEmitter {
         if (this.redis) await this.redis.quit();
         if (this.pool) await this.pool.end();
 
-        console.log('[AUTO_FTP_SERVICE] stop: FTP service stopped gracefully');
+        logger.info('[AUTO_FTP_SERVICE] stop: FTP service stopped gracefully');
     }
 
     // ===== EVENT HANDLERS =====
@@ -193,33 +186,20 @@ class AutoFtpVideoTransferService extends EventEmitter {
      * Handle service start event
      */
     _handleStart = async () => {
-        console.log('[AUTO_FTP_EVENT] _handleStart: FTP service started - beginning processing loops');
+        logger.info('[AUTO_FTP_EVENT] _handleStart: FTP service started - beginning processing loops');
         
         try {
-            // Start main processing loop
             this._runProcessingLoop();
-            
-            // Start cleanup loop
-            // this._runCleanupLoop();
-            
-            // Start buffer monitoring loop
             this._runBufferMonitoringLoop();
-            
-            // Start FTP connection monitoring
             this._runFtpConnectionMonitoring();
-            
-            console.log('[AUTO_FTP_EVENT] All FTP processing loops started successfully');
-            
+            logger.info('[AUTO_FTP_EVENT] All FTP processing loops started successfully');
         } catch (error) {
             this.emit('error', error);
         }
     };
 
-    /**
-     * Handle configuration changes
-     */
     _handleConfigChanged = async () => {
-        console.log('[AUTO_FTP_EVENT] _handleConfigChanged: Config changed');
+        logger.info('[AUTO_FTP_EVENT] _handleConfigChanged: Config changed');
         await this._updateServiceConfig();
         await this._loadFtpConfig();
         if (this.ftpTransferManager && this.ftpConfig) {
@@ -227,32 +207,18 @@ class AutoFtpVideoTransferService extends EventEmitter {
         }
     };
 
-    /**
-     * Handle errors
-     */
     _handleError = (error) => {
-        console.error('[AUTO_FTP_EVENT] _handleError: FTP service error:', error);
-        
-        // Get video stats from FTP BufferManager if available
+        logger.error('[AUTO_FTP_EVENT] _handleError: FTP service error:', { error: error.message, stack: error.stack });
         if (this.ftpBufferManager) {
             const stats = this.ftpBufferManager.getVideoStats();
             stats.errorsCount++;
         }
     };
 
-    /**
-     * Handle cleanup requests
-     */
     _handleCleanup = async () => {
-        console.log('[AUTO_FTP_EVENT] _handleCleanup: Running FTP cleanup tasks');
-        
+        logger.info('[AUTO_FTP_EVENT] _handleCleanup: Running FTP cleanup tasks');
         try {
-            // Clean up FTP buffer entries
-            if (this.ftpBufferManager) {
-                await this.ftpBufferManager.cleanupOldBufferEntries();
-            }
-            
-            // Run general cleanup tasks
+            if (this.ftpBufferManager) await this.ftpBufferManager.cleanupOldBufferEntries();
             await this.cleanupService.runAllCleanupTasks();
         } catch (error) {
             this.emit('error', error);
@@ -265,18 +231,11 @@ class AutoFtpVideoTransferService extends EventEmitter {
      * Main FTP video processing loop
      */
     async _runProcessingLoop() {
-        console.log('-------------------------------------------------------');
-        console.log('-------------------------------------------------------');
-        console.log('[FTP_PROCESSING] _runProcessingLoop: Starting FTP processing loop...');
-        console.log('-------------------------------------------------------');
-        console.log('-------------------------------------------------------');
+        logger.info('[FTP_PROCESSING] _runProcessingLoop: Starting FTP processing loop...');
         if (this.shouldStop) return;
-        // console.log({
-        //     pauseVideoTransferFromConfig: this.pauseVideoTransferFromConfig
-        // });
 
         if (!this.pauseVideoTransferFromConfig) {
-            console.log('[FTP_TRANSFER] _startTransferToStorageAsync: FTP video transfer is disabled in config');
+            logger.info('[FTP_TRANSFER] Video transfer disabled in config');
             setTimeout(() => this._runProcessingLoop(), 2000);
             return;
         }
@@ -288,55 +247,53 @@ class AutoFtpVideoTransferService extends EventEmitter {
             }
 
             this.isProcessing = true;
-            console.log('[FTP_PROCESSING] _runProcessingLoop: Running FTP processing loop');
+            logger.info('[FTP_PROCESSING] Running FTP processing loop');
 
-            // Check if FTP video transfer is enabled
             const isEnabled = this.serviceConfig.transfer && this.serviceConfig.transfer.startTransfer &&
                               ['video', 'both'].includes(this.serviceConfig.transferSchedule.dataType);
 
             if (!isEnabled) {
-                console.log('[FTP_PROCESSING] _runProcessingLoop: FTP video transfer is disabled in config');
+                logger.info('[FTP_PROCESSING] FTP video transfer is disabled in config');
                 return;
             }
 
-            // Check FTP configuration
             if (!this.ftpConfig || !this.ftpConfig.server) {
-                console.log('[FTP_PROCESSING] _runProcessingLoop: FTP configuration not available');
+                logger.info('[FTP_PROCESSING] FTP configuration not available');
                 return;
             }
 
-            // Check if transfer should start based on schedule
             if (!this._shouldStartTransfer()) {
-                console.log('[FTP_PROCESSING] _runProcessingLoop: Not in scheduled transfer time');
+                logger.info('[FTP_PROCESSING] Not in scheduled transfer time');
                 return;
             }
 
-            // Check FTP connection
             if (!this.isFtpConnected) {
-                console.log('[FTP_PROCESSING] _runProcessingLoop: FTP not connected');
+                logger.info('[FTP_PROCESSING] FTP not connected');
                 return;
             }
 
-            // ===== STEP 1: Look for existing jobs that aren't completed =====
             const existingJobs = await this.ftpJobManager.getExistingUncompletedJobs();
-            console.log(`[FTP_PROCESSING] _runProcessingLoop: Found ${existingJobs.length} existing uncompleted FTP jobs`);
+            logger.info(`[FTP_PROCESSING] Found ${existingJobs.length} existing uncompleted FTP jobs`);
             
             if (existingJobs.length > 0) {
-                const activeJob = existingJobs[0]; // Get the newest job
-                console.log(`[FTP_PROCESSING] _runProcessingLoop: Found active FTP job: ${activeJob.batch_id} (status: ${activeJob.status})`);
-                await this._handleJobProcessing(activeJob);
+                const activeJob = existingJobs[0];
+                await runWithTrace({ traceId: newTraceId(), jobId: activeJob.batch_id, jobStatus: activeJob.status }, async () => {
+                    logger.info('[FTP_PROCESSING] Found active FTP job', { jobId: activeJob.batch_id, status: activeJob.status });
+                    await this._handleJobProcessing(activeJob);
+                });
                 return;
             }
 
-            // ===== STEP 2: Create new job if files are available =====
             const newJob = await this._createNewJobIfFilesAvailable();
             if (!newJob) {
-                console.log('[FTP_PROCESSING] _runProcessingLoop: No files available to create new FTP job');
+                logger.info('[FTP_PROCESSING] No files available to create new FTP job');
                 return;
             }
 
-            console.log(`[FTP_PROCESSING] _runProcessingLoop: Created new FTP job: ${newJob.batch_id}`);
-            await this._handleJobProcessing(newJob);
+            await runWithTrace({ traceId: newTraceId(), jobId: newJob.batch_id, jobStatus: 'created' }, async () => {
+                logger.info(`[FTP_PROCESSING] Created new FTP job: ${newJob.batch_id}`);
+                await this._handleJobProcessing(newJob);
+            });
             
         } catch (error) {
             this.emit('error', error);
@@ -350,22 +307,18 @@ class AutoFtpVideoTransferService extends EventEmitter {
      * Handle FTP job processing
      */
     async _handleJobProcessing(job) {
-        console.log(`[FTP_PROCESSING] _handleJobProcessing: Handling FTP job: ${job.batch_id} (ID: ${job.id})`);
+        logger.info(`[FTP_PROCESSING] Handling FTP job: ${job.batch_id}`, { jobId: job.batch_id, id: job.id });
         
-        // Process each camera for this job
         const cameraJobPromises = [];
-        
         for (const camera of this.ISS_MEDIA_CAMERAS) {
             const cameraId = camera.replace('CAM_', '');
-            let singleCameraJobPromise = this._processSingleCameraJob(job, cameraId);
-            cameraJobPromises.push(singleCameraJobPromise);
+            cameraJobPromises.push(this._processSingleCameraJob(job, cameraId));
         }
 
-        console.log(`[FTP_PROCESSING] _handleJobProcessing: FTP Job ${job.id} - Waiting for all cameras to be processed`);
+        logger.info(`[FTP_PROCESSING] FTP Job ${job.id} - Waiting for all cameras to be processed`);
         await Promise.all(cameraJobPromises);
-        console.log(`[FTP_PROCESSING] _handleJobProcessing: FTP Job ${job.id} - All cameras processed`);
+        logger.info(`[FTP_PROCESSING] FTP Job ${job.id} - All cameras processed`);
         
-        // Update and publish video metrics
         await this._updateAndPublishVideoMetrics(job);
     }
 
@@ -373,41 +326,37 @@ class AutoFtpVideoTransferService extends EventEmitter {
      * Process single camera for FTP job
      */
     async _processSingleCameraJob(job, cameraId) {
-        console.log(`[FTP_PROCESSING] _processSingleCameraJob: Processing FTP camera ${cameraId} for job ${job.id}`);
+        logger.info(`[FTP_PROCESSING] Processing FTP camera ${cameraId} for job ${job.id}`, { camera: cameraId, jobId: job.batch_id });
         
-        // Check if video is already in transfer queue
         let videoInTransferQueue = await this.ftpJobManager.getVideoInTransferQueue(job.id, cameraId);
         if (videoInTransferQueue) {
-            console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP video already in transfer queue for camera ${cameraId}`);
+            logger.info(`[FTP_PROCESSING] FTP video already in transfer queue for camera ${cameraId}`, { camera: cameraId });
             if (videoInTransferQueue.status === 'pending') {
                 this.emit('startTransferToStorage', job.id, cameraId);
             }
             return;
         }
 
-        // Get camera file status counts from FTP buffer
         const cameraFileStatusCounts = await this.ftpJobManager.getCameraFileCountsStatusBufferCheck(job.id, cameraId);
         const cameraPendingCount = cameraFileStatusCounts.pending || 0;
         const cameraConvertedCount = cameraFileStatusCounts.converted || 0;
         const cameraGroupedCount = cameraFileStatusCounts.grouped || 0;
 
-        console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - Camera ${cameraId}: ${cameraPendingCount} pending, ${cameraConvertedCount} converted, ${cameraGroupedCount} grouped`);
+        logger.info(`[FTP_PROCESSING] FTP Job ${job.id} - Camera ${cameraId} counts`, { camera: cameraId, pending: cameraPendingCount, converted: cameraConvertedCount, grouped: cameraGroupedCount });
         
         const convertedGroupedCount = cameraGroupedCount + cameraConvertedCount;
         
-        // If we need more files, add them to the buffer
         if (convertedGroupedCount < this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
-            console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - Requesting additional files for camera ${cameraId}`);
+            logger.info(`[FTP_PROCESSING] FTP Job ${job.id} - Requesting additional files for camera ${cameraId}`, { camera: cameraId });
             
             if (cameraPendingCount > 0) {
-                // Process pending records
                 const bufferedRecords = await this.ftpJobManager.requestPendingRecordsForCamera(cameraId, job.id);
-                console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - Camera ${cameraId} has ${bufferedRecords.length} pending records`);
+                logger.info(`[FTP_PROCESSING] Camera ${cameraId} has ${bufferedRecords.length} pending records`, { camera: cameraId, count: bufferedRecords.length });
                 
                 for (const record of bufferedRecords) {
                     const file = await this.ftpJobManager.getMediaFileById(record.source_file_id);
                     if (!file) {
-                        console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - File not found for record ${record.id}`);
+                        logger.warn(`[FTP_PROCESSING] File not found for record ${record.id}`, { recordId: record.id, camera: cameraId });
                         await this.ftpBufferManager.markBufferEntryAsFailed(record.id, 'File not found');
                         continue;
                     }
@@ -415,77 +364,50 @@ class AutoFtpVideoTransferService extends EventEmitter {
                 }
                 return;
             } else {
-                // Request additional files
                 const additionalFiles = await this.ftpJobManager.requestAdditionalFilesForCamera(
                     cameraId, convertedGroupedCount, this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT, job.id
                 );
 
                 if (additionalFiles.length > 0) {
-                    console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - Adding ${additionalFiles.length} files for camera ${cameraId} to FTP processing queue`);
-                    
+                    logger.info(`[FTP_PROCESSING] Adding ${additionalFiles.length} files for camera ${cameraId} to FTP processing queue`, { camera: cameraId, count: additionalFiles.length });
                     for (const file of additionalFiles) {
-                        const bufferRecord = await this.ftpBufferManager.storeFileInBufferAsPending(
-                            file, null, null, null, job.id, null
-                        );
+                        const bufferRecord = await this.ftpBufferManager.storeFileInBufferAsPending(file, null, null, null, job.id, null);
                         await this.ftpBufferManager.convertSingleFile(file, bufferRecord, null);
                     }
                 } else {
-                    console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - No additional files available for camera ${cameraId}`);
+                    logger.info(`[FTP_PROCESSING] No additional files available for camera ${cameraId}`, { camera: cameraId });
                 }
             }
         }
 
-        // Update job status if needed
         if (cameraPendingCount > 0) {
             if (job.status !== 'pending') {
                 await this.ftpJobManager.updateJobStatus(job.id, 'pending');
             }
-            console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - is processing pending files`);
+            logger.info(`[FTP_PROCESSING] FTP Job ${job.id} - processing pending files`, { camera: cameraId });
         }
         
-        // Group files if we have enough converted files
         if (cameraConvertedCount >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
             const groupName = await this.processingStateManager.groupFilesByCamera(cameraId, job.id, 'ftp_video_converted_buffer');
             if (groupName) {
-                console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - Grouped files for camera ${cameraId} - ${groupName}`);
+                logger.info(`[FTP_PROCESSING] Grouped files for camera ${cameraId}`, { camera: cameraId, groupName });
             }
         }
 
-        // Create video if we have enough grouped files
         if (cameraGroupedCount >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
-            console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP Job ${job.id} - Creating video for camera ${cameraId}`);
+            logger.info(`[FTP_PROCESSING] Creating video for camera ${cameraId}`, { camera: cameraId });
             
             try {
-                // Create video from buffer
-                /**
-                 * const videoData = {
-                        videoPath: videoResult.videoPath,
-                        videoName: videoResult.videoName,
-                        fileSize: videoResult.fileSize,
-                        camera_id: cameraId,
-                        site_id: this.currentSiteId,
-                        sourceFileIds: sourceFileIds,
-                        group_key: groupKey
-                    };
-                 */
                 const videoData = await this.ftpBufferManager.createVideoFromBuffer(job.id, cameraId);
-            
-                console.log({videoData});
+                logger.info('[FTP_PROCESSING] Video created from buffer', { videoName: videoData && videoData.videoName });
 
-                // Add video to FTP transfer queue
                 await this.ftpJobManager.addVideoToTransferQueue(videoData, job.id);
-                
-                // Mark camera as processed
                 await this.ftpJobManager.addCameraToProcessed(job.id, cameraId);
-                
-                // Update job stats
                 await this.ftpJobManager.updateJobStatsToTransfered(job.id);
                 
-                console.log(`[FTP_PROCESSING] _processSingleCameraJob: FTP video queued for transfer: ${videoData.videoName}`);
+                logger.info(`[FTP_PROCESSING] FTP video queued for transfer: ${videoData.videoName}`, { videoName: videoData.videoName, camera: cameraId });
                 
-                // Start transfer
                 this.emit('startTransferToStorage', job.id, cameraId);
-                
             } catch (error) {
                 this.emit('error', error);
             }
@@ -496,36 +418,30 @@ class AutoFtpVideoTransferService extends EventEmitter {
      * Create new FTP job if files are available
      */
     async _createNewJobIfFilesAvailable() {
+        logger.info('[FTP_PROCESSING] Checking file availability for FTP transfer...');
 
-        console.log('[FTP_PROCESSING] _createNewJobIfFilesAvailable: Checking file availability for FTP transfer...');
-
-        // Check file availability before creating job
         let totalAvailableFiles = 0;
         const expectedCameras = this.ISS_MEDIA_CAMERAS.map(cam => cam.replace('CAM_', ''));
         
         for (const cameraId of expectedCameras) {
             const files = await this.ftpJobManager.requestAdditionalFilesForCamera(cameraId, 0, 38, null);
-            
             if (files.length === 0) {
-                console.log(`[FTP_PROCESSING] _createNewJobIfFilesAvailable: No files available for FTP camera ${cameraId}`);
+                logger.info(`[FTP_PROCESSING] No files available for FTP camera ${cameraId}`, { camera: cameraId });
                 continue;
             }
-            
-            console.log(`[FTP_PROCESSING] _createNewJobIfFilesAvailable: Found ${files.length} available files for FTP camera ${cameraId}`);
+            logger.info(`[FTP_PROCESSING] Found ${files.length} available files for FTP camera ${cameraId}`, { camera: cameraId, count: files.length });
             totalAvailableFiles += files.length;
         }
         
-        // If no files available, don't create job
         if (totalAvailableFiles === 0) {
-            console.log(`[FTP_PROCESSING] _createNewJobIfFilesAvailable: No files available for FTP transfer`);
+            logger.info('[FTP_PROCESSING] No files available for FTP transfer');
             return null;
         }
         
-        // Create new FTP job
-        console.log(`[FTP_PROCESSING] _createNewJobIfFilesAvailable: Found ${totalAvailableFiles} total files available. Creating new FTP job...`);
+        logger.info(`[FTP_PROCESSING] Found ${totalAvailableFiles} total files available. Creating new FTP job...`, { totalFiles: totalAvailableFiles });
         
         const newJob = await this.ftpJobManager.createNewJobWithUUID();
-        console.log(`[FTP_PROCESSING] _createNewJobIfFilesAvailable: ✓ Created new FTP job: ${newJob.batch_id} (ID: ${newJob.id})`);
+        logger.info(`[FTP_PROCESSING] Created new FTP job: ${newJob.batch_id}`, { jobId: newJob.batch_id, id: newJob.id });
         
         return newJob;
     }
@@ -537,25 +453,23 @@ class AutoFtpVideoTransferService extends EventEmitter {
         if (this.shouldStop) return;
         
         if (!this.pauseVideoTransferFromConfig) {
-            console.log('[FTP_TRANSFER] _startTransferToStorageAsync: FTP video transfer is disabled in config');
+            logger.info('[FTP_TRANSFER] FTP video transfer is disabled in config');
             return;
         }
 
         if (this.isTransferringToStorageRunning) {
-            console.log('[FTP_TRANSFER] _startTransferToStorageAsync: FTP transfer is already running');
+            logger.info('[FTP_TRANSFER] FTP transfer is already running');
             return;
         }
 
         this.isTransferringToStorageRunning = true;
 
-        // Check FTP connection
         if (!this.isFtpConnected) {
-            console.log('[FTP_TRANSFER] _startTransferToStorageAsync: FTP not connected');
+            logger.info('[FTP_TRANSFER] FTP not connected');
             this.isTransferringToStorageRunning = false;
             return;
         }
         
-        // Get pending transfer file
         const fileToTransfer = await this.ftpTransferManager.getPendingTransferFileForJob(jobId, cameraId);
         
         if (!fileToTransfer) {
@@ -563,30 +477,24 @@ class AutoFtpVideoTransferService extends EventEmitter {
             return;
         }
         
-        console.log(`[FTP_TRANSFER] _startTransferToStorageAsync: Processing ${fileToTransfer.video_file_name} for FTP transfer`);
+        logger.info(`[FTP_TRANSFER] Processing ${fileToTransfer.video_file_name} for FTP transfer`, { file: fileToTransfer.video_file_name, jobId, camera: cameraId });
         
         try {
-            // Transfer file via FTP
             await this.ftpTransferManager.transferFile(fileToTransfer);
-            
-            // Mark source files as FTP transferred
             await this.ftpTransferManager.markSourceFilesAsTransferred(fileToTransfer);
             
-            // Clean up temporary video file
             if (fileToTransfer.video_file_path.includes(path.basename(this.VIDEO_TEMP_DIR))) {
                 await this.ftpTransferManager.cleanupTempVideo(fileToTransfer.video_file_path);
             }
             
-            // Check if all files in the job have been transferred
             await this.ftpJobManager.checkAndCompleteJob(fileToTransfer.job_id);
             
-            console.log(`[FTP_TRANSFER] _startTransferToStorageAsync: Post-transfer cleanup completed for: ${fileToTransfer.video_file_name}`);
+            logger.info(`[FTP_TRANSFER] Post-transfer cleanup completed for: ${fileToTransfer.video_file_name}`, { file: fileToTransfer.video_file_name });
             
-            // Update and publish video transfer metrics
             await this._updateAndPublishVideoMetrics();
 
         } catch (error) {
-            console.error(`[FTP_TRANSFER] _startTransferToStorageAsync: Failed to transfer file ${fileToTransfer.id}:`, error);
+            logger.error(`[FTP_TRANSFER] Failed to transfer file ${fileToTransfer.id}:`, { error: error.message, fileId: fileToTransfer.id });
             await this.ftpTransferManager.handleTransferError(fileToTransfer, error);
         }
 
@@ -642,14 +550,14 @@ class AutoFtpVideoTransferService extends EventEmitter {
                     this.isFtpConnected = testResult.success;
                     
                     if (!testResult.success) {
-                        console.error(`[FTP_CONNECTION] FTP connection test failed: ${testResult.message}`);
+                        logger.error(`[FTP_CONNECTION] FTP connection test failed: ${testResult.message}`, { message: testResult.message });
                     } else {
-                        console.log('[FTP_CONNECTION] FTP connection test successful');
+                        logger.info('[FTP_CONNECTION] FTP connection test successful');
                     }
                 }
             } catch (error) {
                 this.isFtpConnected = false;
-                console.error('[FTP_CONNECTION] FTP connection test error:', error);
+                logger.error('[FTP_CONNECTION] FTP connection test error:', { error: error.message });
             }
         }
         
@@ -663,7 +571,7 @@ class AutoFtpVideoTransferService extends EventEmitter {
      * Subscribe to Redis events
      */
     _subscribeToRedisEvents() {
-        console.log('[AUTO_FTP_SERVICE] _subscribeToRedisEvents: Subscribing to Redis events...');
+        logger.info('[AUTO_FTP_SERVICE] Subscribing to Redis events...');
         this.redisSub.subscribe(CONFIG_FTP_STATE_KEY + '_update');
 
         this.redisSub.on('message', (channel, message) => {
@@ -682,7 +590,7 @@ class AutoFtpVideoTransferService extends EventEmitter {
     async _updateServiceConfig() {
         try {
             const configStr = await this.redis.get(CONFIG_FTP_STATE_KEY);
-            console.log('[AUTO_FTP_SERVICE] _updateServiceConfig: ');
+            logger.info('[AUTO_FTP_SERVICE] Updating service config from Redis');
             if (configStr) {
                 this.serviceConfig = JSON.parse(configStr);
                 this.currentSiteId = 'TEST_SITE_ID' || '';
@@ -705,7 +613,7 @@ class AutoFtpVideoTransferService extends EventEmitter {
                 // });
             }
         } catch (error) {
-            console.error('[FTP_CONFIG_ERROR] _updateServiceConfig: Failed to update service config:', error);
+            logger.error('[FTP_CONFIG_ERROR] Failed to update service config:', { error: error.message });
         }
     }
 
@@ -770,7 +678,7 @@ class AutoFtpVideoTransferService extends EventEmitter {
             await this.redis.set(FTP_VIDEO_METRICS_KEY, JSON.stringify(metricsData), 'EX', 300);
             
         } catch (error) {
-            console.error('[AUTO_FTP_SERVICE] Error publishing video metrics:', error);
+            logger.error('[AUTO_FTP_SERVICE] Error publishing video metrics:', { error: error.message });
         }
     }
 
@@ -816,7 +724,7 @@ class AutoFtpVideoTransferService extends EventEmitter {
             await this._publishVideoTransferMetrics(metrics);
             
         } catch (error) {
-            console.error('[AUTO_FTP_SERVICE] Error updating video metrics:', error);
+            logger.error('[AUTO_FTP_SERVICE] Error updating video metrics:', { error: error.message });
         }
     }
 }
@@ -831,13 +739,13 @@ async function main() {
 
     // Graceful shutdown
     process.on('SIGINT', async () => {
-        console.log('[FTP_MAIN] Shutting down FTP service...');
+        logger.info('[FTP_MAIN] Shutting down FTP service...');
         await ftpVideoService.stop();
         process.exit(0);
     });
 
     process.on('SIGTERM', async () => {
-        console.log('[FTP_MAIN] Shutting down FTP service...');
+        logger.info('[FTP_MAIN] Shutting down FTP service...');
         await ftpVideoService.stop();
         process.exit(0);
     });
@@ -849,7 +757,7 @@ module.exports = { AutoFtpVideoTransferService };
 // Run if this file is executed directly
 if (require.main === module) {
     main().catch(error => {
-        console.error("Fatal error during FTP service initialization:", error);
+        logger.error('Fatal error during FTP service initialization:', { error: error.message, stack: error.stack });
         process.exit(1);
     });
 }

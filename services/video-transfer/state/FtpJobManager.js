@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'FtpJobManager' });
 const { v4: uuidv4 } = require('uuid');
 const TransferUtils = require('../../shared/TransferUtils');
 
@@ -44,7 +47,7 @@ class FtpJobManager {
             this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT, this.currentSiteId
         ]);
         
-        console.log(`[FTP_JOB] createNewJobWithUUID: ✓ Created new FTP job: ${batchId} (ID: ${rows[0].id})`);
+        logger.info(`[FTP_JOB] createNewJobWithUUID: ✓ Created new FTP job: ${batchId} (ID: ${rows[0].id})`);
         return rows[0];
     }
 
@@ -69,7 +72,7 @@ class FtpJobManager {
         const needCount = Math.max(0, targetCount - currentCount);
         if (needCount === 0) return [];
 
-        console.log(`[FTP_JOB] requestAdditionalFilesForCamera: Requesting ${needCount} additional files for camera ${cameraId}`);
+        logger.info(`[FTP_JOB] requestAdditionalFilesForCamera: Requesting ${needCount} additional files for camera ${cameraId}`);
 
         // Get files that haven't been FTP transferred yet and aren't in any FTP buffer
         const { rows } = await this.pool.query(`
@@ -86,7 +89,7 @@ class FtpJobManager {
             LIMIT $2
         `, [cameraId, needCount]);
 
-        console.log(`[FTP_JOB] requestAdditionalFilesForCamera: Found ${rows.length} additional files for camera ${cameraId}`);
+        logger.info(`[FTP_JOB] requestAdditionalFilesForCamera: Found ${rows.length} additional files for camera ${cameraId}`);
         return rows;
     }
 
@@ -159,7 +162,7 @@ class FtpJobManager {
      * Add video to FTP transfer queue
      */
     async addVideoToTransferQueue(videoData, jobId) {
-        console.log(`[FTP_JOB] addVideoToTransferQueue: Adding video ${videoData.videoName} to FTP transfer queue for job ${jobId}`);
+        logger.info(`[FTP_JOB] addVideoToTransferQueue: Adding video ${videoData.videoName} to FTP transfer queue for job ${jobId}`);
 
         const insertQuery = `
             INSERT INTO ${this.transferQueueTable} (
@@ -186,11 +189,11 @@ class FtpJobManager {
             'pending',
             jobId
         ];
-        console.log(params);
+        logger.info(params);
 
         const { rows } = await this.pool.query(insertQuery, params);
 
-        console.log(`[FTP_JOB] addVideoToTransferQueue: ✓ Added video to FTP transfer queue with ID: ${rows[0].id}`);
+        logger.info(`[FTP_JOB] addVideoToTransferQueue: ✓ Added video to FTP transfer queue with ID: ${rows[0].id}`);
         return rows[0];
     }
 
@@ -206,7 +209,7 @@ class FtpJobManager {
             AND NOT ($1::text = ANY(processed_cameras))
         `, [cameraId, jobId]);
 
-        console.log(`[FTP_JOB] addCameraToProcessed: ✓ Added camera ${cameraId} to processed list for job ${jobId}`);
+        logger.info(`[FTP_JOB] addCameraToProcessed: ✓ Added camera ${cameraId} to processed list for job ${jobId}`);
     }
 
     /**
@@ -255,12 +258,12 @@ class FtpJobManager {
                              expected_cameras.length === processed_cameras.length &&
                              expected_cameras.every(cam => processed_cameras.includes(cam));
 
-            console.log(`[FTP_JOB] checkJobCompletion: Job ${jobId} completion check: ${isComplete} (${(processed_cameras && processed_cameras.length) || 0}/${(expected_cameras && expected_cameras.length) || 0} cameras)`);
+            logger.info(`[FTP_JOB] checkJobCompletion: Job ${jobId} completion check: ${isComplete} (${(processed_cameras && processed_cameras.length) || 0}/${(expected_cameras && expected_cameras.length) || 0} cameras)`);
             
             return isComplete;
 
         } catch (error) {
-            console.error('[FTP_JOB] checkJobCompletion: Error:', error);
+            logger.error('[FTP_JOB] checkJobCompletion: Error:', error);
             return false;
         }
     }
@@ -286,7 +289,7 @@ class FtpJobManager {
         
         if (isJobComplete && isTransferComplete) {
             await this.updateJobStatus(jobId, 'completed');
-            console.log(`[FTP_JOB] checkAndCompleteJob: ✓ Job ${jobId} marked as completed`);
+            logger.info(`[FTP_JOB] checkAndCompleteJob: ✓ Job ${jobId} marked as completed`);
             return true;
         }
         
@@ -359,7 +362,7 @@ class FtpJobManager {
             };
 
         } catch (error) {
-            console.error('[FTP_JOB] Error getting transfer statistics:', error);
+            logger.error('[FTP_JOB] Error getting transfer statistics:', error);
             return {
                 activeJobs: 0,
                 completedJobs: 0,

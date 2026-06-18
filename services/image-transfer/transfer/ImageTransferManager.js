@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'ImageTransferManager' });
 const fs = require('fs-extra');
 const path = require('path');
 const TransferUtils = require('../../shared/TransferUtils');
@@ -24,7 +27,7 @@ class ImageTransferManager {
      */
     setEncryptionRequired(required) {
         this.isEncryptionRequired = required;
-        // console.log(`[IMAGE_TRANSFER] ImageTransferManager.setEncryptionRequired: Encryption ${required ? 'enabled' : 'disabled'}`);
+        // logger.info(`[IMAGE_TRANSFER] ImageTransferManager.setEncryptionRequired: Encryption ${required ? 'enabled' : 'disabled'}`);
     }
 
     /**
@@ -61,7 +64,7 @@ class ImageTransferManager {
             ORDER BY tq.created_at ASC
             LIMIT $1
         `;
-        // console.log(filesQuery);
+        // logger.info(filesQuery);
 
         const { rows } = await this.pool.query(filesQuery, [limit]);
 
@@ -72,11 +75,11 @@ class ImageTransferManager {
      * Process individual image file
      */
     async processImageFile(file) {
-        console.log(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Processing image file: ${file.file_path}`);
+        logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Processing image file: ${file.file_path}`);
         
         // Capture encryption decision ONCE at the start to avoid race conditions
         const shouldEncrypt = this.isEncryptionRequired;
-        console.log(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Image file ${file.id} - shouldEncrypt: ${shouldEncrypt}`);
+        logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Image file ${file.id} - shouldEncrypt: ${shouldEncrypt}`);
         
         try {
             // Update file destinations based on current config
@@ -91,14 +94,14 @@ class ImageTransferManager {
             const normalizedExportDir = path.normalize(exportDir);
             const normalizedFilePath = path.normalize(file.file_path);
 
-            console.log(`[IMAGE_TRANSFER] DEBUG: exportDir="${normalizedExportDir}", file.file_path="${normalizedFilePath}"`);
+            logger.info(`[IMAGE_TRANSFER] DEBUG: exportDir="${normalizedExportDir}", file.file_path="${normalizedFilePath}"`);
 
             let relativePath = path.relative(normalizedExportDir, normalizedFilePath);
 
             // Safety check: If path.relative returns an absolute path, something is wrong
             if (path.isAbsolute(relativePath)) {
-                console.error(`[IMAGE_TRANSFER] ERROR: path.relative returned absolute path: "${relativePath}"`);
-                console.error(`[IMAGE_TRANSFER] exportDir: "${normalizedExportDir}", file.file_path: "${normalizedFilePath}"`);
+                logger.error(`[IMAGE_TRANSFER] ERROR: path.relative returned absolute path: "${relativePath}"`);
+                logger.error(`[IMAGE_TRANSFER] exportDir: "${normalizedExportDir}", file.file_path: "${normalizedFilePath}"`);
 
                 // Fallback: Try to strip exportDir manually
                 if (normalizedFilePath.startsWith(normalizedExportDir)) {
@@ -110,7 +113,7 @@ class ImageTransferManager {
 
             const destinationPath = path.join(usbPath, relativePath);
             
-            console.log(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Image file: ${path.basename(file.file_path)} -> ${relativePath}`);
+            logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Image file: ${path.basename(file.file_path)} -> ${relativePath}`);
             
             // Update the transfer_queue record with paths
             await this.pool.query(`
@@ -137,10 +140,10 @@ class ImageTransferManager {
             // Update original files table
             await TransferUtils.markSourceFilesAsTransferred(this.pool, [file.file_id], 'auto');
             
-            console.log(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Successfully transferred image file ID: ${file.id}`);
+            logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Successfully transferred image file ID: ${file.id}`);
             
         } catch (error) {
-            console.error(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Failed to process image file ${file.id}:`, error);
+            logger.error(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Failed to process image file ${file.id}:`, error);
             // await TransferUtils.handleTransferError(this.pool, this.file, error, 'transfer_queue');
             throw error;
         }
@@ -169,20 +172,20 @@ class ImageTransferManager {
                 
         //         // If destination file has same size, assume it's already transferred correctly
         //         if (sourceStat.size === destStat.size) {
-        //             console.log(`[IMAGE_TRANSFER] ImageTransferManager.processNormalImageFile: File already exists with same size, skipping copy: ${destinationPath}`);
+        //             logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processNormalImageFile: File already exists with same size, skipping copy: ${destinationPath}`);
         //             shouldCopy = false;
         //         }
         //     } catch (statError) {
-        //         console.warn(`[IMAGE_TRANSFER] ImageTransferManager.processNormalImageFile: Could not compare file stats, proceeding with copy: ${statError.message}`);
+        //         logger.warn(`[IMAGE_TRANSFER] ImageTransferManager.processNormalImageFile: Could not compare file stats, proceeding with copy: ${statError.message}`);
         //     }
         // }
         
         if (shouldCopy) {
             // Use retry mechanism for copying
             await this.copyWithRetry(file.file_path, destinationPath, 3, 1000);
-            console.log(`[IMAGE_TRANSFER] ImageTransferManager.processNormalImageFile: Copied: ${file.file_path} to ${destinationPath}`);
+            logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processNormalImageFile: Copied: ${file.file_path} to ${destinationPath}`);
         } else {
-            console.log(`[IMAGE_TRANSFER] ImageTransferManager.processNormalImageFile: Skipped copy (file exists): ${file.file_path} to ${destinationPath}`);
+            logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processNormalImageFile: Skipped copy (file exists): ${file.file_path} to ${destinationPath}`);
         }
     }
 
@@ -198,14 +201,14 @@ class ImageTransferManager {
         const normalizedExportDir = path.normalize(exportDir);
         const normalizedFilePath = path.normalize(file.file_path);
 
-        console.log(`[IMAGE_TRANSFER] DEBUG: exportDir="${normalizedExportDir}", file.file_path="${normalizedFilePath}"`);
+        logger.info(`[IMAGE_TRANSFER] DEBUG: exportDir="${normalizedExportDir}", file.file_path="${normalizedFilePath}"`);
 
         let relativePath = path.relative(normalizedExportDir, normalizedFilePath);
 
         // Safety check: If path.relative returns an absolute path, something is wrong
         if (path.isAbsolute(relativePath)) {
-            console.error(`[IMAGE_TRANSFER] ERROR: path.relative returned absolute path: "${relativePath}"`);
-            console.error(`[IMAGE_TRANSFER] exportDir: "${normalizedExportDir}", file.file_path: "${normalizedFilePath}"`);
+            logger.error(`[IMAGE_TRANSFER] ERROR: path.relative returned absolute path: "${relativePath}"`);
+            logger.error(`[IMAGE_TRANSFER] exportDir: "${normalizedExportDir}", file.file_path: "${normalizedFilePath}"`);
 
             // Fallback: Try to strip exportDir manually
             if (normalizedFilePath.startsWith(normalizedExportDir)) {
@@ -226,7 +229,7 @@ class ImageTransferManager {
         const newFilename = `${file.id}`; // Use file ID as encrypted filename
         const encryptedFilePath = path.join(destinationGroupDir, newFilename);
         
-        console.log(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageFile: Encrypting: ${file.file_path} to ${encryptedFilePath}`);
+        logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageFile: Encrypting: ${file.file_path} to ${encryptedFilePath}`);
         await this.encryptionService.encryptFileAES(file.file_path, encryptedFilePath, aesKey, aesIv);
         
         // Store encryption metadata in the transfer_queue table
@@ -290,7 +293,7 @@ class ImageTransferManager {
                 
                 const encryptedFilePath = path.join(destinationGroupDir, newFilename);
                 
-                console.log(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Encrypting batch file: ${file.file_path} to ${encryptedFilePath}`);
+                logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Encrypting batch file: ${file.file_path} to ${encryptedFilePath}`);
                 await this.encryptionService.encryptFileAES(file.file_path, encryptedFilePath, aesKey, aesIv);
                 
                 filesData.push({
@@ -320,7 +323,7 @@ class ImageTransferManager {
                 // Update original files table
                 await TransferUtils.markSourceFilesAsTransferred(this.pool, [file.file_id], 'auto');
                 
-                console.log(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Successfully transferred image file ID: ${file.id}`);
+                logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Successfully transferred image file ID: ${file.id}`);
             }
             
             // Create and encrypt metadata.json with RSA
@@ -331,17 +334,17 @@ class ImageTransferManager {
             
             const metadataJson = JSON.stringify(metadata, null, 2);
             const metadataPath = path.join(destinationGroupDir, 'metadata.json');
-            console.log({
+            logger.info({
                 'filesData': filesData,
                 'keysData': keysData,
                 'metadataPath': metadataPath,
             });
             
-            console.log(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Creating RSA-encrypted metadata file: ${metadataPath}`);
+            logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Creating RSA-encrypted metadata file: ${metadataPath}`);
             // const encryptedMetadata = await this.encryptionService.encryptWithRSAPublicKey(metadataJson, publicKeyPath);
             await fs.writeFile(metadataPath, metadataJson);
             
-            console.log(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Created encrypted batch ${batchIndex + 1} with ${batch.length} files in: ${destinationGroupDir}`);
+            logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Created encrypted batch ${batchIndex + 1} with ${batch.length} files in: ${destinationGroupDir}`);
         }
     }
 
@@ -355,14 +358,14 @@ class ImageTransferManager {
             const normalizedExportDir = path.normalize(exportDir);
             const normalizedFilePath = path.normalize(file.file_path);
 
-            console.log(`[IMAGE_TRANSFER] DEBUG: exportDir="${normalizedExportDir}", file.file_path="${normalizedFilePath}"`);
+            logger.info(`[IMAGE_TRANSFER] DEBUG: exportDir="${normalizedExportDir}", file.file_path="${normalizedFilePath}"`);
 
             let relativePath = path.relative(normalizedExportDir, normalizedFilePath);
 
             // Safety check: If path.relative returns an absolute path, something is wrong
             if (path.isAbsolute(relativePath)) {
-                console.error(`[IMAGE_TRANSFER] ERROR: path.relative returned absolute path: "${relativePath}"`);
-                console.error(`[IMAGE_TRANSFER] exportDir: "${normalizedExportDir}", file.file_path: "${normalizedFilePath}"`);
+                logger.error(`[IMAGE_TRANSFER] ERROR: path.relative returned absolute path: "${relativePath}"`);
+                logger.error(`[IMAGE_TRANSFER] exportDir: "${normalizedExportDir}", file.file_path: "${normalizedFilePath}"`);
 
                 // Fallback: Try to strip exportDir manually
                 if (normalizedFilePath.startsWith(normalizedExportDir)) {
@@ -373,7 +376,7 @@ class ImageTransferManager {
             }
 
             const relativeDirPath = path.dirname(relativePath);
-            console.log({
+            logger.info({
                 'groupFilesByDirectory': {
                     relativeDirPath
                 }
@@ -384,7 +387,7 @@ class ImageTransferManager {
             }
             filesByDir[relativeDirPath].push(file);
         }
-        console.log({filesByDir});
+        logger.info({filesByDir});
         return filesByDir;
     }
 
@@ -414,7 +417,7 @@ class ImageTransferManager {
                 
                 // If it's an EBUSY error and we have more attempts, wait and retry
                 if (error.code === 'EBUSY' && attempt < maxRetries) {
-                    console.warn(`[IMAGE_TRANSFER] ImageTransferManager.copyWithRetry: Copy attempt ${attempt} failed with EBUSY error, retrying in ${delay}ms...`);
+                    logger.warn(`[IMAGE_TRANSFER] ImageTransferManager.copyWithRetry: Copy attempt ${attempt} failed with EBUSY error, retrying in ${delay}ms...`);
                     await this.sleep(delay);
                     continue;
                 }
@@ -438,7 +441,7 @@ class ImageTransferManager {
         const params = errorMessage ? [status, errorMessage, fileId] : [status, fileId];
         
         await this.pool.query(query, params);
-        console.log(`[IMAGE_TRANSFER] ImageTransferManager.updateTransferStatus: Updated file ${fileId} status to: ${status}`);
+        logger.info(`[IMAGE_TRANSFER] ImageTransferManager.updateTransferStatus: Updated file ${fileId} status to: ${status}`);
     }
 
     /**
@@ -475,7 +478,7 @@ class ImageTransferManager {
                 WHERE id = $2
             `, [jobFinalStatus, job.id]);
             
-            console.log(`[IMAGE_TRANSFER] ImageTransferManager.checkAndUpdateCompletedJobs: Job ${job.id} (${job.batch_id}) marked as ${jobFinalStatus} - transferred: ${stats.transferred_files}, failed: ${stats.failed_files}`);
+            logger.info(`[IMAGE_TRANSFER] ImageTransferManager.checkAndUpdateCompletedJobs: Job ${job.id} (${job.batch_id}) marked as ${jobFinalStatus} - transferred: ${stats.transferred_files}, failed: ${stats.failed_files}`);
         }
     }
 

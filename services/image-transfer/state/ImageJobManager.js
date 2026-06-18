@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'ImageJobManager' });
 const { v4: uuidv4 } = require('uuid');
 const { calculateBatchStats } = require('../../../utils/batchUtils.js');
 
@@ -41,12 +44,12 @@ class ImageJobManager {
         
         if (result.rows.length > 0) {
             const activeJob = result.rows[0];
-            console.log(`[IMAGE_JOB] Found active job: ${activeJob.batch_id} (status: ${activeJob.status})`);
+            logger.info(`[IMAGE_JOB] Found active job: ${activeJob.batch_id} (status: ${activeJob.status})`);
             
             // If paused, resume it
             if (activeJob.status === 'paused') {
                 await this.updateJobStatus(activeJob.id, 'transferring');
-                console.log(`[IMAGE_JOB] Resumed paused job: ${activeJob.batch_id}`);
+                logger.info(`[IMAGE_JOB] Resumed paused job: ${activeJob.batch_id}`);
             }
             
             return activeJob;
@@ -59,12 +62,12 @@ class ImageJobManager {
         }
         
         // Create new job and batch
-        console.log(`[IMAGE_JOB] Creating new job for ${filesToTransfer.length} file groups`);
+        logger.info(`[IMAGE_JOB] Creating new job for ${filesToTransfer.length} file groups`);
         const newJob = await this.createTransferJob(origin);
         await this.createTransferBatch(filesToTransfer, newJob);
         await this.updateJobStatus(newJob.id, 'transferring');
         
-        console.log(`[IMAGE_JOB] ✓ Created and started new job: ${newJob.batch_id} (ID: ${newJob.id})`);
+        logger.info(`[IMAGE_JOB] ✓ Created and started new job: ${newJob.batch_id} (ID: ${newJob.id})`);
         return newJob;
     }
 
@@ -79,7 +82,7 @@ class ImageJobManager {
             RETURNING *
         `, [batchId, origin]);
         
-        console.log(`[IMAGE_JOB] Created new image transfer job: ${batchId} (ID: ${result.rows[0].id})`);
+        logger.info(`[IMAGE_JOB] Created new image transfer job: ${batchId} (ID: ${result.rows[0].id})`);
         return result.rows[0];
     }
 
@@ -125,7 +128,7 @@ class ImageJobManager {
         }
         
         await this.pool.query(`UPDATE ${this.jobTable} SET ${setClause} WHERE id = $1`, values);
-        console.log(`[IMAGE_JOB] Updated job ${jobId} status to: ${status}`);
+        logger.info(`[IMAGE_JOB] Updated job ${jobId} status to: ${status}`);
     }
 
     /**
@@ -213,7 +216,7 @@ class ImageJobManager {
         }
 
         if (insertValues.length === 0) {
-            console.log(`[IMAGE_JOB] No files to insert for job ${job.id}`);
+            logger.info(`[IMAGE_JOB] No files to insert for job ${job.id}`);
             return job.batch_id;
         }
 
@@ -228,7 +231,7 @@ class ImageJobManager {
         // Update job statistics
         await this.updateJobStats(job.id);
 
-        console.log(`[IMAGE_JOB] Created transfer batch for job ${job.id} with ${filesToCopy.length} groups (${insertParams.length / 7} total files)`);
+        logger.info(`[IMAGE_JOB] Created transfer batch for job ${job.id} with ${filesToCopy.length} groups (${insertParams.length / 7} total files)`);
         return job.batch_id;
     }
 
@@ -277,7 +280,7 @@ class ImageJobManager {
                 WHERE id = $2
             `, [jobFinalStatus, job.id]);
             
-            console.log(`[IMAGE_JOB] Job ${job.id} (${job.batch_id}) marked as ${jobFinalStatus} - transferred: ${stats.transferred_files}, failed: ${stats.failed_files}`);
+            logger.info(`[IMAGE_JOB] Job ${job.id} (${job.batch_id}) marked as ${jobFinalStatus} - transferred: ${stats.transferred_files}, failed: ${stats.failed_files}`);
         }
     }
 
@@ -293,7 +296,7 @@ class ImageJobManager {
         `, [reason]);
 
         if (result.rows.length > 0) {
-            console.log(`[IMAGE_JOB] Paused ${result.rows.length} image jobs: ${result.rows.map(j => j.batch_id).join(', ')}`);
+            logger.info(`[IMAGE_JOB] Paused ${result.rows.length} image jobs: ${result.rows.map(j => j.batch_id).join(', ')}`);
         }
     }
 
@@ -309,9 +312,9 @@ class ImageJobManager {
         `);
 
         if (result.rows.length > 0) {
-            console.log(`[IMAGE_JOB] Resumed ${result.rows.length} image jobs: ${result.rows.map(j => j.batch_id).join(', ')}`);
+            logger.info(`[IMAGE_JOB] Resumed ${result.rows.length} image jobs: ${result.rows.map(j => j.batch_id).join(', ')}`);
         } else {
-            console.log(`[IMAGE_JOB] No image jobs to resume`);
+            logger.info(`[IMAGE_JOB] No image jobs to resume`);
         }
     }
 }

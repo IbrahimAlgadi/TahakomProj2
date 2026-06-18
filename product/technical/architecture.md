@@ -1,7 +1,7 @@
 # Technical Architecture
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18 (shared logger + trace IDs added)
+Last updated: 2026-06-18 (full logger rollout complete — all 23 services/helpers migrated)
 
 > For a living service/table map, see [PROJECT_MAP.md](../../PROJECT_MAP.md).  
 > For database schema details, see [database/schema.md](database/schema.md).  
@@ -219,7 +219,7 @@ Trace IDs let you follow one HTTP request or background job across all log lines
 
 The mechanism uses Node's built-in `AsyncLocalStorage` (`async_hooks`). Any field stored in the current async context (e.g. `traceId`, `jobId`, `camera`) is merged automatically into every log entry emitted within that context.
 
-**Usage in background jobs** (`refactored_autoVideoTransferEDAMicroservice.js` and others):
+**Usage in background jobs** (`refactored_autoVideoTransferEDAMicroservice.js`, `autoFtpVideoTransferService.js`, `autoUSBImageTransferService.js`, `autoFTPImageTransferService.js`, `monitorISSMediaFilesOptimizedMicroservice.js` and all remaining PM2 entry services — full rollout complete as of 2026-06-18):
 
 ```js
 const { runWithTrace, newTraceId } = require('./utils/logger');

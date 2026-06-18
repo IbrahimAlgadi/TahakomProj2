@@ -8,6 +8,9 @@ const ImageProcessor = require('./services/image-transfer/processors/ImageProces
 const TransferUtils = require('./services/shared/TransferUtils');
 const encryptionService = require('./utils/encryptionService');
 const config = require('./utils/envConfig');
+const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
+
+const logger = createLogger({ service: 'autoUSBImageTransferService' });
 
 // Database Configuration
 let DB_USER = "postgres";
@@ -153,7 +156,7 @@ function updateScheduleStatus() {
         NEXT_SCHEDULED_RUN = calculateNextScheduledRun(SCHEDULE_CONFIG);
     }
 
-    console.log(`[USB_IMAGE_SCHEDULE] updateScheduleStatus: Status: ${CURRENT_SCHEDULE_STATUS}, Next run: ${NEXT_SCHEDULED_RUN}, In window: ${IS_IN_SCHEDULED_WINDOW}`);
+    logger.info(`[USB_IMAGE_SCHEDULE] updateScheduleStatus: Status: ${CURRENT_SCHEDULE_STATUS}, Next run: ${NEXT_SCHEDULED_RUN}, In window: ${IS_IN_SCHEDULED_WINDOW}`);
 }
 
 // Function to publish transfer metrics to Redis
@@ -172,9 +175,9 @@ function publishImageTransferMetrics(type, data) {
         };
         
         redisMetrics.publish('usb_image_transfer_metrics', JSON.stringify(metricsPayload));
-        console.log(`[USB_IMAGE_REDIS_METRICS] publishImageTransferMetrics: Published metrics: ${type} - ${data.processedCount || 0}/${data.totalFiles || 0}`);
+        logger.info(`[USB_IMAGE_REDIS_METRICS] Published metrics: ${type} - ${data.processedCount || 0}/${data.totalFiles || 0}`);
     } catch (error) {
-        console.error('[USB_IMAGE_REDIS_METRICS] publishImageTransferMetrics: Error publishing metrics:', error);
+        logger.error('[USB_IMAGE_REDIS_METRICS] Error publishing metrics:', { error: error.message });
     }
 }
 
@@ -186,10 +189,10 @@ function readConfig() {
             const configData = JSON.parse(fs.readFileSync(config.CONFIG_FILE_PATH, 'utf8'));
             return configData;
         }
-        console.log('[USB_IMAGE] readConfig: Config file not found:', config.CONFIG_FILE_PATH);
+        logger.warn('[USB_IMAGE] readConfig: Config file not found:', { path: config.CONFIG_FILE_PATH });
         return null;
     } catch (error) {
-        console.error('[USB_IMAGE] readConfig: Error reading config file:', error);
+        logger.error('[USB_IMAGE] readConfig: Error reading config file:', { error: error.message });
         return null;
     }
 }
@@ -206,11 +209,9 @@ async function updateDriveInfo() {
                 const configuredDrive = CONFIG_STATE && CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive;
                 const transferMode = CONFIG_STATE && CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.transferMode;
 
-                // Handle "ANY" mode OR when transferMode is 'any'
                 if (transferMode === 'any' || configuredDrive === 'ANY') {
-                    console.log(`[USB_IMAGE] updateDriveInfo: Transfer mode is 'any' - checking connected drives`);
+                    logger.info(`[USB_IMAGE] updateDriveInfo: Transfer mode is 'any' - checking connected drives`);
 
-                    // Check if configured drive (if set and not "ANY") is connected
                     if (configuredDrive && configuredDrive !== 'ANY') {
                         targetDrive = driveList.find(drive =>
                             drive.drive === configuredDrive ||
@@ -219,13 +220,11 @@ async function updateDriveInfo() {
                         );
                     }
 
-                    // If configured drive not connected, use first available
                     if (!targetDrive) {
                         targetDrive = driveList[0];
-                        console.log(`[USB_IMAGE] updateDriveInfo: Using first available drive: ${targetDrive.drive}`);
+                        logger.info(`[USB_IMAGE] updateDriveInfo: Using first available drive: ${targetDrive.drive}`);
 
-                        // Update config file with the actual drive being used (so it persists)
-                        const actualDrive = targetDrive.drive.replace(':', ''); // Remove colon
+                        const actualDrive = targetDrive.drive.replace(':', '');
                         if (configuredDrive !== actualDrive) {
                             try {
                                 const fs = require('fs-extra');
@@ -233,16 +232,15 @@ async function updateDriveInfo() {
                                 if (currentConfig) {
                                     currentConfig.autoTransfer.drive = actualDrive;
                                     fs.writeFileSync(config.CONFIG_FILE_PATH, JSON.stringify(currentConfig, null, 2));
-                                    CONFIG_STATE = currentConfig; // Update in-memory state
-                                    console.log(`[USB_IMAGE] updateDriveInfo: Updated config with drive ${actualDrive}`);
+                                    CONFIG_STATE = currentConfig;
+                                    logger.info(`[USB_IMAGE] updateDriveInfo: Updated config with drive ${actualDrive}`);
                                 }
                             } catch (error) {
-                                console.error('[USB_IMAGE] updateDriveInfo: Error updating config file:', error);
+                                logger.error('[USB_IMAGE] updateDriveInfo: Error updating config file:', { error: error.message });
                             }
                         }
                     }
                 } else {
-                    // Specific drive mode - find the exact drive
                     if (configuredDrive) {
                         targetDrive = driveList.find(drive =>
                             drive.drive === configuredDrive ||
@@ -252,8 +250,7 @@ async function updateDriveInfo() {
                     }
 
                     if (!targetDrive) {
-                        console.warn(`[USB_IMAGE] updateDriveInfo: Target drive '${configuredDrive}' not found`);
-                        // Don't use fallback in specific mode - wait for correct drive
+                        logger.warn(`[USB_IMAGE] updateDriveInfo: Target drive '${configuredDrive}' not found`);
                         DRIVE_INFO = null;
                         IS_DRIVE_CONNECTED = false;
                         SHOULD_STOP_TRANSFER = true;
@@ -274,16 +271,16 @@ async function updateDriveInfo() {
                 DRIVE_INFO = null;
                 IS_DRIVE_CONNECTED = false;
                 SHOULD_STOP_TRANSFER = true;
-                console.log('[USB_IMAGE] updateDriveInfo: No drives connected');
+                logger.info('[USB_IMAGE] updateDriveInfo: No drives connected');
             }
         } else {
             DRIVE_INFO = null;
             IS_DRIVE_CONNECTED = false;
             SHOULD_STOP_TRANSFER = true;
-            console.log('[USB_IMAGE] updateDriveInfo: No drive list found in Redis');
+            logger.info('[USB_IMAGE] updateDriveInfo: No drive list found in Redis');
         }
     } catch (error) {
-        console.error('[USB_IMAGE] updateDriveInfo: Error updating drive info:', error);
+        logger.error('[USB_IMAGE] updateDriveInfo: Error updating drive info:', { error: error.message });
         DRIVE_INFO = null;
         IS_DRIVE_CONNECTED = false;
         SHOULD_STOP_TRANSFER = true;
@@ -293,9 +290,9 @@ async function updateDriveInfo() {
 // Redis PubSub Listeners
 redisPubSub.subscribe(CONNECTED_DRIVE_LIST + '_update', CONFIG_STATE_KEY + '_update', (err, count) => {
     if (err) {
-        console.error('[USB_IMAGE] redisPubSub.subscribe: Failed to subscribe: %s', err.message);
+        logger.error('[USB_IMAGE] redisPubSub.subscribe: Failed to subscribe:', { error: err.message });
     } else {
-        console.log(`[USB_IMAGE] redisPubSub.subscribe: Subscribed successfully! Listening on ${count} channel(s).`);
+        logger.info(`[USB_IMAGE] redisPubSub.subscribe: Subscribed successfully! Listening on ${count} channel(s).`);
     }
 });
 
@@ -354,344 +351,258 @@ redisPubSub.on('message', async (channel, message) => {
             // })
             
             if (IS_AUTO_TRANSFER_ACTIVE && !wasActive) {
-                console.log("[USB_IMAGE_REDIS_UPDATE] redisPubSub.on: Auto transfer reactivated - resuming paused jobs");
+                logger.info("[USB_IMAGE_REDIS_UPDATE] Auto transfer reactivated - resuming paused jobs");
                 await imageJobManager.resumeActiveJobs();
             } else if (!IS_AUTO_TRANSFER_ACTIVE && wasActive) {
-                console.log("[USB_IMAGE_REDIS_UPDATE] redisPubSub.on: Auto transfer stopped - pausing active jobs");
+                logger.info("[USB_IMAGE_REDIS_UPDATE] Auto transfer stopped - pausing active jobs");
                 await imageJobManager.pauseActiveJobs('Auto transfer disabled');
             }
         }
     } catch (error) {
-        console.error('[USB_IMAGE_REDIS_UPDATE] redisPubSub.on: Error processing Redis message:', error);
+        logger.error('[USB_IMAGE_REDIS_UPDATE] redisPubSub.on: Error processing Redis message:', { error: error.message });
     }
 });
 
 // Main Image Transfer Consumer
 async function consumer() {
-    console.log('--------------------------------');
-    console.log('--------------------------------');
-    console.log('--------------------------------');
-    console.log('--------------------------------');
-    console.log('[USB_IMAGE_CONSUMER] consumer: USB Image Transfer Service started...');   
+    logger.info('[USB_IMAGE_CONSUMER] USB Image Transfer Service started...');   
     
     while (true) {
         try {
             if (!IS_AUTO_TRANSFER_ACTIVE) {
-                console.log("[USB_IMAGE_CONSUMER] consumer: Auto transfer disabled - pausing active jobs");
+                logger.info("[USB_IMAGE_CONSUMER] Auto transfer disabled - pausing active jobs");
                 await imageJobManager.pauseActiveJobs('Auto transfer disabled');
                 await sleep(1000);
                 continue;
             }
 
             if (!IS_IMAGE_TRANSFER_ACTIVE) {
-                console.log("[USB_IMAGE_CONSUMER] consumer: Image transfer disabled - pausing active jobs");
+                logger.info("[USB_IMAGE_CONSUMER] Image transfer disabled - pausing active jobs");
                 await imageJobManager.pauseActiveJobs('Image transfer disabled');
                 await sleep(1000);
                 continue;
             }
 
-            // Add schedule check
             if (IS_SCHEDULED_TRANSFER && !IS_IN_SCHEDULED_WINDOW) {
-                console.log("[USB_IMAGE_CONSUMER] consumer: Scheduled transfer - waiting for window. Next run: " + NEXT_SCHEDULED_RUN + ", Status: " + CURRENT_SCHEDULE_STATUS);
+                logger.info("[USB_IMAGE_CONSUMER] Scheduled transfer - waiting for window", { nextRun: NEXT_SCHEDULED_RUN, status: CURRENT_SCHEDULE_STATUS });
                 await imageJobManager.pauseActiveJobs('Outside scheduled window');
-                await sleep(1000); // Check every 30 seconds during scheduled mode
-                updateScheduleStatus(); // Re-check schedule status
+                await sleep(1000);
+                updateScheduleStatus();
                 continue;
             }
 
             if (IS_SCHEDULED_TRANSFER && IS_IN_SCHEDULED_WINDOW) {
-                console.log("[USB_IMAGE_CONSUMER] consumer: In scheduled transfer window - processing images");
+                logger.info("[USB_IMAGE_CONSUMER] In scheduled transfer window - processing images");
             }
 
             if (!IS_DRIVE_CONNECTED) {
-                console.log("[USB_IMAGE_CONSUMER] consumer: Drive not connected - service paused");
+                logger.info("[USB_IMAGE_CONSUMER] Drive not connected - service paused");
                 await sleep(1000);
                 continue;
             }
 
             if (SHOULD_STOP_TRANSFER) {
-                console.log("[USB_IMAGE_CONSUMER] consumer: USB storage full - service paused");
+                logger.info("[USB_IMAGE_CONSUMER] USB storage full - service paused");
                 await sleep(1000);
                 continue;
             }
 
-            // Update drive info periodically
             await updateDriveInfo();
 
-            // Log status
             const spaceStatus = imageSpaceValidator.getSpaceStatus();
-            console.log(`[USB_IMAGE_CONSUMER] consumer: Status: Active=${IS_AUTO_TRANSFER_ACTIVE}, Connected=${IS_DRIVE_CONNECTED}, Space=${spaceStatus.message}`);
+            logger.info(`[USB_IMAGE_CONSUMER] Status: Active=${IS_AUTO_TRANSFER_ACTIVE}, Connected=${IS_DRIVE_CONNECTED}, Space=${spaceStatus.message}`);
 
-            // Get or create active job
             const activeJob = await imageJobManager.getOrCreateActiveJob('auto', 1000);
             if (!activeJob) {
-                console.log("[USB_IMAGE_CONSUMER] consumer: No active job and no files to process");
+                logger.info("[USB_IMAGE_CONSUMER] No active job and no files to process");
                 await sleep(1000);
                 continue;
             }
 
-            console.log(`[USB_IMAGE_CONSUMER] consumer: Processing job: ${activeJob.batch_id} (status: ${activeJob.status})`);
+            await runWithTrace({ traceId: newTraceId(), jobId: activeJob.batch_id, jobStatus: activeJob.status }, async () => {
+                logger.info(`[USB_IMAGE_CONSUMER] Processing job: ${activeJob.batch_id}`, { jobId: activeJob.batch_id, status: activeJob.status });
 
-            // Get pending files for this job
-            const filesToProcess = await imageTransferManager.getPendingFiles(1000);
-            console.log(`[USB_IMAGE_CONSUMER] consumer: Found ${filesToProcess.length} pending image files for job ${activeJob.batch_id}`);
+                const filesToProcess = await imageTransferManager.getPendingFiles(1000);
+                logger.info(`[USB_IMAGE_CONSUMER] Found ${filesToProcess.length} pending image files`, { count: filesToProcess.length, jobId: activeJob.batch_id });
 
-            if (filesToProcess.length === 0) {
-                console.log(`[USB_IMAGE_CONSUMER] consumer: No pending files for job ${activeJob.batch_id} - checking for completion`);
-                await sleep(1000);
-                continue;
-            }
-
-            console.log(`[USB_IMAGE_CONSUMER] consumer: Processing batch of ${filesToProcess.length} image files for job ${activeJob.batch_id}`);
-
-            // Publish batch start metrics
-            console.log({
-                'batch_start': {
-                    jobId: activeJob.batch_id,
-                    totalFiles: filesToProcess.length,
-                    batchSize: filesToProcess.length
+                if (filesToProcess.length === 0) {
+                    logger.info(`[USB_IMAGE_CONSUMER] No pending files for job ${activeJob.batch_id} - checking for completion`);
+                    await sleep(1000);
+                    return;
                 }
-            });
 
-            publishImageTransferMetrics('batch_start', {
-                jobId: activeJob.batch_id,
-                totalFiles: filesToProcess.length,
-                batchSize: filesToProcess.length
-            });
+                logger.info(`[USB_IMAGE_CONSUMER] Processing batch of ${filesToProcess.length} image files`, { count: filesToProcess.length });
 
-            // Process files batch
-            const startTime = process.hrtime();
-            let processedCount = 0;
-            let failedCount = 0;
+                const startTime = process.hrtime();
+                let processedCount = 0;
+                let failedCount = 0;
 
-            // Process files individually (existing logic for non-encrypted)
-            console.log(`[USB_IMAGE_CONSUMER] consumer: Processing ${filesToProcess.length} files individually`);
+                const exportDir = CONFIG_STATE.storage && CONFIG_STATE.storage.directory;
+                const usbPath = `${CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive}:\\`;
+                const publicKeyPath = 'certs/'+CONFIG_STATE.certificates.publicKeyFilename;
 
-            // Get necessary paths for batch processing
-            const exportDir = CONFIG_STATE.storage && CONFIG_STATE.storage.directory;
-            const usbPath = `${CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive}:\\`;
-            const publicKeyPath = 'certs/'+CONFIG_STATE.certificates.publicKeyFilename;
+                logger.info('[USB_IMAGE_CONSUMER] Processing config', { exportDir, usbPath, publicKeyPath });
 
-            console.log('[USB_IMAGE_CONSUMER] DEBUG Config:', {
-                exportDir,
-                usbPath,
-                publicKeyPath,
-                sampleFilePath: filesToProcess[0]?.file_path
-            });
-
-
-            if (IS_ENCRYPTION_REQUIRED) {
-                // Group files by directory, then into batches of 3
-                const filesByDir = imageTransferManager.groupFilesByDirectory(filesToProcess, exportDir);
-                console.log('--------------------------------');
-                console.log('--------------------------------');
-                console.log('--------------------------------');
-                console.log('--------------------------------');
-                console.log({
-                    filesByDir
-                });
-                console.log('--------------------------------');
-                console.log('--------------------------------');
-                console.log('--------------------------------');
-                console.log('--------------------------------');
-                for (const [relativeDirPath, dirFiles] of Object.entries(filesByDir)) {
-                    if (dirFiles.length === 0) {
-                        console.log(`[USB_IMAGE_CONSUMER] consumer: No files to process for directory ${relativeDirPath}`);
-                        continue;
-                    }
-
-                    if (dirFiles.length < 3) {
-                        console.log(`[USB_IMAGE_CONSUMER] consumer: Not enough files to process for directory ${relativeDirPath}`);
-                        // TODO: Handle this case by delete files from the transfer queue database so other files can be added to the queue
-                        // Or we can handle this case before files are added to the queue and check if the number of files is less than the number of cameras
-                        // so we don't add files to the queue that are not completed the required batch size
-                        processedCount+=dirFiles.length;
-                        // Mark all files as failed
-                        for (const file of dirFiles) {
-                            await TransferUtils.handleImageTransferError(pool, file, new Error('Not enough files to process for directory'), 'transfer_queue');
+                if (IS_ENCRYPTION_REQUIRED) {
+                    const filesByDir = imageTransferManager.groupFilesByDirectory(filesToProcess, exportDir);
+                    for (const [relativeDirPath, dirFiles] of Object.entries(filesByDir)) {
+                        if (dirFiles.length === 0) {
+                            logger.info(`[USB_IMAGE_CONSUMER] No files to process for directory ${relativeDirPath}`);
+                            continue;
                         }
-                        continue;
-                    }
 
-                    console.log(`[USB_IMAGE_CONSUMER] consumer: Encryption enabled - processing ${filesToProcess.length} files in batches of 3`);
-
-                    try {
-                        // Process all files as encrypted batches
-                        await imageTransferManager.processEncryptedImageBatch(dirFiles, relativeDirPath, exportDir, usbPath, publicKeyPath);
-                        
-                        processedCount += dirFiles.length;
-
-                        console.log({
-                            'batch_complete': {
-                                jobId: activeJob.batch_id,
-                                processedCount: processedCount,
-                                totalFiles: dirFiles.length,
+                        if (dirFiles.length < 3) {
+                            logger.warn(`[USB_IMAGE_CONSUMER] Not enough files for directory ${relativeDirPath}`, { count: dirFiles.length });
+                            processedCount += dirFiles.length;
+                            for (const file of dirFiles) {
+                                await TransferUtils.handleImageTransferError(pool, file, new Error('Not enough files to process for directory'), 'transfer_queue');
                             }
-                        });
-                        console.log(`[USB_IMAGE_CONSUMER] consumer: Successfully processed ${processedCount} files in encrypted batches`);
+                            continue;
+                        }
 
-                        // Publish progress metrics every 5 files or on completion
-                        if (processedCount % 5 === 0 || processedCount === filesToProcess.length) {
+                        logger.info(`[USB_IMAGE_CONSUMER] Encryption enabled - processing ${filesToProcess.length} files in batches of 3`);
+
+                        try {
+                            await imageTransferManager.processEncryptedImageBatch(dirFiles, relativeDirPath, exportDir, usbPath, publicKeyPath);
+                            processedCount += dirFiles.length;
+
+                            logger.info(`[USB_IMAGE_CONSUMER] Successfully processed ${processedCount} files in encrypted batches`);
+
+                            if (processedCount % 5 === 0 || processedCount === filesToProcess.length) {
+                                publishImageTransferMetrics('batch_progress', {
+                                    jobId: activeJob.batch_id,
+                                    processedCount: processedCount,
+                                    totalFiles: filesToProcess.length,
+                                    failedCount: failedCount,
+                                    currentFile: dirFiles[0].file_name,
+                                    progressPercentage: Math.round((processedCount / filesToProcess.length) * 100),
+                                    throughput: processedCount / ((process.hrtime(startTime)[0] + process.hrtime(startTime)[1] / 1e9))
+                                });
+                            }
+                        } catch (error) {
+                            logger.error(`[USB_IMAGE_CONSUMER] Batch encryption failed:`, { error: error.message });
+                            failedCount = dirFiles.length;
+                            
+                            for (const file of dirFiles) {
+                                logger.error(`[USB_IMAGE_CONSUMER] Error processing image file ${file.id}:`, { error: error.message, fileId: file.id });
+                                await TransferUtils.handleImageTransferError(pool, file, error, 'transfer_queue');
+                            }
                             publishImageTransferMetrics('batch_progress', {
                                 jobId: activeJob.batch_id,
                                 processedCount: processedCount,
                                 totalFiles: filesToProcess.length,
                                 failedCount: failedCount,
-                                currentFile: dirFiles[0].file_name,
-                                progressPercentage: Math.round((processedCount / filesToProcess.length) * 100),
-                                throughput: processedCount / ((process.hrtime(startTime)[0] + process.hrtime(startTime)[1] / 1e9))
+                                progressPercentage: Math.round(((processedCount + failedCount) / filesToProcess.length) * 100),
+                                lastError: error.message,
+                                hasError: true
                             });
-                        }
-                    } catch (error) {
-                        console.error(`[USB_IMAGE_CONSUMER] consumer: Batch encryption failed:`, error);
-                        failedCount = dirFiles.length;
-                        
-                        // Mark all files as failed
-                        for (const file of dirFiles) {
-                            console.error(`[USB_IMAGE_CONSUMER] consumer: Error processing image file ${file.id}:`, error);
-                            await TransferUtils.handleImageTransferError(pool, file, error, 'transfer_queue');
-                        }
-                        // Publish error progress metrics
-                        publishImageTransferMetrics('batch_progress', {
-                            jobId: activeJob.batch_id,
-                            processedCount: processedCount,
-                            totalFiles: filesToProcess.length,
-                            failedCount: failedCount,
-                            currentFile: file.file_name,
-                            progressPercentage: Math.round(((processedCount + failedCount) / filesToProcess.length) * 100),
-                            lastError: error.message,
-                            hasError: true
-                        });
-                        // Handle different types of errors
-                        if (TransferUtils.isFileNotFoundError(error)) {
-                            console.log(`[USB_IMAGE_CONSUMER] consumer: File ${file.id} not found - marking as failed`);
-                            await imageTransferManager.updateTransferStatus(file.id, 'failed', 'File not found');
-                            continue;
-                        }
-                        if (TransferUtils.isDriveRelatedError(error)) {
-                            console.log(`[USB_IMAGE_CONSUMER] consumer: Drive error detected - stopping batch`);
-                            IS_DRIVE_CONNECTED = false;
-                            break;
-                        } else {
-                            // Handle with retry logic
-                            await TransferUtils.handleImageTransferError(pool, file, error, 'transfer_queue');
+                            if (TransferUtils.isFileNotFoundError(error)) {
+                                await imageTransferManager.updateTransferStatus(dirFiles[0].id, 'failed', 'File not found');
+                                continue;
+                            }
+                            if (TransferUtils.isDriveRelatedError(error)) {
+                                logger.warn(`[USB_IMAGE_CONSUMER] Drive error detected - stopping batch`);
+                                IS_DRIVE_CONNECTED = false;
+                                break;
+                            } else {
+                                await TransferUtils.handleImageTransferError(pool, dirFiles[0], error, 'transfer_queue');
+                            }
                         }
 
+                        if (processedCount % 10 === 0) {
+                            logger.info(`[USB_IMAGE_CONSUMER] Batch progress: ${processedCount}/${filesToProcess.length} images processed`);
+                        }
                     }
+                } else {
+                    for (const file of filesToProcess) {
+                        try {
+                            if (!IS_AUTO_TRANSFER_ACTIVE || !IS_DRIVE_CONNECTED || SHOULD_STOP_TRANSFER) {
+                                const reason = !IS_AUTO_TRANSFER_ACTIVE ? 'auto transfer disabled' : 
+                                            !IS_DRIVE_CONNECTED ? 'drive disconnected' : 'USB storage full';
+                                logger.info(`[USB_IMAGE_CONSUMER] Transfer stopped (${reason}) - pausing remaining files`);
+                                break;
+                            }
 
-                    // Log progress every 10 files
-                    if (processedCount % 10 === 0) {
-                        console.log(`[USB_IMAGE_CONSUMER] consumer: Batch progress: ${processedCount}/${filesToProcess.length} images processed`);
-                    }
+                            if (!imageSpaceValidator.hasSpaceForFile(file.file_size || 0)) {
+                                logger.warn(`[USB_IMAGE_CONSUMER] Insufficient space for file ${file.id} - stopping batch`);
+                                await TransferUtils.handleImageTransferError(pool, file, new Error('Insufficient USB space'), 'transfer_queue');
+                                break;
+                            }
 
-                }
-            } else {
-                for (const file of filesToProcess) {
-                    try{
-                        // Check conditions before processing each file
-                        if (!IS_AUTO_TRANSFER_ACTIVE || !IS_DRIVE_CONNECTED || SHOULD_STOP_TRANSFER) {
-                            const reason = !IS_AUTO_TRANSFER_ACTIVE ? 'auto transfer disabled' : 
-                                        !IS_DRIVE_CONNECTED ? 'drive disconnected' : 'USB storage full';
-                            console.log(`[USB_IMAGE_CONSUMER] consumer: Transfer stopped (${reason}) - pausing remaining files`);
-                            break;
-                        }
+                            await imageTransferManager.processImageFile(file);
+                            processedCount++;
 
-                        // Check space for this specific file
-                        if (!imageSpaceValidator.hasSpaceForFile(file.file_size || 0)) {
-                            console.log(`[USB_IMAGE_CONSUMER] consumer: Insufficient space for file ${file.id} - stopping batch`);
+                            if (processedCount % 5 === 0 || processedCount === filesToProcess.length) {
+                                publishImageTransferMetrics('batch_progress', {
+                                    jobId: activeJob.batch_id,
+                                    processedCount: processedCount,
+                                    totalFiles: filesToProcess.length,
+                                    failedCount: failedCount,
+                                    currentFile: file.file_name,
+                                    progressPercentage: Math.round((processedCount / filesToProcess.length) * 100),
+                                    throughput: processedCount / ((process.hrtime(startTime)[0] + process.hrtime(startTime)[1] / 1e9))
+                                });
+                            }
+                        } catch (error) {
+                            logger.error(`[USB_IMAGE_CONSUMER] Error processing image file ${file.id}:`, { error: error.message, fileId: file.id });
+                            failedCount++;
                             
-                            await TransferUtils.handleImageTransferError(
-                                pool, 
-                                file, 
-                                new Error('Insufficient USB space'), 
-                                'transfer_queue'
-                            );
-                            break;
-                        }
-
-                        // Process the image file
-                        console.log("[USB_IMAGE_CONSUMER] consumer: await imageTransferManager.processImageFile(file)")
-                        await imageTransferManager.processImageFile(file);
-
-                        processedCount++;
-
-                        // Publish progress metrics every 5 files or on completion
-                        if (processedCount % 5 === 0 || processedCount === filesToProcess.length) {
                             publishImageTransferMetrics('batch_progress', {
                                 jobId: activeJob.batch_id,
                                 processedCount: processedCount,
                                 totalFiles: filesToProcess.length,
                                 failedCount: failedCount,
                                 currentFile: file.file_name,
-                                progressPercentage: Math.round((processedCount / filesToProcess.length) * 100),
-                                throughput: processedCount / ((process.hrtime(startTime)[0] + process.hrtime(startTime)[1] / 1e9))
+                                progressPercentage: Math.round(((processedCount + failedCount) / filesToProcess.length) * 100),
+                                lastError: error.message,
+                                hasError: true
                             });
-                        }
-                    } catch (error) {
-                        console.error(`[USB_IMAGE_CONSUMER] consumer: Error processing image file ${file.id}:`, error);
-                        failedCount++;
-                        
-                        // Publish error progress metrics
-                        publishImageTransferMetrics('batch_progress', {
-                            jobId: activeJob.batch_id,
-                            processedCount: processedCount,
-                            totalFiles: filesToProcess.length,
-                            failedCount: failedCount,
-                            currentFile: file.file_name,
-                            progressPercentage: Math.round(((processedCount + failedCount) / filesToProcess.length) * 100),
-                            lastError: error.message,
-                            hasError: true
-                        });
+                                
+                            if (TransferUtils.isFileNotFoundError(error)) {
+                                logger.info(`[USB_IMAGE_CONSUMER] File ${file.id} not found - marking as failed`);
+                                await imageTransferManager.updateTransferStatus(file.id, 'failed', 'File not found');
+                                continue;
+                            }
                             
-                        // Handle different types of errors
-                        if (TransferUtils.isFileNotFoundError(error)) {
-                            console.log(`[USB_IMAGE_CONSUMER] consumer: File ${file.id} not found - marking as failed`);
-                            await imageTransferManager.updateTransferStatus(file.id, 'failed', 'File not found');
-                            continue;
-                        }
-                        
-                        if (TransferUtils.isDriveRelatedError(error)) {
-                            console.log(`[USB_IMAGE_CONSUMER] consumer: Drive error detected - stopping batch`);
-                            IS_DRIVE_CONNECTED = false;
-                            break;
-                        } else {
-                            // Handle with retry logic
-                            await TransferUtils.handleImageTransferError(pool, file, error, 'transfer_queue');
+                            if (TransferUtils.isDriveRelatedError(error)) {
+                                logger.warn(`[USB_IMAGE_CONSUMER] Drive error detected - stopping batch`);
+                                IS_DRIVE_CONNECTED = false;
+                                break;
+                            } else {
+                                await TransferUtils.handleImageTransferError(pool, file, error, 'transfer_queue');
+                            }
                         }
                     }
+
+                    TransferUtils.markUSBSourceFilesAsTransferred(pool, filesToProcess.map(f => f.id), "auto");
                 }
 
-                TransferUtils.markUSBSourceFilesAsTransferred(pool, filesToProcess.map(f => f.id), "auto");
-            }
+                const endTime = process.hrtime(startTime);
+                const duration = endTime[0] * 1000 + endTime[1] / 1000000;
+                const throughput = processedCount > 0 ? (processedCount / (duration / 1000)).toFixed(2) : 0;
+                
+                publishImageTransferMetrics('batch_complete', {
+                    jobId: activeJob.batch_id,
+                    processedCount: processedCount,
+                    failedCount: failedCount,
+                    totalFiles: filesToProcess.length,
+                    duration: duration.toFixed(2),
+                    throughput: parseFloat(throughput),
+                    successRate: Math.round((processedCount / filesToProcess.length) * 100),
+                    batchSize: filesToProcess.length
+                });
+                
+                logger.info(`[USB_IMAGE_CONSUMER] Batch completed: ${processedCount} transferred, ${failedCount} failed in ${duration.toFixed(2)}ms (${throughput} files/sec)`, { processedCount, failedCount, duration: duration.toFixed(2), throughput });
 
-            const endTime = process.hrtime(startTime);
-            const duration = endTime[0] * 1000 + endTime[1] / 1000000;
-            const throughput = processedCount > 0 ? (processedCount / (duration / 1000)).toFixed(2) : 0;
-            
-            // Publish batch completion metrics
-            publishImageTransferMetrics('batch_complete', {
-                jobId: activeJob.batch_id,
-                processedCount: processedCount,
-                failedCount: failedCount,
-                totalFiles: filesToProcess.length,
-                duration: duration.toFixed(2),
-                throughput: parseFloat(throughput),
-                successRate: Math.round((processedCount / filesToProcess.length) * 100),
-                batchSize: filesToProcess.length
+                await imageTransferManager.checkAndUpdateCompletedJobs();
+
+                if (processedCount > 0) {
+                    await sleep(500);
+                }
             });
-            
-            console.log(`[USB_IMAGE_CONSUMER] consumer: Batch completed: ${processedCount} transferred, ${failedCount} failed in ${duration.toFixed(2)}ms (${throughput} files/sec)`);
-
-            // Check for completed jobs
-            await imageTransferManager.checkAndUpdateCompletedJobs();
-
-            // Small delay before next batch
-            if (processedCount > 0) {
-                await sleep(500);
-            }
 
         } catch (error) {
-            console.error('[USB_IMAGE_CONSUMER] consumer: Error in transfer consumer:', error);
+            logger.error('[USB_IMAGE_CONSUMER] Error in transfer consumer:', { error: error.message, stack: error.stack });
             await sleep(1000);
         }
     }
@@ -700,9 +611,8 @@ async function consumer() {
 // Initialize and start service
 async function runService() {
     try {
-        console.log('[USB_IMAGE_RUN_SERVICE] runService: Initializing USB Image Transfer Service...');
+        logger.info('[USB_IMAGE_RUN_SERVICE] Initializing USB Image Transfer Service...');
         
-        // Load initial config
         let configLoaded = false;
         
         const fileConfig = readConfig();
@@ -710,29 +620,14 @@ async function runService() {
             CONFIG_STATE = fileConfig;
             IS_ENCRYPTION_REQUIRED = CONFIG_STATE && CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.encryption && CONFIG_STATE.autoTransfer.encryption.enabled || false;
             
-            console.log({
-                CONFIG_STATE
-            });
-
-            // Update managers with CONFIG_STATE
             imageTransferManager.config = CONFIG_STATE;
             imageTransferManager.setEncryptionRequired(IS_ENCRYPTION_REQUIRED);
             
-            // Initialize schedule configuration
             SCHEDULE_CONFIG = CONFIG_STATE && CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.schedule || {};
             IS_SCHEDULED_TRANSFER = SCHEDULE_CONFIG.type === 'scheduled';
             updateScheduleStatus();
             
-            console.log('[USB_IMAGE_RUN_SERVICE] runService: Loaded config from file - Encryption enabled:', IS_ENCRYPTION_REQUIRED);
-            console.log('[USB_IMAGE_RUN_SERVICE] runService: Config storage.directory:', CONFIG_STATE.storage && CONFIG_STATE.storage.directory);
-            console.log('[USB_IMAGE_RUN_SERVICE] runService: Config autoTransfer.drive:', CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive);
-            console.log('[USB_IMAGE_RUN_SERVICE] runService: Schedule config loaded:', {
-                type: SCHEDULE_CONFIG.type,
-                mode: SCHEDULE_CONFIG.mode,
-                isScheduled: IS_SCHEDULED_TRANSFER,
-                status: CURRENT_SCHEDULE_STATUS,
-                nextRun: NEXT_SCHEDULED_RUN
-            });
+            logger.info('[USB_IMAGE_RUN_SERVICE] Loaded config from file', { encryptionEnabled: IS_ENCRYPTION_REQUIRED, storageDir: CONFIG_STATE.storage && CONFIG_STATE.storage.directory, drive: CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive, scheduleType: SCHEDULE_CONFIG.type, isScheduled: IS_SCHEDULED_TRANSFER });
             configLoaded = true;
         }
         
@@ -742,49 +637,35 @@ async function runService() {
                 CONFIG_STATE = JSON.parse(redisConfig);
                 IS_ENCRYPTION_REQUIRED = CONFIG_STATE && CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.encryption && CONFIG_STATE.autoTransfer.encryption.enabled || false;
                 
-                // Update managers with CONFIG_STATE
                 imageTransferManager.config = CONFIG_STATE;
                 imageTransferManager.setEncryptionRequired(IS_ENCRYPTION_REQUIRED);
                 
-                // Initialize schedule configuration
                 SCHEDULE_CONFIG = CONFIG_STATE && CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.schedule || {};
                 IS_SCHEDULED_TRANSFER = SCHEDULE_CONFIG.type === 'scheduled';
                 updateScheduleStatus();
                 
-                console.log('[USB_IMAGE_RUN_SERVICE] runService: Loaded config from Redis - Encryption enabled:', IS_ENCRYPTION_REQUIRED);
-                console.log('[USB_IMAGE_RUN_SERVICE] runService: Config storage.directory:', CONFIG_STATE.storage && CONFIG_STATE.storage.directory);
-                console.log('[USB_IMAGE_RUN_SERVICE] runService: Config autoTransfer.drive:', CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive);
-                console.log('[USB_IMAGE_RUN_SERVICE] runService: Schedule config loaded:', {
-                    type: SCHEDULE_CONFIG.type,
-                    mode: SCHEDULE_CONFIG.mode,
-                    isScheduled: IS_SCHEDULED_TRANSFER,
-                    status: CURRENT_SCHEDULE_STATUS,
-                    nextRun: NEXT_SCHEDULED_RUN
-                });
+                logger.info('[USB_IMAGE_RUN_SERVICE] Loaded config from Redis', { encryptionEnabled: IS_ENCRYPTION_REQUIRED, storageDir: CONFIG_STATE.storage && CONFIG_STATE.storage.directory, drive: CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive });
                 configLoaded = true;
             }
         }
         
         if (!configLoaded) {
-            console.log('[USB_IMAGE_RUN_SERVICE] runService: No config found - using defaults');
+            logger.warn('[USB_IMAGE_RUN_SERVICE] No config found - using defaults');
         }
         
-        // Initial drive info update
         await updateDriveInfo();
         
-        // Start consumer
-        console.log('[USB_IMAGE_RUN_SERVICE] runService: Starting consumer...');
+        logger.info('[USB_IMAGE_RUN_SERVICE] Starting consumer...');
         consumer();
         
     } catch (error) {
-        console.error('[USB_IMAGE_RUN_SERVICE] runService: Service initialization error:', error);
+        logger.error('[USB_IMAGE_RUN_SERVICE] Service initialization error:', { error: error.message, stack: error.stack });
         process.exit(1);
     }
 }
 
-// Graceful shutdown
 process.on('SIGINT', async () => {
-    console.log('[USB_IMAGE_SHUTDOWN] process.on: Shutting down USB Image Transfer Service...');
+    logger.info('[USB_IMAGE_SHUTDOWN] Shutting down USB Image Transfer Service...');
     await imageProcessor.cleanup();
     process.exit(0);
 });

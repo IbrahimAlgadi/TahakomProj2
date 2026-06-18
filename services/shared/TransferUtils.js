@@ -1,3 +1,7 @@
+const { createLogger } = require('../../utils/logger');
+
+const logger = createLogger({ service: 'TransferUtils' });
+
 /**
  * Shared Transfer Utilities
  * Common operations used by both USB and FTP video/image transfer services
@@ -13,7 +17,7 @@ class TransferUtils {
             return;
         }
 
-        console.log(`[TRANSFER_UTILS] markSourceFilesAsTransferred: Marking ${sourceFileIds.length} source files as transferred (${transferType})`);
+        logger.info(`[TRANSFER_UTILS] markSourceFilesAsTransferred: Marking ${sourceFileIds.length} source files as transferred (${transferType})`);
         
         try {
             const updateField = transferType === 'ftp' ? 'is_ftp_transferred' : 'is_auto_transferred';
@@ -24,10 +28,10 @@ class TransferUtils {
                 WHERE id = ANY($1)
             `, [sourceFileIds]);
 
-            console.log(`[TRANSFER_UTILS] markSourceFilesAsTransferred: ✓ Marked ${sourceFileIds.length} source files as ${transferType} transferred`);
+            logger.info(`[TRANSFER_UTILS] markSourceFilesAsTransferred: ✓ Marked ${sourceFileIds.length} source files as ${transferType} transferred`);
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] markSourceFilesAsTransferred: Error:', error);
+            logger.error('[TRANSFER_UTILS] markSourceFilesAsTransferred: Error:', error);
             throw error;
         }
     }
@@ -40,7 +44,7 @@ class TransferUtils {
             return;
         }
 
-        console.log(`[TRANSFER_UTILS] markSourceFilesAsTransferred: Marking ${sourceFileIds.length} source files as transferred (${transferType})`);
+        logger.info(`[TRANSFER_UTILS] markSourceFilesAsTransferred: Marking ${sourceFileIds.length} source files as transferred (${transferType})`);
         
         try {
             
@@ -50,10 +54,10 @@ class TransferUtils {
                 WHERE id = ANY($1)
             `, [sourceFileIds]);
 
-            console.log(`[TRANSFER_UTILS] markSourceFilesAsTransferred: ✓ Marked ${sourceFileIds.length} source files as ${transferType} transferred`);
+            logger.info(`[TRANSFER_UTILS] markSourceFilesAsTransferred: ✓ Marked ${sourceFileIds.length} source files as ${transferType} transferred`);
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] markSourceFilesAsTransferred: Error:', error);
+            logger.error('[TRANSFER_UTILS] markSourceFilesAsTransferred: Error:', error);
             throw error;
         }
     }
@@ -62,7 +66,7 @@ class TransferUtils {
      * Handle transfer error with retry logic
      */
     static async handleTransferError(pool, file, error, tableName = 'video_transfer_queue') {
-        console.error(`[TRANSFER_UTILS] handleTransferError: Transfer failed for ${file.video_file_name}:`, error);
+        logger.error(`[TRANSFER_UTILS] handleTransferError: Transfer failed for ${file.video_file_name}:`, error);
         
         const newRetryCount = (file.retry_count || 0) + 1;
         const shouldStopProcessing = error.message.includes('ENOSPC') || 
@@ -77,7 +81,7 @@ class TransferUtils {
                 WHERE id = $3
             `, [newRetryCount, error.message.substring(0, 500), file.id]);
             
-            console.log(`[TRANSFER_UTILS] handleTransferError: ❌ Max retries reached for file ${file.id}, marked as failed`);
+            logger.info(`[TRANSFER_UTILS] handleTransferError: ❌ Max retries reached for file ${file.id}, marked as failed`);
         } else {
             await pool.query(`
                 UPDATE ${tableName} 
@@ -85,7 +89,7 @@ class TransferUtils {
                 WHERE id = $3
             `, [newRetryCount, error.message.substring(0, 500), file.id]);
             
-            console.log(`[TRANSFER_UTILS] handleTransferError: ⏳ Retry ${newRetryCount}/${file.max_retries || 3} scheduled for file ${file.id}`);
+            logger.info(`[TRANSFER_UTILS] handleTransferError: ⏳ Retry ${newRetryCount}/${file.max_retries || 3} scheduled for file ${file.id}`);
         }
         
         return { 
@@ -103,12 +107,12 @@ class TransferUtils {
         try {
             if (await fs.pathExists(videoPath)) {
                 await fs.remove(videoPath);
-                console.log(`[TRANSFER_UTILS] cleanupTempVideo: ✓ Cleaned up temp video: ${videoPath}`);
+                logger.info(`[TRANSFER_UTILS] cleanupTempVideo: ✓ Cleaned up temp video: ${videoPath}`);
                 return true;
             }
             return false;
         } catch (error) {
-            console.error('[TRANSFER_UTILS] cleanupTempVideo: Error cleaning up temp video:', error);
+            logger.error('[TRANSFER_UTILS] cleanupTempVideo: Error cleaning up temp video:', error);
             return false;
         }
     }
@@ -131,10 +135,10 @@ class TransferUtils {
             query += ` WHERE id = $2`;
             
             await pool.query(query, params);
-            console.log(`[TRANSFER_UTILS] updateJobStatus: ✓ Updated job ${jobId} status to ${status}`);
+            logger.info(`[TRANSFER_UTILS] updateJobStatus: ✓ Updated job ${jobId} status to ${status}`);
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] updateJobStatus: Error:', error);
+            logger.error('[TRANSFER_UTILS] updateJobStatus: Error:', error);
             throw error;
         }
     }
@@ -157,13 +161,13 @@ class TransferUtils {
             
             if (isComplete) {
                 await TransferUtils.updateJobStatus(pool, jobId, 'completed', jobTable);
-                console.log(`[TRANSFER_UTILS] checkJobCompletion: ✓ Job ${jobId} marked as completed (${transferred_videos}/${total_videos} videos transferred)`);
+                logger.info(`[TRANSFER_UTILS] checkJobCompletion: ✓ Job ${jobId} marked as completed (${transferred_videos}/${total_videos} videos transferred)`);
             }
             
             return isComplete;
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] checkJobCompletion: Error:', error);
+            logger.error('[TRANSFER_UTILS] checkJobCompletion: Error:', error);
             return false;
         }
     }
@@ -188,7 +192,7 @@ class TransferUtils {
             return result.rows[0];
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] getJobStatistics: Error:', error);
+            logger.error('[TRANSFER_UTILS] getJobStatistics: Error:', error);
             return {
                 total_videos: 0,
                 pending_videos: 0,
@@ -224,10 +228,10 @@ class TransferUtils {
                 jobId
             ]);
             
-            console.log(`[TRANSFER_UTILS] updateJobStatistics: ✓ Updated job ${jobId} stats: ${stats.transferred_videos}/${stats.total_videos} videos transferred`);
+            logger.info(`[TRANSFER_UTILS] updateJobStatistics: ✓ Updated job ${jobId} stats: ${stats.transferred_videos}/${stats.total_videos} videos transferred`);
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] updateJobStatistics: Error:', error);
+            logger.error('[TRANSFER_UTILS] updateJobStatistics: Error:', error);
             throw error;
         }
     }
@@ -255,7 +259,7 @@ class TransferUtils {
             
             const ext = path.extname(filePath).toLowerCase();
             if (!['.mp4', '.avi', '.mov', '.mkv'].includes(ext)) {
-                console.warn(`[TRANSFER_UTILS] validateFileForTransfer: Warning - unusual video file extension: ${ext}`);
+                logger.warn(`[TRANSFER_UTILS] validateFileForTransfer: Warning - unusual video file extension: ${ext}`);
             }
             
             return {
@@ -302,7 +306,7 @@ class TransferUtils {
             return;
         }
 
-        console.log(`[TRANSFER_UTILS] markImageFilesAsTransferred: Marking ${fileIds.length} image files as transferred (${transferType})`);
+        logger.info(`[TRANSFER_UTILS] markImageFilesAsTransferred: Marking ${fileIds.length} image files as transferred (${transferType})`);
         
         try {
             const updateField = transferType === 'ftp' ? 'is_ftp_transferred' : 'is_auto_transferred';
@@ -313,10 +317,10 @@ class TransferUtils {
                 WHERE id = ANY($1)
             `, [fileIds]);
 
-            console.log(`[TRANSFER_UTILS] markImageFilesAsTransferred: ✓ Marked ${fileIds.length} image files as ${transferType} transferred`);
+            logger.info(`[TRANSFER_UTILS] markImageFilesAsTransferred: ✓ Marked ${fileIds.length} image files as ${transferType} transferred`);
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] markImageFilesAsTransferred: Error:', error);
+            logger.error('[TRANSFER_UTILS] markImageFilesAsTransferred: Error:', error);
             throw error;
         }
     }
@@ -325,7 +329,7 @@ class TransferUtils {
      * Handle image transfer error with retry logic
      */
     static async handleImageTransferError(pool, file, error, tableName = 'transfer_queue') {
-        console.error(`[TRANSFER_UTILS] handleImageTransferError: Transfer failed for ${file.file_path}:`, error);
+        logger.error(`[TRANSFER_UTILS] handleImageTransferError: Transfer failed for ${file.file_path}:`, error);
         
         const newRetryCount = (file.retry_count || 0) + 1;
         const shouldStopProcessing = error.message.includes('ENOSPC') || 
@@ -342,7 +346,7 @@ class TransferUtils {
                 WHERE id = $3
             `, [newRetryCount, error.message.substring(0, 500), file.id]);
             
-            console.log(`[TRANSFER_UTILS] handleImageTransferError: ❌ Max retries reached for image file ${file.id}, marked as failed`);
+            logger.info(`[TRANSFER_UTILS] handleImageTransferError: ❌ Max retries reached for image file ${file.id}, marked as failed`);
         } else {
             await pool.query(`
                 UPDATE ${tableName} 
@@ -350,7 +354,7 @@ class TransferUtils {
                 WHERE id = $3
             `, [newRetryCount, error.message.substring(0, 500), file.id]);
             
-            console.log(`[TRANSFER_UTILS] handleImageTransferError: ⏳ Retry ${newRetryCount}/${file.max_retries || 3} scheduled for image file ${file.id}`);
+            logger.info(`[TRANSFER_UTILS] handleImageTransferError: ⏳ Retry ${newRetryCount}/${file.max_retries || 3} scheduled for image file ${file.id}`);
         }
         
         return { 
@@ -424,7 +428,7 @@ class TransferUtils {
             return result.rows[0];
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] getImageJobStatistics: Error:', error);
+            logger.error('[TRANSFER_UTILS] getImageJobStatistics: Error:', error);
             return {
                 total_files: 0,
                 pending_files: 0,
@@ -460,10 +464,10 @@ class TransferUtils {
                 jobId
             ]);
             
-            console.log(`[TRANSFER_UTILS] updateImageJobStatistics: ✓ Updated job ${jobId} stats: ${stats.transferred_files}/${stats.total_files} images transferred`);
+            logger.info(`[TRANSFER_UTILS] updateImageJobStatistics: ✓ Updated job ${jobId} stats: ${stats.transferred_files}/${stats.total_files} images transferred`);
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] updateImageJobStatistics: Error:', error);
+            logger.error('[TRANSFER_UTILS] updateImageJobStatistics: Error:', error);
             throw error;
         }
     }
@@ -486,13 +490,13 @@ class TransferUtils {
             
             if (isComplete) {
                 await TransferUtils.updateJobStatus(pool, jobId, 'completed', jobTable);
-                console.log(`[TRANSFER_UTILS] checkImageJobCompletion: ✓ Job ${jobId} marked as completed (${transferred_files}/${total_files} images transferred)`);
+                logger.info(`[TRANSFER_UTILS] checkImageJobCompletion: ✓ Job ${jobId} marked as completed (${transferred_files}/${total_files} images transferred)`);
             }
             
             return isComplete;
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] checkImageJobCompletion: Error:', error);
+            logger.error('[TRANSFER_UTILS] checkImageJobCompletion: Error:', error);
             return false;
         }
     }
@@ -519,7 +523,7 @@ class TransferUtils {
             };
             
         } catch (error) {
-            console.error('[TRANSFER_UTILS] generateImageDestinationPath: Error:', error);
+            logger.error('[TRANSFER_UTILS] generateImageDestinationPath: Error:', error);
             throw new Error(`Failed to generate destination path: ${error.message}`);
         }
     }
@@ -631,7 +635,7 @@ class TransferUtils {
             }
         }
 
-        console.log(`[TRANSFER_UTILS] validateImageBatch: ${results.valid.length} valid, ${results.invalid.length} invalid, ${results.oversized.length} oversized`);
+        logger.info(`[TRANSFER_UTILS] validateImageBatch: ${results.valid.length} valid, ${results.invalid.length} invalid, ${results.oversized.length} oversized`);
         return results;
     }
 }

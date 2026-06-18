@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'FtpImageTransferManager' });
 const ImageTransferManager = require('./ImageTransferManager');
 const TransferUtils = require('../../shared/TransferUtils');
 const ftp = require('basic-ftp');
@@ -24,7 +27,7 @@ class FtpImageTransferManager extends ImageTransferManager {
     setFtpConfig(ftpConfig) {
         this.ftpConfig = ftpConfig;
         this.isConnected = ftpConfig && ftpConfig.connection && ftpConfig.connection.status === 'connected';
-        console.log(`[FTP_IMAGE_TRANSFER] FTP connection status: ${this.isConnected ? 'connected' : 'disconnected'}`);
+        logger.info(`[FTP_IMAGE_TRANSFER] FTP connection status: ${this.isConnected ? 'connected' : 'disconnected'}`);
     }
 
     /**
@@ -69,7 +72,7 @@ class FtpImageTransferManager extends ImageTransferManager {
      * Process individual image file for FTP upload
      */
     async processImageFile(file) {
-        console.log(`[FTP_IMAGE_TRANSFER] Processing image file: ${file.file_path}`);
+        logger.info(`[FTP_IMAGE_TRANSFER] Processing image file: ${file.file_path}`);
         
         if (!this.isFtpReady()) {
             throw new Error('FTP server not ready for transfers');
@@ -105,10 +108,10 @@ class FtpImageTransferManager extends ImageTransferManager {
             // Update original files table
             await TransferUtils.markSourceFilesAsTransferred(this.pool, [file.file_id], 'ftp');
             
-            console.log(`[FTP_IMAGE_TRANSFER] Successfully uploaded image file ID: ${file.id} to ${file.ftp_remote_path}`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Successfully uploaded image file ID: ${file.id} to ${file.ftp_remote_path}`);
             
         } catch (error) {
-            console.error(`[FTP_IMAGE_TRANSFER] Failed to process image file ${file.id}:`, error);
+            logger.error(`[FTP_IMAGE_TRANSFER] Failed to process image file ${file.id}:`, error);
             
             // If FTP connection error, mark as disconnected
             if (this.isFtpConnectionError(error)) {
@@ -155,15 +158,15 @@ class FtpImageTransferManager extends ImageTransferManager {
                 };
             }
 
-            console.log(`[FTP_IMAGE_TRANSFER] Connecting to ${this.ftpConfig.server.protocol || 'FTP'} server: ${this.ftpConfig.server.host}:${connectionOptions.port} (secure: ${connectionOptions.secure})`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Connecting to ${this.ftpConfig.server.protocol || 'FTP'} server: ${this.ftpConfig.server.host}:${connectionOptions.port} (secure: ${connectionOptions.secure})`);
             
             await this.ftpClient.access(connectionOptions);
             
             this.isConnected = true;
-            console.log(`[FTP_IMAGE_TRANSFER] Successfully connected to ${this.ftpConfig.server.protocol || 'FTP'} server: ${this.ftpConfig.server.host}`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Successfully connected to ${this.ftpConfig.server.protocol || 'FTP'} server: ${this.ftpConfig.server.host}`);
             
         } catch (error) {
-            console.error('[FTP_IMAGE_TRANSFER] Failed to connect to FTP server:', error);
+            logger.error('[FTP_IMAGE_TRANSFER] Failed to connect to FTP server:', error);
             this.isConnected = false;
             throw error;
         }
@@ -179,9 +182,9 @@ class FtpImageTransferManager extends ImageTransferManager {
                 this.ftpClient = null;
             }
             this.isConnected = false;
-            console.log('[FTP_IMAGE_TRANSFER] Disconnected from FTP server');
+            logger.info('[FTP_IMAGE_TRANSFER] Disconnected from FTP server');
         } catch (error) {
-            console.error('[FTP_IMAGE_TRANSFER] Error disconnecting from FTP:', error);
+            logger.error('[FTP_IMAGE_TRANSFER] Error disconnecting from FTP:', error);
         }
     }
 
@@ -194,7 +197,7 @@ class FtpImageTransferManager extends ImageTransferManager {
         }
 
         try {
-            // console.log({
+            // logger.info({
             //     file,
             //     ftpConfig: this.ftpConfig.server.remotePath + remotePath
             // });
@@ -203,22 +206,22 @@ class FtpImageTransferManager extends ImageTransferManager {
             const fullRemotePath = path.posix.join(this.ftpConfig.server.remoteDirectory || '/', remotePath);
             const remoteDir = path.dirname(fullRemotePath);
             
-            console.log(`[FTP_IMAGE_TRANSFER] Full paths:`);
-            console.log(`  Local: ${localPath}`);
-            console.log(`  Remote: ${fullRemotePath}`);
-            console.log(`  Remote dir: ${remoteDir}`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Full paths:`);
+            logger.info(`  Local: ${localPath}`);
+            logger.info(`  Remote: ${fullRemotePath}`);
+            logger.info(`  Remote dir: ${remoteDir}`);
             
             // Ensure remote directory exists using simple approach
             await this.ensureFtpDirectory(remoteDir);
             
             // Upload the file using the full path
-            console.log(`[FTP_IMAGE_TRANSFER] Uploading file...`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Uploading file...`);
             await this.ftpClient.uploadFrom(localPath, fullRemotePath);
             
-            console.log(`[FTP_IMAGE_TRANSFER] Successfully uploaded: ${fullRemotePath}`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Successfully uploaded: ${fullRemotePath}`);
             
         } catch (error) {
-            console.error(`[FTP_IMAGE_TRANSFER] FTP upload failed for ${localPath}:`, error);
+            logger.error(`[FTP_IMAGE_TRANSFER] FTP upload failed for ${localPath}:`, error);
             throw error;
         }
     }
@@ -232,15 +235,15 @@ class FtpImageTransferManager extends ImageTransferManager {
         }
 
         try {
-            console.log(`[FTP_IMAGE_TRANSFER] Ensuring directory: ${dirPath}`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Ensuring directory: ${dirPath}`);
             
             // Use the simple basic-ftp approach
             await this.ftpClient.ensureDir(dirPath);
             
-            console.log(`[FTP_IMAGE_TRANSFER] Successfully ensured directory: ${dirPath}`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Successfully ensured directory: ${dirPath}`);
             
         } catch (error) {
-            console.error(`[FTP_IMAGE_TRANSFER] Failed to ensure directory ${dirPath}:`, error);
+            logger.error(`[FTP_IMAGE_TRANSFER] Failed to ensure directory ${dirPath}:`, error);
             
             // Parse specific 550 error messages
             if (error.code === 550) {
@@ -252,7 +255,7 @@ class FtpImageTransferManager extends ImageTransferManager {
                     throw new Error(`Permission denied creating directory ${dirPath}. Check FTP user permissions. Error: ${error.message}`);
                 } else if (errorMessage.includes('already exists') || errorMessage.includes('file exists')) {
                     // This should normally be handled by ensureDir, but if we get here, continue
-                    console.log(`[FTP_IMAGE_TRANSFER] Directory ${dirPath} already exists, continuing...`);
+                    logger.info(`[FTP_IMAGE_TRANSFER] Directory ${dirPath} already exists, continuing...`);
                     return;
                 } else {
                     throw new Error(`Failed to create directory ${dirPath}. FTP Error 550: ${error.message}`);
@@ -285,7 +288,7 @@ class FtpImageTransferManager extends ImageTransferManager {
      * Handle transfer error with FTP-specific logic
      */
     async handleTransferError(file, error) {
-        console.error(`[FTP_IMAGE_TRANSFER] Transfer failed for ${file.file_path}:`, error);
+        logger.error(`[FTP_IMAGE_TRANSFER] Transfer failed for ${file.file_path}:`, error);
         
         const newRetryCount = (file.retry_count || 0) + 1;
         const isConnectionError = this.isFtpConnectionError(error);
@@ -301,7 +304,7 @@ class FtpImageTransferManager extends ImageTransferManager {
                 WHERE id = (SELECT job_id FROM ${this.transferQueueTable} WHERE id = $2)
             `, ['FTP connection error: ' + error.message, file.id]);
             
-            console.log(`[FTP_IMAGE_TRANSFER] Job paused due to FTP connection error`);
+            logger.info(`[FTP_IMAGE_TRANSFER] Job paused due to FTP connection error`);
         } else if (newRetryCount >= (file.max_retries || 3)) {
             // Max retries reached, mark as failed
             await this.pool.query(`
@@ -328,7 +331,7 @@ class FtpImageTransferManager extends ImageTransferManager {
 
     setEncryptionRequired(required) {
         if (required) {
-            console.warn('[FTP_IMAGE_TRANSFER] Encryption not supported for FTP transfers');
+            logger.warn('[FTP_IMAGE_TRANSFER] Encryption not supported for FTP transfers');
         }
         // Do nothing - FTP doesn't support encryption in this implementation
     }

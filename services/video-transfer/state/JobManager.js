@@ -1,4 +1,7 @@
 const { v4: uuidv4 } = require('uuid');
+const \{ createLogger \} = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'JobManager' });
 const fs = require('fs-extra');
 
 class JobManager {
@@ -34,19 +37,19 @@ class JobManager {
         
         if (result.rows.length > 0) {
             const activeJob = result.rows[0];
-            console.log(`[JOB] JobManager.getOrCreateActiveJob: Found active job: ${activeJob.batch_id} (status: ${activeJob.status})`);
+            logger.info(`[JOB] JobManager.getOrCreateActiveJob: Found active job: ${activeJob.batch_id} (status: ${activeJob.status})`);
             
             // If job is created, check if all cameras are complete
             const isComplete = await this.checkJobCompletion(activeJob.id) && await this.checkJobVideoTransferCompletion(activeJob.id);
             if (isComplete) {
-                console.log('[JOB] JobManager.getOrCreateActiveJob: All cameras processed. Moving job to pending status...');
+                logger.info('[JOB] JobManager.getOrCreateActiveJob: All cameras processed. Moving job to pending status...');
                 await this.updateJobStatus(activeJob.id, 'pending');
-                console.log('[JOB] JobManager.getOrCreateActiveJob: ✓ Job status changed to pending for transfer');
+                logger.info('[JOB] JobManager.getOrCreateActiveJob: ✓ Job status changed to pending for transfer');
                 return null; // Job is now ready for transfer, don't create new content
             }
             
             // Job exists but is incomplete - continue with this job
-            console.log('[JOB] JobManager.getOrCreateActiveJob: Job incomplete. Continuing with current job...');
+            logger.info('[JOB] JobManager.getOrCreateActiveJob: Job incomplete. Continuing with current job...');
             
             return activeJob;
         }
@@ -61,7 +64,7 @@ class JobManager {
         const expectedCameras = this.ISS_MEDIA_CAMERAS.map(cam => cam.replace('CAM_', ''));
         const batchId = uuidv4();
         
-        console.log(`[JOB] JobManager.getOrCreateActiveJob: Creating new job for cameras: ${expectedCameras.join(', ')}`);
+        logger.info(`[JOB] JobManager.getOrCreateActiveJob: Creating new job for cameras: ${expectedCameras.join(', ')}`);
         const createResult = await this.pool.query(`
             INSERT INTO video_transfer_queue_job (
                 batch_id, batch_origin, status, 
@@ -72,7 +75,7 @@ class JobManager {
             RETURNING *
         `, [batchId, 'auto_video', expectedCameras, this.currentSiteId]);
         
-        console.log(`[JOB] JobManager.getOrCreateActiveJob: ✓ Created new job: ${createResult.rows[0].batch_id}`);
+        logger.info(`[JOB] JobManager.getOrCreateActiveJob: ✓ Created new job: ${createResult.rows[0].batch_id}`);
         return createResult.rows[0];
     }
 
@@ -132,7 +135,7 @@ class JobManager {
             jobId
         ]);
         
-        console.log(`[QUEUE] JobManager.addVideoToTransferQueue: Added video ${videoData.videoName} to transfer queue (ID: ${result.rows[0].id})`);
+        logger.info(`[QUEUE] JobManager.addVideoToTransferQueue: Added video ${videoData.videoName} to transfer queue (ID: ${result.rows[0].id})`);
         return result.rows[0].id;
     }
 
@@ -156,7 +159,7 @@ class JobManager {
         const expectedCount = row.expected_count || 0;
         const processedCount = row.processed_count || 0;
 
-        console.log(`[JOB] JobManager.checkJobCompletion: Completion camera check - Expected count: ${expectedCount} (${row.expected_cameras}), Processed count: ${processedCount} (${row.processed_cameras})`);
+        logger.info(`[JOB] JobManager.checkJobCompletion: Completion camera check - Expected count: ${expectedCount} (${row.expected_cameras}), Processed count: ${processedCount} (${row.processed_cameras})`);
         return expectedCount > 0 && processedCount >= expectedCount;
     }
 
@@ -177,7 +180,7 @@ class JobManager {
         const videosGeneratedTransferredCount = videosGenerated.rows.find(row => row.status === 'transferred') ? videosGenerated.rows.find(row => row.status === 'transferred').count : 0;
         const totalProcessedCount = videosGeneratedTransferredCount + videosGeneratedFailedCount;
 
-        console.log(`[JOB] JobManager.checkJobVideoTransferCompletion: Completion video check - Processed: ${totalProcessedCount}`);
+        logger.info(`[JOB] JobManager.checkJobVideoTransferCompletion: Completion video check - Processed: ${totalProcessedCount}`);
 
         return totalProcessedCount >= this.ISS_MEDIA_CAMERAS.length;
     }
@@ -186,7 +189,7 @@ class JobManager {
      * Update job status
      */
     async updateJobStatus(jobId, status, errorMessage = null) {
-        console.log(`[JOB] JobManager.updateJobStatus: Updating job ${jobId} status to: ${status} with error message: ${errorMessage}`);
+        logger.info(`[JOB] JobManager.updateJobStatus: Updating job ${jobId} status to: ${status} with error message: ${errorMessage}`);
 
         const updateQuery = errorMessage 
             ? `UPDATE video_transfer_queue_job SET status = $1, error_message = $2, updated_at = CURRENT_TIMESTAMP WHERE id = $3`
@@ -195,7 +198,7 @@ class JobManager {
         const params = errorMessage ? [status, errorMessage, jobId] : [status, jobId];
         
         await this.pool.query(updateQuery, params);
-        console.log(`[JOB] JobManager.updateJobStatus: Updated job ${jobId} status to: ${status}`);
+        logger.info(`[JOB] JobManager.updateJobStatus: Updated job ${jobId} status to: ${status}`);
     }
 
     /**
@@ -210,7 +213,7 @@ class JobManager {
             AND NOT ($1::text = ANY(processed_cameras))
         `, [cameraId.toString(), jobId]);
         
-        console.log(`[JOB] JobManager.addCameraToProcessed: Added camera ${cameraId} to processed list for job ${jobId}`);
+        logger.info(`[JOB] JobManager.addCameraToProcessed: Added camera ${cameraId} to processed list for job ${jobId}`);
     }
 
     /**
@@ -243,7 +246,7 @@ class JobManager {
      * Handle video creation completion
      */
     async videoGrouppingCompleted (videoData, jobId) {
-        console.log(`[EVENT] JobManager.videoGrouppingCompleted: Video created: ${videoData.videoName} for job ${jobId}`);
+        logger.info(`[EVENT] JobManager.videoGrouppingCompleted: Video created: ${videoData.videoName} for job ${jobId}`);
         
         try {
             // // Add video to transfer queue using JobManager
@@ -259,7 +262,7 @@ class JobManager {
             const sourceFiles = videoData.sourceFileIds.map(id => ({ id }));
             await this.processingStateManager.removeProcessingMarkers(sourceFiles);
             
-            console.log(`[EVENT] JobManager.videoGrouppingCompleted: Video queued for transfer: ${videoData.videoName}`);
+            logger.info(`[EVENT] JobManager.videoGrouppingCompleted: Video queued for transfer: ${videoData.videoName}`);
             
         } catch (error) {
             this.emit('error', error);
@@ -292,16 +295,16 @@ class JobManager {
             const totalVideos = parseInt(job.total_videos);
             const transferredVideos = parseInt(job.transferred_videos);
             
-            console.log(`[JOB] JobManager.checkAndCompleteJob: Transfer progress for job ${job.batch_id}: ${transferredVideos}/${totalVideos} videos transferred`);
+            logger.info(`[JOB] JobManager.checkAndCompleteJob: Transfer progress for job ${job.batch_id}: ${transferredVideos}/${totalVideos} videos transferred`);
             
             // If all videos have been transferred, mark job as completed
             if (totalVideos > 0 && transferredVideos >= this.ISS_MEDIA_CAMERAS.length) {
                 await this.updateJobStatus(jobId, 'completed');
-                console.log(`[JOB] ✓ JobManager.checkAndCompleteJob: Job ${job.batch_id} completed - all ${totalVideos} videos transferred`);
+                logger.info(`[JOB] ✓ JobManager.checkAndCompleteJob: Job ${job.batch_id} completed - all ${totalVideos} videos transferred`);
             }
             
         } catch (error) {
-            console.error(`[JOB_ERROR] JobManager.checkAndCompleteJob: Error checking job completion for job ${jobId}:`, error);
+            logger.error(`[JOB_ERROR] JobManager.checkAndCompleteJob: Error checking job completion for job ${jobId}:`, error);
         }
     }
 
@@ -327,10 +330,10 @@ class JobManager {
                 ORDER BY created_at DESC
             `);
             
-            console.log(`[JOB] JobManager.getExistingUncompletedJobs: Found ${result.rows.length} uncompleted jobs`);
+            logger.info(`[JOB] JobManager.getExistingUncompletedJobs: Found ${result.rows.length} uncompleted jobs`);
             return result.rows;
         } catch (error) {
-            console.error('[JOB_ERROR] JobManager.getExistingUncompletedJobs: Error getting existing uncompleted jobs:', error);
+            logger.error('[JOB_ERROR] JobManager.getExistingUncompletedJobs: Error getting existing uncompleted jobs:', error);
             throw error;
         }
     }
@@ -373,10 +376,10 @@ class JobManager {
                 cameraFileCounts[cameraId] = parseInt(result.rows[0].count);
             }
             
-            console.log(`[JOB] JobManager.getCameraFileCountsInBuffer: Camera file counts in buffer${jobId ? ` for job ${jobId}` : ''}:`, cameraFileCounts);
+            logger.info(`[JOB] JobManager.getCameraFileCountsInBuffer: Camera file counts in buffer${jobId ? ` for job ${jobId}` : ''}:`, cameraFileCounts);
             return cameraFileCounts;
         } catch (error) {
-            console.error('[JOB_ERROR] JobManager.getCameraFileCountsInBuffer: Error getting camera file counts in buffer:', error);
+            logger.error('[JOB_ERROR] JobManager.getCameraFileCountsInBuffer: Error getting camera file counts in buffer:', error);
             throw error;
         }
     }
@@ -386,7 +389,7 @@ class JobManager {
      */
     async getCameraFileCountsStatusBufferCheck(jobId, cameraId) {
         try {
-            console.log(`[JOB] JobManager.getCameraFileCountsStatusBufferCheck: Getting camera file counts in buffer for job ${jobId}`);
+            logger.info(`[JOB] JobManager.getCameraFileCountsStatusBufferCheck: Getting camera file counts in buffer for job ${jobId}`);
             // const statusList = ['pending', 'converted', 'grouped'];
             const cameraFileStatusCounts = {
                 "pending": 0,
@@ -406,21 +409,21 @@ class JobManager {
             params = [parseInt(cameraId), jobId];
             
             const result = await this.pool.query(query, params);
-            // console.log(`[JOB] JobManager.getCameraFileCountsStatusBufferCheck: Result for camera ${cameraId}:`, JSON.stringify(result.rows));
+            // logger.info(`[JOB] JobManager.getCameraFileCountsStatusBufferCheck: Result for camera ${cameraId}:`, JSON.stringify(result.rows));
             // result.rows = [{"status":"converted","count":"38"}]
             for (const status of result.rows) {
-                // console.log(status);
-                // console.log(status.status);
-                // console.log(status.count);
-                // console.log(cameraFileStatusCounts[`${status.status}`]);
+                // logger.info(status);
+                // logger.info(status.status);
+                // logger.info(status.count);
+                // logger.info(cameraFileStatusCounts[`${status.status}`]);
                 cameraFileStatusCounts[status.status] = parseInt(status.count);
-                // console.log("cameraFileStatusCounts after assign: ", cameraFileStatusCounts[status.status]);
+                // logger.info("cameraFileStatusCounts after assign: ", cameraFileStatusCounts[status.status]);
             }
             
-            console.log(`[JOB] JobManager.getCameraFileCountsStatusBufferCheck: Camera file counts in buffer${jobId ? ` for job ${jobId}` : ''}:`, JSON.stringify(cameraFileStatusCounts));
+            logger.info(`[JOB] JobManager.getCameraFileCountsStatusBufferCheck: Camera file counts in buffer${jobId ? ` for job ${jobId}` : ''}:`, JSON.stringify(cameraFileStatusCounts));
             return cameraFileStatusCounts;
         } catch (error) {
-            console.error('[JOB_ERROR] JobManager.getCameraFileCountsStatusBufferCheck: Error getting camera file counts in buffer:', error);
+            logger.error('[JOB_ERROR] JobManager.getCameraFileCountsStatusBufferCheck: Error getting camera file counts in buffer:', error);
             throw error;
         }
     }
@@ -432,11 +435,11 @@ class JobManager {
         try {
             const needed = targetCount - currentCount;
             if (needed <= 0) {
-                console.log(`[JOB] JobManager.requestAdditionalFilesForCamera: Camera ${cameraId} already has enough files (${currentCount}/${targetCount})`);
+                logger.info(`[JOB] JobManager.requestAdditionalFilesForCamera: Camera ${cameraId} already has enough files (${currentCount}/${targetCount})`);
                 return [];
             }
 
-            console.log(`[JOB] JobManager.requestAdditionalFilesForCamera: Camera ${cameraId} needs ${needed} more files to reach ${targetCount}`);
+            logger.info(`[JOB] JobManager.requestAdditionalFilesForCamera: Camera ${cameraId} needs ${needed} more files to reach ${targetCount}`);
             
             // Request more files than needed to account for missing files on disk
             const requestCount = Math.min(needed * 2, 100); // Request up to 2x needed or 100 max
@@ -463,7 +466,7 @@ class JobManager {
             `;
             
             const result = await this.pool.query(query, params);
-            console.log(`[JOB] JobManager.requestAdditionalFilesForCamera: Found ${result.rows.length} candidates for camera ${cameraId}${jobId ? ` for job ${jobId}` : ''}`);
+            logger.info(`[JOB] JobManager.requestAdditionalFilesForCamera: Found ${result.rows.length} candidates for camera ${cameraId}${jobId ? ` for job ${jobId}` : ''}`);
             
             // Filter files that actually exist on disk
             const validFiles = [];
@@ -477,7 +480,7 @@ class JobManager {
                         break;
                     }
                 } else {
-                    console.log(`[JOB] JobManager.requestAdditionalFilesForCamera: File not found on disk: ${file.file_path} (ID: ${file.id})`);
+                    logger.info(`[JOB] JobManager.requestAdditionalFilesForCamera: File not found on disk: ${file.file_path} (ID: ${file.id})`);
                     invalidFileIds.push(file.id);
                 }
             }
@@ -490,17 +493,17 @@ class JobManager {
                         SET deleted = true, updated_at = CURRENT_TIMESTAMP 
                         WHERE id = ANY($1)
                     `, [invalidFileIds]);
-                    console.log(`[JOB] JobManager.requestAdditionalFilesForCamera: Marked ${invalidFileIds.length} missing files as deleted for camera ${cameraId}`);
+                    logger.info(`[JOB] JobManager.requestAdditionalFilesForCamera: Marked ${invalidFileIds.length} missing files as deleted for camera ${cameraId}`);
                 } catch (dbError) {
-                    console.error(`[JOB_ERROR] JobManager.requestAdditionalFilesForCamera: Failed to mark files as deleted:`, dbError);
+                    logger.error(`[JOB_ERROR] JobManager.requestAdditionalFilesForCamera: Failed to mark files as deleted:`, dbError);
                 }
             }
 
-            console.log(`[JOB] JobManager.requestAdditionalFilesForCamera: Found ${validFiles.length} valid files for camera ${cameraId}${jobId ? ` for job ${jobId}` : ''} (${invalidFileIds.length} files marked as deleted)`);
+            logger.info(`[JOB] JobManager.requestAdditionalFilesForCamera: Found ${validFiles.length} valid files for camera ${cameraId}${jobId ? ` for job ${jobId}` : ''} (${invalidFileIds.length} files marked as deleted)`);
             return validFiles;
             
         } catch (error) {
-            console.error(`[JOB_ERROR] JobManager.requestAdditionalFilesForCamera: Error requesting additional files for camera ${cameraId}:`, error);
+            logger.error(`[JOB_ERROR] JobManager.requestAdditionalFilesForCamera: Error requesting additional files for camera ${cameraId}:`, error);
             throw error;
         }
     }
@@ -542,16 +545,16 @@ class JobManager {
                 const count = cameraFileCounts[cameraId] || 0;
                 
                 if (count < targetCount) {
-                    console.log(`[JOB] JobManager.checkJobHasRequiredFiles: Job ${jobId} - Camera ${cameraId} has only ${count}/${targetCount} files - not ready`);
+                    logger.info(`[JOB] JobManager.checkJobHasRequiredFiles: Job ${jobId} - Camera ${cameraId} has only ${count}/${targetCount} files - not ready`);
                     allCamerasReady = false;
                 } else {
-                    console.log(`[JOB] JobManager.checkJobHasRequiredFiles: Job ${jobId} - Camera ${cameraId} has ${count}/${targetCount} files - ready`);
+                    logger.info(`[JOB] JobManager.checkJobHasRequiredFiles: Job ${jobId} - Camera ${cameraId} has ${count}/${targetCount} files - ready`);
                 }
             }
             
             return allCamerasReady;
         } catch (error) {
-            console.error(`[JOB_ERROR] JobManager.checkJobHasRequiredFiles: Error checking if job ${jobId} has required files:`, error);
+            logger.error(`[JOB_ERROR] JobManager.checkJobHasRequiredFiles: Error checking if job ${jobId} has required files:`, error);
             throw error;
         }
     }
@@ -600,16 +603,16 @@ class JobManager {
                 }
             }
 
-            console.log(`[JOB] JobManager.checkJobVideoTransferCompletion: Job ${jobId} completion check:`);
-            console.log(`      JobManager.checkJobVideoTransferCompletion:  Expected cameras: ${expectedCameras.join(', ')}`);
-            console.log(`      JobManager.checkJobVideoTransferCompletion:  Cameras with grouped videos: ${camerasWithGroupedVideos.join(', ')}`);
-            console.log(`      JobManager.checkJobVideoTransferCompletion:  All cameras have videos: ${allCamerasHaveVideos}`);
-            console.log(`      JobManager.checkJobVideoTransferCompletion:  Videos: ${transferredVideos}/${totalVideos} transferred`);
-            console.log(`      JobManager.checkJobVideoTransferCompletion:  Buffer file counts per camera:`, cameraBufferCounts);
+            logger.info(`[JOB] JobManager.checkJobVideoTransferCompletion: Job ${jobId} completion check:`);
+            logger.info(`      JobManager.checkJobVideoTransferCompletion:  Expected cameras: ${expectedCameras.join(', ')}`);
+            logger.info(`      JobManager.checkJobVideoTransferCompletion:  Cameras with grouped videos: ${camerasWithGroupedVideos.join(', ')}`);
+            logger.info(`      JobManager.checkJobVideoTransferCompletion:  All cameras have videos: ${allCamerasHaveVideos}`);
+            logger.info(`      JobManager.checkJobVideoTransferCompletion:  Videos: ${transferredVideos}/${totalVideos} transferred`);
+            logger.info(`      JobManager.checkJobVideoTransferCompletion:  Buffer file counts per camera:`, cameraBufferCounts);
 
             return allCamerasHaveVideos && totalVideos > 0;
         } catch (error) {
-            console.error(`[JOB_ERROR] JobManager.checkJobVideoTransferCompletion: Error checking job video transfer completion for job ${jobId}:`, error);
+            logger.error(`[JOB_ERROR] JobManager.checkJobVideoTransferCompletion: Error checking job video transfer completion for job ${jobId}:`, error);
             throw error;
         }
     }
@@ -622,8 +625,8 @@ class JobManager {
             const cameras = expectedCameras || this.ISS_MEDIA_CAMERAS.map(cam => cam.replace('CAM_', ''));
             const batchId = uuidv4();
             
-            console.log(`[JOB] JobManager.createNewJobWithUUID: Creating new job with UUID: ${batchId}`);
-            console.log(`[JOB] JobManager.createNewJobWithUUID: Expected cameras: ${cameras.join(', ')}`);
+            logger.info(`[JOB] JobManager.createNewJobWithUUID: Creating new job with UUID: ${batchId}`);
+            logger.info(`[JOB] JobManager.createNewJobWithUUID: Expected cameras: ${cameras.join(', ')}`);
             
             const result = await this.pool.query(`
                 INSERT INTO video_transfer_queue_job (
@@ -636,10 +639,10 @@ class JobManager {
                 RETURNING *
             `, [batchId, 'auto_video', cameras, this.currentSiteId]);
             
-            console.log(`[JOB] JobManager.createNewJobWithUUID: ✓ Created new job: ${result.rows[0].batch_id} (ID: ${result.rows[0].id})`);
+            logger.info(`[JOB] JobManager.createNewJobWithUUID: ✓ Created new job: ${result.rows[0].batch_id} (ID: ${result.rows[0].id})`);
             return result.rows[0];
         } catch (error) {
-            console.error('[JOB] JobManager.createNewJobWithUUID: Error creating new job with UUID:', error);
+            logger.error('[JOB] JobManager.createNewJobWithUUID: Error creating new job with UUID:', error);
             throw error;
         }
     }
@@ -655,9 +658,9 @@ class JobManager {
             // Then delete the job itself
             await this.pool.query('DELETE FROM video_transfer_queue_job WHERE id = $1', [jobId]);
             
-            console.log(`[JOB] JobManager.deleteJob: Successfully deleted job ${jobId} and related entries`);
+            logger.info(`[JOB] JobManager.deleteJob: Successfully deleted job ${jobId} and related entries`);
         } catch (error) {
-            console.error(`[JOB_ERROR] JobManager.deleteJob: Error deleting job ${jobId}:`, error);
+            logger.error(`[JOB_ERROR] JobManager.deleteJob: Error deleting job ${jobId}:`, error);
             throw error;
         }
     }

@@ -2,6 +2,9 @@ const Redis = require('ioredis');
 const si = require('systeminformation');
 const { sleep } = require('./utils.js');
 const { PROCESS_MONITOR_KEY, PROCESS_MONITOR_UPDATE } = require('./redisKeyStore.js');
+const { createLogger } = require('./utils/logger');
+
+const logger = createLogger({ service: 'monitorSpecialProcesses' });
 
 // Initialize Redis client
 const config = require('./utils/envConfig');
@@ -57,33 +60,22 @@ async function runProcessMonitor() {
                 redis.set(PROCESS_MONITOR_KEY, processDataString);
                 redis.publish(PROCESS_MONITOR_UPDATE, processDataString);
 
-                // Log for monitoring
-                console.log('\n=== Process Load Status ===');
-                processData.forEach(process => {
-                    console.log(`\nProcess: ${process.name}`);
-                    console.log(`- Main PID: ${process.mainPid}`);
-                    console.log(`- CPU Usage: ${process.cpuUsage}%`);
-                    console.log(`- Memory Usage: ${process.memoryUsage}%`);
-                    console.log(`- All PIDs: ${process.allPids.join(', ')}`);
-                });
-                console.log('\n===================\n');
+                logger.info('Process load status', { processes: processData });
             });
 
-            await sleep(5000); // Update every second
+            await sleep(5000);
         } catch (error) {
-            console.error('Process monitor error:', error);
+            logger.error('Process monitor error:', { error: error.message });
             await sleep(5000);
             continue;
         }
     }
 }
 
-// Run the process monitor
 runProcessMonitor();
 
-// Keep the process running
 process.on('SIGINT', async () => {
-    console.log('Cleaning up...');
+    logger.info('Cleaning up process monitor...');
     await redis.quit();
     process.exit(0);
 });

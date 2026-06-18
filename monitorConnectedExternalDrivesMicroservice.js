@@ -3,6 +3,9 @@ const si = require('systeminformation');
 const { CONNECTED_DRIVE_LIST, CONNECTED_DRIVE_LIST_UPDATE, CONNECTED_DRIVE_STATE, CONFIG_STATE_KEY } = require('./redisKeyStore.js');
 const { sleep, formatGB } = require('./utils.js');
 const { Pool } = require('pg');
+const { createLogger } = require('./utils/logger');
+
+const logger = createLogger({ service: 'monitorConnectedExternalDrives' });
 
 let DB_USER = "postgres";
 let DB_PASSWORD = "postgres";
@@ -45,16 +48,16 @@ const UPTIME_UPDATE_INTERVAL = 60000; // Update uptime every minute
 // Subscribe to config updates
 redisPubSub.subscribe(CONFIG_STATE_KEY + '_update', (err, count) => {
     if (err) {
-        console.error('[CONFIG UPDATE] Failed to subscribe to config updates: %s', err.message);
+        logger.error('[CONFIG UPDATE] Failed to subscribe to config updates:', { error: err.message });
     } else {
-        console.log(`[CONFIG UPDATE] Subscribed successfully to config updates! Listening on ${count} channel(s).`);
+        logger.info(`[CONFIG UPDATE] Subscribed successfully to config updates! Listening on ${count} channel(s).`);
     }
 });
 
 redisPubSub.on('message', async (channel, message) => {
     if (channel === CONFIG_STATE_KEY + '_update') {
         CONFIG_STATE = JSON.parse(message);
-        console.log('[CONFIG UPDATE] Config updated:', CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive);
+        logger.info('[CONFIG UPDATE] Config updated', { drive: CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive });
     }
 });
 
@@ -84,14 +87,14 @@ async function insertDeviceConnection(driveInfo) {
         ]);
         return result.rows[0].id;
     } catch (error) {
-        console.error('Error inserting device connection:', error);
+        logger.error('Error inserting device connection:', { error: error.message, drive: driveInfo.drive });
         return null;
     }
 }
 
 // Function to update device status to disconnected
 async function markDeviceDisconnected(driveLetter) {
-    console.log(`[MARK DRIVE DISCONNECTED] Marking drive ${driveLetter} as disconnected`);
+    logger.info(`[MARK DRIVE DISCONNECTED] Marking drive ${driveLetter} as disconnected`, { drive: driveLetter });
     const query = `
         UPDATE device_connections 
         SET status = 'disconnected', 
@@ -104,15 +107,15 @@ async function markDeviceDisconnected(driveLetter) {
     
     try {
         await pool.query(query, [driveLetter]);
-        console.log(`[MARK DRIVE DISCONNECTED] Marked drive ${driveLetter} as disconnected`);
+        logger.info(`[MARK DRIVE DISCONNECTED] Marked drive ${driveLetter} as disconnected`, { drive: driveLetter });
     } catch (error) {
-        console.error('[MARK DRIVE DISCONNECTED] Error marking device as disconnected:', error);
+        logger.error('[MARK DRIVE DISCONNECTED] Error marking device as disconnected:', { error: error.message, drive: driveLetter });
     }
 }
 
 // Function to update device information
 async function updateDeviceInfo(driveInfo) {
-    console.log(`[UPDATE DRIVE INFO] Updating drive ${driveInfo.drive} info`);
+    logger.info(`[UPDATE DRIVE INFO] Updating drive ${driveInfo.drive} info`, { drive: driveInfo.drive });
     const query = `
         UPDATE device_connections 
         SET total_space = $1,
@@ -132,15 +135,15 @@ async function updateDeviceInfo(driveInfo) {
             driveInfo.usedPercentage,
             driveInfo.drive
         ]);
-        console.log(`[UPDATE DRIVE INFO] Updated drive ${driveInfo.drive} info`);
+        logger.info(`[UPDATE DRIVE INFO] Updated drive ${driveInfo.drive} info`, { drive: driveInfo.drive });
     } catch (error) {
-        console.error('[UPDATE DRIVE INFO] Error updating device info:', error);
+        logger.error('[UPDATE DRIVE INFO] Error updating device info:', { error: error.message, drive: driveInfo.drive });
     }
 }
 
 // Enhanced uptime calculation function
 async function calculateAndUpdateUptime() {
-    console.log(`[UPDATE UPTIME] Calculating and updating uptime`);
+    logger.info(`[UPDATE UPTIME] Calculating and updating uptime`);
     const query = `
         UPDATE device_connections 
         SET 
@@ -153,16 +156,16 @@ async function calculateAndUpdateUptime() {
     try {
         const result = await pool.query(query);
         if (result.rowCount > 0) {
-            console.log(`[UPDATE UPTIME] Updated uptime for ${result.rowCount} connected devices`);
+            logger.info(`[UPDATE UPTIME] Updated uptime for ${result.rowCount} connected devices`, { count: result.rowCount });
         }
     } catch (error) {
-        console.error('[UPDATE UPTIME] Error calculating uptime:', error);
+        logger.error('[UPDATE UPTIME] Error calculating uptime:', { error: error.message });
     }
 }
 
 // Function to get specific drive info for auto-transfer
 async function getSpecificDriveInfo(driveLetter) {
-    console.log(`[GET DRIVE INFO] Getting specific drive info for ${driveLetter}`);
+    logger.info(`[GET DRIVE INFO] Getting specific drive info for ${driveLetter}`, { drive: driveLetter });
     if (!driveLetter) {
         return {
             isConnected: false,
@@ -176,11 +179,10 @@ async function getSpecificDriveInfo(driveLetter) {
 
     try {
         const fsData = await si.fsSize(driveLetter + ":");
-        console.log(`[GET DRIVE INFO] Drive ${driveLetter} info`);
+        logger.info(`[GET DRIVE INFO] Drive ${driveLetter} info retrieved`, { drive: driveLetter });
         
-        // Check if fsData exists and has data
         if (!fsData || fsData.length === 0 || !fsData[0]) {
-            console.log(`[GET DRIVE INFO] Drive ${driveLetter} not found or not accessible`);
+            logger.warn(`[GET DRIVE INFO] Drive ${driveLetter} not found or not accessible`, { drive: driveLetter });
             return {
                 isConnected: false,
                 drive: driveLetter,
@@ -195,7 +197,7 @@ async function getSpecificDriveInfo(driveLetter) {
         
         const fs = fsData[0];
         if (!fs) {
-            console.log(`[GET DRIVE INFO] Drive ${driveLetter} info not found`);
+            logger.warn(`[GET DRIVE INFO] Drive ${driveLetter} info not found`, { drive: driveLetter });
             return {
                 isConnected: false,
                 drive: driveLetter,
@@ -208,9 +210,8 @@ async function getSpecificDriveInfo(driveLetter) {
             };
         }
 
-        // Additional safety check for fs properties (similar to main loop)
         if (!fs.size || !fs.used || !fs.available) {
-            console.log(`[GET DRIVE INFO] Drive ${driveLetter} has incomplete filesystem data`);
+            logger.warn(`[GET DRIVE INFO] Drive ${driveLetter} has incomplete filesystem data`, { drive: driveLetter });
             return {
                 isConnected: false,
                 drive: driveLetter,
@@ -224,9 +225,8 @@ async function getSpecificDriveInfo(driveLetter) {
         }
 
 
-        console.log(`[GET DRIVE INFO] Drive ${driveLetter} info:`);
+        logger.info(`[GET DRIVE INFO] Drive ${driveLetter} info:`, { drive: driveLetter });
         return {
-            isConnected: true,
             drive: driveLetter,
             totalSpace: formatGB(fs.size),
             usedSpace: formatGB(fs.used),
@@ -236,7 +236,7 @@ async function getSpecificDriveInfo(driveLetter) {
             readWrite: fs.rw ? 'Yes' : 'No'
         };
     } catch (error) {
-        console.error(`[GET DRIVE INFO] Error getting drive info for ${driveLetter}:`, error);
+        logger.error(`[GET DRIVE INFO] Error getting drive info for ${driveLetter}:`, { error: error.message, drive: driveLetter });
         return {
             isConnected: false,
             drive: driveLetter,
@@ -250,10 +250,9 @@ async function getSpecificDriveInfo(driveLetter) {
 
 // Run the enhanced monitor service
 async function runEnhancedMonitor() {
-    // Clear existing Redis data
     await redis.del(CONNECTED_DRIVE_LIST);
 
-    console.log('[START DRIVE MONITOR] Starting Enhanced Drive Monitor Service...');
+    logger.info('[START DRIVE MONITOR] Starting Enhanced Drive Monitor Service...');
 
     // Cache for inaccessible drives to avoid repeated expensive checks
     const inaccessibleDrives = new Map(); // Map<driveLetter, lastCheckTime>
@@ -285,7 +284,7 @@ async function runEnhancedMonitor() {
                 if (!currentDrives.has(drive)) {
                     await markDeviceDisconnected(drive);
                     connectedDrives.delete(drive);
-                    console.log(`[DRIVE DISCONNECTED] Drive ${drive} disconnected`);
+                    logger.info(`[DRIVE DISCONNECTED] Drive ${drive} disconnected`, { drive });
                 }
             }
 
@@ -305,26 +304,24 @@ async function runEnhancedMonitor() {
                     // Check if filesystem data exists
                     if (!fsData || fsData.length === 0 || !fsData[0]) {
                         if (!inaccessibleDrives.has(driveLetter)) {
-                            console.log(`[SKIP DRIVE] Drive ${driveLetter} has no accessible filesystem`);
+                            logger.warn(`[SKIP DRIVE] Drive ${driveLetter} has no accessible filesystem`, { drive: driveLetter });
                         }
-                        inaccessibleDrives.set(driveLetter, now); // Cache with timestamp
+                        inaccessibleDrives.set(driveLetter, now);
                         continue;
                     }
 
                     const fs = fsData[0];
 
-                    // Additional safety check for fs properties
                     if (!fs.size || !fs.used || !fs.available) {
                         if (!inaccessibleDrives.has(driveLetter)) {
-                            console.log(`[SKIP DRIVE] Drive ${driveLetter} has incomplete filesystem data`);
+                            logger.warn(`[SKIP DRIVE] Drive ${driveLetter} has incomplete filesystem data`, { drive: driveLetter });
                         }
-                        inaccessibleDrives.set(driveLetter, now); // Cache with timestamp
+                        inaccessibleDrives.set(driveLetter, now);
                         continue;
                     }
 
-                    // Drive is accessible - remove from inaccessible cache if present
                     if (inaccessibleDrives.has(driveLetter)) {
-                        console.log(`[DRIVE ACCESSIBLE] Drive ${driveLetter} is now accessible`);
+                        logger.info(`[DRIVE ACCESSIBLE] Drive ${driveLetter} is now accessible`, { drive: driveLetter });
                         inaccessibleDrives.delete(driveLetter);
                     }
 
@@ -344,7 +341,7 @@ async function runEnhancedMonitor() {
                     if (!connectedDrives.has(driveInfo.drive)) {
                         await insertDeviceConnection(driveInfo);
                         connectedDrives.add(driveInfo.drive);
-                        console.log(`[DRIVE CONNECTED] Drive ${driveInfo.drive} connected`);
+                        logger.info(`[DRIVE CONNECTED] Drive ${driveInfo.drive} connected`, { drive: driveInfo.drive });
                     } else {
                         // Update existing record (silently, no log spam)
                         await updateDeviceInfo(driveInfo);
@@ -352,7 +349,7 @@ async function runEnhancedMonitor() {
 
                     driveList.push(driveInfo);
                 } catch (error) {
-                    console.error('[PROCESS DRIVE ERROR] Error processing drive:', error);
+                    logger.error('[PROCESS DRIVE ERROR] Error processing drive:', { error: error.message });
                 }
             }
 
@@ -376,13 +373,12 @@ async function runEnhancedMonitor() {
                 lastUptimeUpdate = now;
             }
 
-            // Log status (reduced verbosity)
-            console.log(`[MONITOR] Drives: ${driveList.length} accessible, ${inaccessibleDrives.size} cached as inaccessible`);
+            logger.info(`[MONITOR] Drives: ${driveList.length} accessible, ${inaccessibleDrives.size} cached as inaccessible`, { accessible: driveList.length, inaccessible: inaccessibleDrives.size });
 
             await sleep(1000); // Keep 1 second for real-time detection
 
         } catch (error) {
-            console.error('[MONITOR ERROR] Enhanced Monitor error:', error);
+            logger.error('[MONITOR ERROR] Enhanced Monitor error:', { error: error.message });
             // Still publish empty data on error
             await redis.set(CONNECTED_DRIVE_LIST, driveListString);
             await redis.publish(CONNECTED_DRIVE_LIST_UPDATE, driveListString);
@@ -404,20 +400,15 @@ async function runEnhancedMonitor() {
     }
 }
 
-// Start the service
 async function startService() {
-    console.log('[MONITOR START] Initializing Enhanced Drive Monitor...');
-    
-    // Start the monitoring loop
+    logger.info('[MONITOR START] Initializing Enhanced Drive Monitor...');
     await runEnhancedMonitor();
 }
 
-// Start the service
 startService();
 
-// Graceful shutdown
 process.on('SIGINT', async () => {
-    console.log('[MONITRO CLOSE] Cleaning up Enhanced Drive Monitor...');
+    logger.info('[MONITRO CLOSE] Cleaning up Enhanced Drive Monitor...');
     await redis.quit();
     await redisPubSub.quit();
     await pool.end();

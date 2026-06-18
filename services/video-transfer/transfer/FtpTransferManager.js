@@ -1,3 +1,6 @@
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'FtpTransferManager' });
 const fs = require('fs-extra');
 const path = require('path');
 const { sleep } = require('../../../utils.js');
@@ -24,7 +27,7 @@ class FtpTransferManager {
     setFtpConfig(ftpConfig) {
         this.ftpConfig = ftpConfig;
         this.isConnected = ftpConfig && ftpConfig.connection && ftpConfig.connection.status === 'connected';
-        console.log(`[FTP_TRANSFER] setFtpConfig: FTP connection status: ${this.isConnected ? 'connected' : 'disconnected'}`);
+        logger.info(`[FTP_TRANSFER] setFtpConfig: FTP connection status: ${this.isConnected ? 'connected' : 'disconnected'}`);
     }
 
     /**
@@ -69,7 +72,7 @@ class FtpTransferManager {
      * Transfer a video file via FTP
      */
     async transferFile(file) {
-        console.log(`[FTP_TRANSFER] transferFile: Processing video file: ${file.video_file_path}`);
+        logger.info(`[FTP_TRANSFER] transferFile: Processing video file: ${file.video_file_path}`);
         
         try {
             if (!this.isFtpReady()) {
@@ -103,10 +106,10 @@ class FtpTransferManager {
                 WHERE id = $1
             `, [file.id]);
             
-            console.log(`[FTP_TRANSFER] transferFile: ✓ Successfully transferred: ${videoFileName} to ${remotePath}`);
+            logger.info(`[FTP_TRANSFER] transferFile: ✓ Successfully transferred: ${videoFileName} to ${remotePath}`);
             
         } catch (error) {
-            console.error(`[FTP_TRANSFER] transferFile: Failed to transfer ${file.video_file_path}:`, error);
+            logger.error(`[FTP_TRANSFER] transferFile: Failed to transfer ${file.video_file_path}:`, error);
             throw error;
         }
     }
@@ -119,7 +122,7 @@ class FtpTransferManager {
         client.ftp.verbose = false; // Reduce logging
         
         try {
-            console.log(`[FTP_TRANSFER] _performFtpTransfer: Connecting to ${this.ftpConfig.server.host}:${this.ftpConfig.server.port}`);
+            logger.info(`[FTP_TRANSFER] _performFtpTransfer: Connecting to ${this.ftpConfig.server.host}:${this.ftpConfig.server.port}`);
             
             const connectionOptions = {
                 host: this.ftpConfig.server.host,
@@ -143,24 +146,24 @@ class FtpTransferManager {
             const remoteDir = path.posix.dirname(remotePath);
             try {
                 await client.ensureDir(remoteDir);
-                console.log(`[FTP_TRANSFER] _performFtpTransfer: ✓ Ensured remote directory: ${remoteDir}`);
+                logger.info(`[FTP_TRANSFER] _performFtpTransfer: ✓ Ensured remote directory: ${remoteDir}`);
             } catch (dirError) {
-                console.log(`[FTP_TRANSFER] _performFtpTransfer: Directory ${remoteDir} may already exist: ${dirError.message}`);
+                logger.info(`[FTP_TRANSFER] _performFtpTransfer: Directory ${remoteDir} may already exist: ${dirError.message}`);
             }
             
             // Upload file with progress tracking
-            console.log(`[FTP_TRANSFER] _performFtpTransfer: Starting upload ${localPath} → ${remotePath}`);
+            logger.info(`[FTP_TRANSFER] _performFtpTransfer: Starting upload ${localPath} → ${remotePath}`);
             await client.uploadFrom(localPath, remotePath);
-            console.log(`[FTP_TRANSFER] _performFtpTransfer: ✓ Upload completed successfully`);
+            logger.info(`[FTP_TRANSFER] _performFtpTransfer: ✓ Upload completed successfully`);
             
         } catch (error) {
-            console.error(`[FTP_TRANSFER] _performFtpTransfer: Upload failed:`, error);
+            logger.error(`[FTP_TRANSFER] _performFtpTransfer: Upload failed:`, error);
             throw error;
         } finally {
             try {
                 client.close();
             } catch (closeError) {
-                console.warn(`[FTP_TRANSFER] _performFtpTransfer: Error closing FTP connection:`, closeError);
+                logger.warn(`[FTP_TRANSFER] _performFtpTransfer: Error closing FTP connection:`, closeError);
             }
         }
     }
@@ -169,7 +172,7 @@ class FtpTransferManager {
      * Mark source files as transferred using shared utilities
      */
     async markSourceFilesAsTransferred(file) {
-        console.log(`[FTP_TRANSFER] markSourceFilesAsTransferred: Marking source files as FTP transferred for video: ${file.video_file_name}`);
+        logger.info(`[FTP_TRANSFER] markSourceFilesAsTransferred: Marking source files as FTP transferred for video: ${file.video_file_name}`);
         
         try {
             // Use shared utility to mark source files as FTP transferred
@@ -177,10 +180,10 @@ class FtpTransferManager {
                 await TransferUtils.markSourceFilesAsTransferred(this.pool, file.source_file_ids, 'ftp');
             }
 
-            console.log(`[FTP_TRANSFER] markSourceFilesAsTransferred: ✓ Marked ${(file.source_file_ids && file.source_file_ids.length) || 0} source files as FTP transferred`);
+            logger.info(`[FTP_TRANSFER] markSourceFilesAsTransferred: ✓ Marked ${(file.source_file_ids && file.source_file_ids.length) || 0} source files as FTP transferred`);
             
         } catch (error) {
-            console.error('[FTP_TRANSFER] markSourceFilesAsTransferred: Error:', error);
+            logger.error('[FTP_TRANSFER] markSourceFilesAsTransferred: Error:', error);
             throw error;
         }
     }
@@ -189,7 +192,7 @@ class FtpTransferManager {
      * Handle transfer error using shared utilities
      */
     async handleTransferError(file, error) {
-        console.error(`[FTP_TRANSFER] handleTransferError: Transfer failed for ${file.video_file_name}:`, error);
+        logger.error(`[FTP_TRANSFER] handleTransferError: Transfer failed for ${file.video_file_name}:`, error);
         
         const result = await TransferUtils.handleTransferError(
             this.pool, 
@@ -201,13 +204,13 @@ class FtpTransferManager {
         // FTP-specific error handling
         if (error.message.includes('ECONNREFUSED') || error.message.includes('timeout')) {
             this.isConnected = false;
-            console.error('[FTP_TRANSFER] handleTransferError: FTP connection lost, marking as disconnected');
+            logger.error('[FTP_TRANSFER] handleTransferError: FTP connection lost, marking as disconnected');
         } else if (error.message.includes('503 Use AUTH first') || error.message.includes('AUTH')) {
             this.isConnected = false;
-            console.error('[FTP_TRANSFER] handleTransferError: FTP server requires AUTH (TLS/SSL) authentication. Check if protocol should be "ftps"');
+            logger.error('[FTP_TRANSFER] handleTransferError: FTP server requires AUTH (TLS/SSL) authentication. Check if protocol should be "ftps"');
         } else if (error.message.includes('SSL') || error.message.includes('TLS') || error.message.includes('certificate')) {
             this.isConnected = false;
-            console.error('[FTP_TRANSFER] handleTransferError: TLS/SSL related error. Check secure connection settings');
+            logger.error('[FTP_TRANSFER] handleTransferError: TLS/SSL related error. Check secure connection settings');
         }
         
         return result;
@@ -328,7 +331,7 @@ class FtpTransferManager {
             return result.rows[0];
             
         } catch (error) {
-            console.error('[FTP_TRANSFER] getTransferStatistics: Error:', error);
+            logger.error('[FTP_TRANSFER] getTransferStatistics: Error:', error);
             return null;
         }
     }
@@ -385,7 +388,7 @@ class FtpTransferManager {
             return stats;
             
         } catch (error) {
-            console.error('[FTP_TRANSFER] getCurrentTransferStats: Error:', error);
+            logger.error('[FTP_TRANSFER] getCurrentTransferStats: Error:', error);
             return {
                 currentFile: null,
                 progress: 0,

@@ -1,4 +1,7 @@
 const fs = require('fs-extra');
+const \{ createLogger \} = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'CompleteBufferManager' });
 const path = require('path');
 const { sleep } = require('../../../utils.js');
 
@@ -50,14 +53,14 @@ class CompleteBufferManager {
             if (existingCheck.rows.length > 0) {
                 const existing = existingCheck.rows[0];
                 if (existing.status === 'pending') {
-                    console.log(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: File ${sourceFile.file_name} already in buffer as pending for job ${jobId}, returning existing record (Buffer ID: ${existing.id})`);
+                    logger.info(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: File ${sourceFile.file_name} already in buffer as pending for job ${jobId}, returning existing record (Buffer ID: ${existing.id})`);
                     return existing;
                 } else if (existing.status === 'converted') {
-                    console.log(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: File ${sourceFile.file_name} already converted in buffer for job ${jobId}, returning existing record (Buffer ID: ${existing.id})`);
+                    logger.info(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: File ${sourceFile.file_name} already converted in buffer for job ${jobId}, returning existing record (Buffer ID: ${existing.id})`);
                     return existing;
                 } else {
                     // Clean up old entries with failed/error status and allow re-adding
-                    console.log(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: Cleaning up old buffer entry for ${sourceFile.file_name} (status: ${existing.status}) in job ${jobId}`);
+                    logger.info(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: Cleaning up old buffer entry for ${sourceFile.file_name} (status: ${existing.status}) in job ${jobId}`);
                     await this.pool.query(`DELETE FROM video_converted_buffer WHERE id = $1`, [existing.id]);
                 }
             }
@@ -84,11 +87,11 @@ class CompleteBufferManager {
             ]);
             
             const bufferRecord = result.rows[0];
-            console.log(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: Added file to buffer for job ${jobId}: ${sourceFile.file_name} (Buffer ID: ${bufferRecord.id})`);
+            logger.info(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: Added file to buffer for job ${jobId}: ${sourceFile.file_name} (Buffer ID: ${bufferRecord.id})`);
             return bufferRecord;
             
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: Failed to store file in buffer for job ${jobId}: ${sourceFile.file_name}`, error);
+            logger.error(`[BUFFER] CompleteBufferManager.storeFileInBufferAsPending: Failed to store file in buffer for job ${jobId}: ${sourceFile.file_name}`, error);
             throw error;
         }
     }
@@ -110,14 +113,14 @@ class CompleteBufferManager {
             `, [bufferId, convertedFilePath, convertedFileName, stats.size]);
             
             if (result.rows.length > 0) {
-                console.log(`[BUFFER] CompleteBufferManager.updateBufferAfterConversion: ✓ Updated buffer entry ${bufferId}: ${convertedFileName} (${(stats.size/1024/1024).toFixed(2)} MB)`);
+                logger.info(`[BUFFER] CompleteBufferManager.updateBufferAfterConversion: ✓ Updated buffer entry ${bufferId}: ${convertedFileName} (${(stats.size/1024/1024).toFixed(2)} MB)`);
                 return result.rows[0];
             } else {
                 throw new Error(`[BUFFER_ERROR] CompleteBufferManager.updateBufferAfterConversion: Buffer entry ${bufferId} not found for update`);
             }
             
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.updateBufferAfterConversion: Failed to update buffer entry ${bufferId}:`, error);
+            logger.error(`[BUFFER] CompleteBufferManager.updateBufferAfterConversion: Failed to update buffer entry ${bufferId}:`, error);
             throw error;
         }
     }
@@ -133,9 +136,9 @@ class CompleteBufferManager {
                 WHERE id = $1
             `, [bufferId]);
             
-            console.log(`[BUFFER] CompleteBufferManager.markBufferEntryAsFailed: Marked buffer entry as failed (ID: ${bufferId})`);
+            logger.info(`[BUFFER] CompleteBufferManager.markBufferEntryAsFailed: Marked buffer entry as failed (ID: ${bufferId})`);
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.markBufferEntryAsFailed: Failed to mark buffer entry as failed: ${error.message}`);
+            logger.error(`[BUFFER] CompleteBufferManager.markBufferEntryAsFailed: Failed to mark buffer entry as failed: ${error.message}`);
         }
     }
 
@@ -156,12 +159,12 @@ class CompleteBufferManager {
             const result = await this.pool.query(query, [cameraId, date, groupKey]);
             const fileCount = parseInt(result.rows[0].file_count);
             
-            console.log(`[BUFFER] CompleteBufferManager.checkCameraGroupReady: Camera ${cameraId} group ${groupKey}: ${fileCount}/${this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT} files converted`);
+            logger.info(`[BUFFER] CompleteBufferManager.checkCameraGroupReady: Camera ${cameraId} group ${groupKey}: ${fileCount}/${this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT} files converted`);
             
             return fileCount >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT;
             
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.checkCameraGroupReady: Failed to check camera group readiness:`, error);
+            logger.error(`[BUFFER] CompleteBufferManager.checkCameraGroupReady: Failed to check camera group readiness:`, error);
             return false;
         }
     }
@@ -171,7 +174,7 @@ class CompleteBufferManager {
      */
     async getConvertedFilesForGroup(cameraId, date, groupKey) {
         try {
-            console.log(`[BUFFER] CompleteBufferManager.getConvertedFilesForGroup: Querying for: camera=${cameraId}, date=${date}, groupKey=${groupKey}, status=converted`);
+            logger.info(`[BUFFER] CompleteBufferManager.getConvertedFilesForGroup: Querying for: camera=${cameraId}, date=${date}, groupKey=${groupKey}, status=converted`);
             
             const query = `
                 SELECT * FROM video_converted_buffer 
@@ -184,12 +187,12 @@ class CompleteBufferManager {
             `;
             
             const result = await this.pool.query(query, [cameraId, date, groupKey, this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT]);
-            console.log(`[BUFFER] CompleteBufferManager.getConvertedFilesForGroup: Retrieved ${result.rows.length} converted files for concatenation`);
+            logger.info(`[BUFFER] CompleteBufferManager.getConvertedFilesForGroup: Retrieved ${result.rows.length} converted files for concatenation`);
             
             return result.rows;
             
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.getConvertedFilesForGroup: Failed to get converted files for group:`, error);
+            logger.error(`[BUFFER] CompleteBufferManager.getConvertedFilesForGroup: Failed to get converted files for group:`, error);
             return [];
         }
     }
@@ -200,7 +203,7 @@ class CompleteBufferManager {
      */
     async getConvertedFilesForJob(jobId, cameraId) {
         try {
-            console.log(`[BUFFER] CompleteBufferManager.getConvertedFilesForJob: Querying for: jobId=${jobId}, status=converted`);
+            logger.info(`[BUFFER] CompleteBufferManager.getConvertedFilesForJob: Querying for: jobId=${jobId}, status=converted`);
             
             const query = `
                 SELECT * FROM video_converted_buffer 
@@ -210,12 +213,12 @@ class CompleteBufferManager {
             `;
             
             const result = await this.pool.query(query, [cameraId, jobId]);
-            console.log(`[BUFFER] CompleteBufferManager.getConvertedFilesForJob: Retrieved ${result.rows.length} converted files for concatenation`);
+            logger.info(`[BUFFER] CompleteBufferManager.getConvertedFilesForJob: Retrieved ${result.rows.length} converted files for concatenation`);
             
             return result.rows;
             
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.getConvertedFilesForJob: Failed to get converted files for group:`, error);
+            logger.error(`[BUFFER] CompleteBufferManager.getConvertedFilesForJob: Failed to get converted files for group:`, error);
             return [];
         }
     }
@@ -226,7 +229,7 @@ class CompleteBufferManager {
      */
     async getGroupedFilesForJob(jobId, cameraId) {
         try {
-            console.log(`[BUFFER] CompleteBufferManager.getGroupedFilesForJob: Querying for: jobId=${jobId}, status=converted`);
+            logger.info(`[BUFFER] CompleteBufferManager.getGroupedFilesForJob: Querying for: jobId=${jobId}, status=converted`);
             
             const query = `
                 SELECT * FROM video_converted_buffer 
@@ -236,12 +239,12 @@ class CompleteBufferManager {
             `;
             
             const result = await this.pool.query(query, [cameraId, jobId]);
-            console.log(`[BUFFER] CompleteBufferManager.getGroupedFilesForJob: Retrieved ${result.rows.length} grouped files for concatenation`);
+            logger.info(`[BUFFER] CompleteBufferManager.getGroupedFilesForJob: Retrieved ${result.rows.length} grouped files for concatenation`);
             
             return result.rows;
             
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.getGroupedFilesForJob: Failed to get grouped files for group:`, error);
+            logger.error(`[BUFFER] CompleteBufferManager.getGroupedFilesForJob: Failed to get grouped files for group:`, error);
             return [];
         }
     }
@@ -257,9 +260,9 @@ class CompleteBufferManager {
                 WHERE id = ANY($1)
             `, [bufferIds]);
             
-            console.log(`[BUFFER] CompleteBufferManager.markFilesAsGrouped: Marked ${bufferIds.length} converted files as grouped`);
+            logger.info(`[BUFFER] CompleteBufferManager.markFilesAsGrouped: Marked ${bufferIds.length} converted files as grouped`);
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.markFilesAsGrouped: Failed to mark files as grouped: ${error.message}`);
+            logger.error(`[BUFFER] CompleteBufferManager.markFilesAsGrouped: Failed to mark files as grouped: ${error.message}`);
         }
     }
 
@@ -271,7 +274,7 @@ class CompleteBufferManager {
             // After all files are processed, check if group is ready for concatenation
             const isReady = await this.checkCameraGroupReady(camera_id, date, group_key);
             if (isReady) {
-                console.log(`[BUFFER] CompleteBufferManager.processFilesToBuffer: Group ready for concatenation: camera ${camera_id}, interval ${interval_start}-${interval_end}`);
+                logger.info(`[BUFFER] CompleteBufferManager.processFilesToBuffer: Group ready for concatenation: camera ${camera_id}, interval ${interval_start}-${interval_end}`);
                 // await this.createVideoFromBuffer(camera_id, date, group_key, interval_start, interval_end);
                 const videoData = await this.createVideoFromBuffer(jobId, camera_id, date, group_key, interval_start, interval_end);
                 if (videoData && this.eventEmitter) {
@@ -282,7 +285,7 @@ class CompleteBufferManager {
             }
             
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.processFilesToBuffer: Error processing files to buffer:`, error);
+            logger.error(`[BUFFER] CompleteBufferManager.processFilesToBuffer: Error processing files to buffer:`, error);
             throw error;
         }
     }
@@ -299,7 +302,7 @@ class CompleteBufferManager {
             // Check if source file exists before attempting conversion
             if (!await fs.pathExists(file.file_path)) {
                 const error = new Error(`Source file not found: ${file.file_path}`);
-                console.error(`[VIDEO_CONVERT_ERROR] CompleteBufferManager.convertSingleFile: ${error.message}`);
+                logger.error(`[VIDEO_CONVERT_ERROR] CompleteBufferManager.convertSingleFile: ${error.message}`);
                 
                 // Mark file as deleted in database if it doesn't exist
                 try {
@@ -308,9 +311,9 @@ class CompleteBufferManager {
                         SET deleted = true, updated_at = CURRENT_TIMESTAMP 
                         WHERE id = $1
                     `, [file.id]);
-                    console.log(`[UPDATE] CompleteBufferManager.convertSingleFile: Marked file ${file.file_name} as deleted (ID: ${file.id})`);
+                    logger.info(`[UPDATE] CompleteBufferManager.convertSingleFile: Marked file ${file.file_name} as deleted (ID: ${file.id})`);
                 } catch (dbError) {
-                    console.error(`[ERROR] CompleteBufferManager.convertSingleFile: Failed to mark file as deleted: ${dbError.message}`);
+                    logger.error(`[ERROR] CompleteBufferManager.convertSingleFile: Failed to mark file as deleted: ${dbError.message}`);
                 }
                 
                 // Mark buffer entry as failed due to missing source file
@@ -319,7 +322,7 @@ class CompleteBufferManager {
                 return;
             }
             
-            console.log(`[VIDEO_CONVERT] CompleteBufferManager.convertSingleFile: Converting file: ${bufferRecord.converted_file_name} -> ${tempGroupDir}`);
+            logger.info(`[VIDEO_CONVERT] CompleteBufferManager.convertSingleFile: Converting file: ${bufferRecord.converted_file_name} -> ${tempGroupDir}`);
 
             const convertedFilePath = await this.videoProcessor.convertSingleFile(file, bufferRecord, tempGroupDir);
             
@@ -329,7 +332,7 @@ class CompleteBufferManager {
             await sleep(100);
             
         } catch (error) {
-            console.error(`[VIDEO_CONVERT] CompleteBufferManager.convertSingleFile: Failed to convert: ${file.file_name}`, error.message);
+            logger.error(`[VIDEO_CONVERT] CompleteBufferManager.convertSingleFile: Failed to convert: ${file.file_name}`, error.message);
             
             // Only mark as failed if we haven't already done so above
             if (!error.message.includes('Source file not found')) {
@@ -344,11 +347,11 @@ class CompleteBufferManager {
         // Check if file already exists return it directly
         try {
             await fs.access(finalVideoPath);
-            console.log(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: Found existing file: ${finalVideoPath}`);
+            logger.info(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: Found existing file: ${finalVideoPath}`);
             const stats = await fs.stat(finalVideoPath);
             const fileSize = stats.size;
             
-            console.log(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: ✓ Found: ${finalVideoName} (${(fileSize/1024/1024).toFixed(2)} MB)`);
+            logger.info(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: ✓ Found: ${finalVideoName} (${(fileSize/1024/1024).toFixed(2)} MB)`);
             
             return {
                 videoPath: finalVideoPath,
@@ -357,7 +360,7 @@ class CompleteBufferManager {
                 convertedFilePaths: convertedFilePaths
             };
         } catch (error) {
-            console.log(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: File not found: ${finalVideoPath}`);
+            logger.info(`[VIDEO] VideoProcessor.searchFindalVideoInConversionStorage: File not found: ${finalVideoPath}`);
             return null;
         }
     }
@@ -369,7 +372,7 @@ class CompleteBufferManager {
         try {
             let videoResult;
 
-            console.log(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: Creating video from buffer for camera ${cameraId} - ${jobId}`);
+            logger.info(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: Creating video from buffer for camera ${cameraId} - ${jobId}`);
             
             const cameraFileStatusCounts = await this.jobManager.getCameraFileCountsStatusBufferCheck(jobId, cameraId);
 
@@ -378,7 +381,7 @@ class CompleteBufferManager {
             const cameraGroupedCount = cameraFileStatusCounts.grouped || 0;
 
             if (cameraGroupedCount < this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
-                console.log(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: ⚠️ Camera ${cameraId} has ${cameraGroupedCount} grouped files. Skipping video creation.`);
+                logger.info(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: ⚠️ Camera ${cameraId} has ${cameraGroupedCount} grouped files. Skipping video creation.`);
                 return null;
             }
             
@@ -386,7 +389,7 @@ class CompleteBufferManager {
             const groupedFiles = await this.getGroupedFilesForJob(jobId, cameraId);
             
             if (groupedFiles.length === 0) {
-                console.error(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: No grouped files found for group ${cameraId}_${jobId}`);
+                logger.error(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: No grouped files found for group ${cameraId}_${jobId}`);
                 return null;
             }
             
@@ -412,7 +415,7 @@ class CompleteBufferManager {
             }
 
             if (videoResult) {
-                console.log(`[VIDEO] CompleteBufferManager.createVideoFromBuffer: ✓ Created: ${videoResult.videoName} (${(videoResult.fileSize/1024/1024).toFixed(2)} MB)`);
+                logger.info(`[VIDEO] CompleteBufferManager.createVideoFromBuffer: ✓ Created: ${videoResult.videoName} (${(videoResult.fileSize/1024/1024).toFixed(2)} MB)`);
                 
                 // Mark buffer files as grouped
                 // await this.markFilesAsGrouped(bufferIds);
@@ -422,11 +425,11 @@ class CompleteBufferManager {
                 this.videoStats.lastProcessedTime = new Date();
 
                 // Clean up individual MP4 files
-                console.log(`[VIDEO_SEGMENT_CLEANUP] CompleteBufferManager.createVideoFromBuffer: Cleaning up ${videoResult.videoName} total of (${videoResult.convertedFilePaths.length}) files`);
+                logger.info(`[VIDEO_SEGMENT_CLEANUP] CompleteBufferManager.createVideoFromBuffer: Cleaning up ${videoResult.videoName} total of (${videoResult.convertedFilePaths.length}) files`);
                 for (const filePath of videoResult.convertedFilePaths) {
                     try {
                         await fs.unlink(filePath);
-                        console.log(`[VIDEO_SEGMENT_CLEANUP] CompleteBufferManager.createVideoFromBuffer: Removed segment ${filePath} for final created video ${videoResult.videoName}`);
+                        logger.info(`[VIDEO_SEGMENT_CLEANUP] CompleteBufferManager.createVideoFromBuffer: Removed segment ${filePath} for final created video ${videoResult.videoName}`);
                     } catch (error) {
                         // Ignore cleanup errors
                     }
@@ -444,12 +447,12 @@ class CompleteBufferManager {
                 
                 return videoData;
             } else {
-                console.error(`[VIDEO] CompleteBufferManager.createVideoFromBuffer: ✗ Failed to create video for group ${cameraId}_${groupKey}`);
+                logger.error(`[VIDEO] CompleteBufferManager.createVideoFromBuffer: ✗ Failed to create video for group ${cameraId}_${groupKey}`);
                 return null;
             }
             
         } catch (error) {
-            console.error(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: Error creating video from buffer:`, error);
+            logger.error(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: Error creating video from buffer:`, error);
             return null;
         }
     }
@@ -467,7 +470,7 @@ class CompleteBufferManager {
                 await fs.access(file.converted_file_path);
                 validPaths.push(file.converted_file_path);
             } catch (error) {
-                console.warn(`[BUFFER] File not found: ${file.converted_file_path}`);
+                logger.warn(`[BUFFER] File not found: ${file.converted_file_path}`);
                 
                 // Try to find the actual converted file
                 const tempDir = path.join(this.VIDEO_TEMP_DIR, `temp_cam_${cameraId}`);
@@ -489,7 +492,7 @@ class CompleteBufferManager {
                 }
                 
                 if (foundPath) {
-                    console.log(`[BUFFER] Found actual file: ${foundPath}`);
+                    logger.info(`[BUFFER] Found actual file: ${foundPath}`);
                     // Update database with correct path
                     await this.pool.query(
                         'UPDATE video_converted_buffer SET converted_file_path = $1 WHERE id = $2',
@@ -498,7 +501,7 @@ class CompleteBufferManager {
                     validPaths.push(foundPath);
                 } else {
                     invalidRecords.push(file);
-                    console.error(`[BUFFER] Could not locate converted file for: ${file.converted_file_name}`);
+                    logger.error(`[BUFFER] Could not locate converted file for: ${file.converted_file_name}`);
                 }
             }
         }
@@ -531,16 +534,16 @@ class CompleteBufferManager {
                 return;
             }
             
-            console.log(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Found ${readyGroups.rows.length} ready groups for video creation`);
+            logger.info(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Found ${readyGroups.rows.length} ready groups for video creation`);
             
             for (const group of readyGroups.rows) {
                 try {
-                    console.log(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Processing ready group: camera ${group.camera_id}, interval ${group.group_interval_start}-${group.group_interval_end}`);
+                    logger.info(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Processing ready group: camera ${group.camera_id}, interval ${group.group_interval_start}-${group.group_interval_end}`);
                     
                     // Check if this camera has already contributed to the current job
                     const hasAlreadyContributed = await this.checkCameraAlreadyProcessedInCurrentJob(group.camera_id);
                     if (hasAlreadyContributed) {
-                        console.log(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: ⚠️ Skipping ready group for camera ${group.camera_id} - already contributed to current job (maintaining 1 video per camera per job)`);
+                        logger.info(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: ⚠️ Skipping ready group for camera ${group.camera_id} - already contributed to current job (maintaining 1 video per camera per job)`);
                         continue;
                     }
                     
@@ -564,12 +567,12 @@ class CompleteBufferManager {
                     }
                     
                 } catch (error) {
-                    console.error(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Error processing ready group:`, error);
+                    logger.error(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Error processing ready group:`, error);
                 }
             }
             
         } catch (error) {
-            console.error('[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Error checking ready groups:', error);
+            logger.error('[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Error checking ready groups:', error);
         }
     }
 
@@ -589,7 +592,7 @@ class CompleteBufferManager {
             `);
             
             if (jobResult.rows.length === 0) {
-                console.log(`[CAMERA_CHECK] No active job found`);
+                logger.info(`[CAMERA_CHECK] No active job found`);
                 return false;
             }
             
@@ -600,7 +603,7 @@ class CompleteBufferManager {
             const isAlreadyProcessed = processedCameras.includes(cameraId.toString());
             
             if (isAlreadyProcessed) {
-                console.log(`[CAMERA_CHECK] CompleteBufferManager.checkCameraAlreadyProcessedInCurrentJob: Camera ${cameraId} already processed in job ${currentJob.id} (processed_cameras: [${processedCameras.join(', ')}])`);
+                logger.info(`[CAMERA_CHECK] CompleteBufferManager.checkCameraAlreadyProcessedInCurrentJob: Camera ${cameraId} already processed in job ${currentJob.id} (processed_cameras: [${processedCameras.join(', ')}])`);
                 return true;
             }
             
@@ -615,15 +618,15 @@ class CompleteBufferManager {
             `, [currentJob.id, cameraId]);
             
             if (videoResult.rows.length > 0) {
-                console.log(`[CAMERA_CHECK] CompleteBufferManager.checkCameraAlreadyProcessedInCurrentJob: Camera ${cameraId} already has video in transfer queue for job ${currentJob.id}: ${videoResult.rows[0].video_file_name}`);
+                logger.info(`[CAMERA_CHECK] CompleteBufferManager.checkCameraAlreadyProcessedInCurrentJob: Camera ${cameraId} already has video in transfer queue for job ${currentJob.id}: ${videoResult.rows[0].video_file_name}`);
                 return true;
             }
             
-            console.log(`[CAMERA_CHECK] CompleteBufferManager.checkCameraAlreadyProcessedInCurrentJob: Camera ${cameraId} has not yet contributed to job ${currentJob.id}`);
+            logger.info(`[CAMERA_CHECK] CompleteBufferManager.checkCameraAlreadyProcessedInCurrentJob: Camera ${cameraId} has not yet contributed to job ${currentJob.id}`);
             return false;
             
         } catch (error) {
-            console.error(`[CAMERA_CHECK] CompleteBufferManager.checkCameraAlreadyProcessedInCurrentJob: Error checking if camera ${cameraId} already processed in current job:`, error);
+            logger.error(`[CAMERA_CHECK] CompleteBufferManager.checkCameraAlreadyProcessedInCurrentJob: Error checking if camera ${cameraId} already processed in current job:`, error);
             return false; // Default to allowing processing if check fails
         }
     }

@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18 (shared logger + trace IDs added; ADR-0006 written)
+Last updated: 2026-06-18 (full logger rollout complete — all 23 services/helpers migrated to utils/logger.js)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

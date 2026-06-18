@@ -4,6 +4,9 @@ const fs = require('fs-extra');
 const chokidar = require('chokidar');
 const { exec } = require('child_process');
 const { CONFIG_STATE_KEY, CONFIG_FTP_STATE_KEY } = require('./redisKeyStore');
+const { createLogger } = require('./utils/logger');
+
+const logger = createLogger({ service: 'ConfigStateServiceRedis' });
 
 // Load environment variables
 require('dotenv').config();
@@ -38,48 +41,44 @@ function sleep(ms) {
 }
 
 
-// Helper functions
 function readConfig(filePath) {
     try {
         if (!fs.existsSync(filePath)) {
-            console.log("Config file not found:", filePath);
+            logger.warn('Config file not found:', { path: filePath });
             return {};
         }
         return JSON.parse(fs.readFileSync(filePath, 'utf8'));
     } catch (error) {
-        console.error('Error reading config:', error);
+        logger.error('Error reading config:', { error: error.message });
         return null;
     }
 }
 
-// One-liner for current directory
-chokidar.watch(CONFIG_FILE_PATH).on('all', async (event, path) => {
-    console.log(event, path);
-    console.log('Config info loaded');
+chokidar.watch(CONFIG_FILE_PATH).on('all', async (event, filePath) => {
+    logger.info('Config file event', { event, path: filePath });
+    logger.info('Config info loaded');
     const config = readConfig(CONFIG_FILE_PATH);
     redis.set(CONFIG_STATE_KEY, JSON.stringify(config));
     redisPubSub.publish(CONFIG_STATE_KEY + '_update', JSON.stringify(config));
 });
 
-chokidar.watch(CONFIG_FTP_FILE_PATH).on('all', async (event, path) => {
-    console.log(event, path);
-    console.log('Config info loaded');
+chokidar.watch(CONFIG_FTP_FILE_PATH).on('all', async (event, filePath) => {
+    logger.info('FTP config file event', { event, path: filePath });
+    logger.info('FTP config info loaded');
     const config = readConfig(CONFIG_FTP_FILE_PATH);
     redis.set(CONFIG_FTP_STATE_KEY, JSON.stringify(config));
     redisPubSub.publish(CONFIG_FTP_STATE_KEY + '_update', JSON.stringify(config));
 });
 
 async function runSimulation() {
-    // Start all components
     while (true) {
         try {
             const mainConfig = readConfig(CONFIG_FILE_PATH);
             redisPubSub.publish(CONFIG_STATE_KEY + '_update', JSON.stringify(mainConfig));
 
             const ftpConfig = readConfig(CONFIG_FTP_FILE_PATH);
-            // console.log(ftpConfig)
             redisPubSub.publish(CONFIG_FTP_STATE_KEY + '_update', JSON.stringify(ftpConfig));
-            console.log('Config info loaded pubslished');
+            logger.info('Config info published');
             await sleep(500);
         } catch (error) {
             await sleep(1000);
