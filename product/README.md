@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-17 (docs consolidated)
+Last updated: 2026-06-18 (test suite added, TEST_MAP.md created)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
@@ -87,11 +87,12 @@ This folder is the **single source of truth** for product decisions, requirement
 | ADR-0005 | [decisions/0005-mcp-read-access-to-databases.md](decisions/0005-mcp-read-access-to-databases.md) | Provide MCP read-only access to PostgreSQL for Cursor AI agents |
 | Template | [decisions/template.md](decisions/template.md) | ADR template for new decisions |
 
-### Root Map
+### Root Maps
 
 | Document | Path | Purpose |
 |---|---|---|
 | Project Map | [../PROJECT_MAP.md](../PROJECT_MAP.md) | Living tech stack, system flow, architecture, orphans & pending — update on every change |
+| Test Map | [../TEST_MAP.md](../TEST_MAP.md) | Jest test suite index, coverage table, mocking strategy, and gap registry — update when tests are added or coverage changes |
 
 ### Agent Skills
 
@@ -148,6 +149,7 @@ These files provide the minimum context required for any task:
 | SecurOS log registry | When tailing SecurOS logs or editing a SecurOS script | `.cursor/skills/securos-log-registry/SKILL.md` |
 | Ecosystem config | When adding a service, changing restart policy, or checking log paths | `ecosystem.config.js` |
 | Migration script | When modifying the database schema | `scripts/migration/DatabaseMigration.js` |
+| Test suite map | When writing new tests, checking coverage gaps, or extending the test setup | `TEST_MAP.md` |
 
 ### Always Exclude
 

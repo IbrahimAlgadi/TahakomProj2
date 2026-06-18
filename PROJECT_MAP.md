@@ -24,6 +24,7 @@ _Update this file whenever a service is added, a table changes, or a decision is
 | Charts | Apache ECharts | 5.4.3 (vendored) | Dashboard statistics, vendored in `data_transfer_v2/public/vendors/echarts/` |
 | Date handling | Moment.js + moment-timezone | ^2.30.1 / ^0.5.48 | Transfer scheduling, timestamp formatting |
 | Encryption | Node.js `crypto` (built-in) | — | AES-256-CBC file encryption; RSA key management via `certs/` |
+| **Test runner** | **Jest** | **latest (devDependency)** | **Unit test suite — `npm test`; config: `jest.config.js`; suites: `tests/`** |
 | FTP client | basic-ftp | ^5.0.5 | FTP/FTPS image and video upload |
 | File watching | chokidar | ^3.6.0 | ISS media directory monitoring |
 | HTTP client | axios | ^1.9.0 | Internal service calls |
@@ -319,6 +320,63 @@ services/
 
 ---
 
+## [TESTING]
+
+> See `TEST_MAP.md` (workspace root) for the full per-suite index and coverage table.
+
+### Test Stack
+
+| Tool | Role |
+|---|---|
+| Jest (devDependency) | Test runner, assertion library, mock framework, coverage |
+| `jest.config.js` | Config: node env, `tests/**/*.test.js` pattern, `silent: true`, excludes `data_transfer_v2/` and `archived/` |
+| `tests/helpers/mocks.js` | Shared factories: `createMockPool`, `createMockRedis`, `createMockEncryption`, fixture rows |
+
+### Commands
+
+```bash
+npm test              # Run all suites (silent)
+npm run test:watch    # Watch mode
+npm run test:coverage # Coverage report
+```
+
+### Suite Index
+
+| Suite | File | Tests | What is verified |
+|---|---|---|---|
+| FileTransferManager | `tests/video-transfer/FileTransferManager.test.js` | 24 | `transferFile`, `copyWithRetry`, `handleTransferError`, `processEncryptedVideoBatch`, `markSourceFilesAsTransferred`, `getPendingTransferFileForJob` |
+| SpaceValidator | `tests/video-transfer/SpaceValidator.test.js` | 12 | Drive-ready check, free-space estimation, processing-space validation |
+| Schedule helpers | `tests/video-transfer/UnifiedVideoTransferService.schedule.test.js` | 14 | `_calculateNextScheduledRun` (daily/weekly), `_isInScheduledWindow`, `_updateScheduleStatus` |
+| ImageTransferManager | `tests/image-transfer/ImageTransferManager.test.js` | 28 | Grouping, normal/encrypted paths, retry, job completion |
+| ImageSpaceValidator | `tests/image-transfer/ImageSpaceValidator.test.js` | 13 | Free-space in MB, per-file/batch checks, drive-near-full threshold |
+| TransferUtils | `tests/shared/TransferUtils.test.js` | 32 | All static DB helpers, error detectors, path generators, file validators |
+| encryptionService | `tests/encryptionService.test.js` | 8 | Real AES-256-CBC and RSA-OAEP round-trips using OS temp dir |
+| **Total** | | **131 unit + 8 real-crypto = 139** | |
+
+### Coverage (as of Jun 2026)
+
+| Module | Statements | Functions | Lines |
+|---|---|---|---|
+| `services/image-transfer/transfer/ImageTransferManager.js` | 89% | 87% | 88% |
+| `services/video-transfer/transfer/FileTransferManager.js` | 81% | 77% | 81% |
+| `services/video-transfer/validators/SpaceValidator.js` | 85% | 88% | 85% |
+| `services/image-transfer/validators/ImageSpaceValidator.js` | 66% | 90% | 66% |
+| `services/shared/TransferUtils.js` | 51% | 63% | 51% |
+| `utils/encryptionService.js` | 79% | 57% | 91% |
+
+### What Is NOT Unit-Tested
+
+| Item | Reason | Path |
+|---|---|---|
+| SecurOS scripts | Cannot run without the SecurOS runtime injected `securos` module | `securos-scripts/` |
+| `autoUSBImageTransferService.js` entry | Self-executes at module load (opens real Redis/PG); tests target `ImageTransferManager` directly | — |
+| FTP transfer managers | No FTP test suite yet | `services/*/transfer/Ftp*.js` |
+| `JobManager`, `ProcessingStateManager`, `CompleteBufferManager` | Complex state machines; integration tests planned (T-5) | `services/video-transfer/state/`, `processors/` |
+| Dashboard routes | No API test suite yet | `routes/` |
+| DB integration | Tests use mock pool; no real-DB integration tests exist | — |
+
+---
+
 ## [ORPHANS & PENDING]
 
 ### Legacy — Safe to Ignore or Remove
@@ -360,5 +418,7 @@ These archived files contain detail that should eventually be verified and lifte
 | T-2 | `pending_deletion` + `updated_at` added at runtime | `ExportDirectoryControlV3.js` L587–628 | Low — schema alterations should be in migration, not in a script loop |
 | T-3 | Inline JSONB retry log on `files` | `files.export_retry_log_object` | Low — bloat risk at high plate-volume; consider extracting to a dedicated `export_retry_log` table |
 | T-4 | `transfer_job` / `transfer_job_log` (legacy manual flow) | `routes/mainControlRoutes.js`, `manualTransferRoutes.js` | Low — assess whether this flow is still used or fully superseded by `transfer_queue_job` |
-| T-5 | No automated tests for SecurOS scripts | `securos-scripts/` | Low — not possible without the SecurOS runtime injection; consider a mock harness |
+| ~~T-5a~~ | ~~No unit tests for Node transfer services~~ | ~~`services/`~~ | **Resolved** (Jun 2026) — 139 Jest unit tests added. See `TEST_MAP.md`. |
+| T-5b | No unit tests for SecurOS scripts | `securos-scripts/` | Low — not possible without the SecurOS runtime injection; consider a mock harness |
+| T-5c | No tests for FTP transfer managers, JobManager, CompleteBufferManager, dashboard routes | `services/*/Ftp*.js`, `state/`, `routes/` | Medium — integration test suite planned; see `TEST_MAP.md` §Gaps |
 | ~~T-6~~ | ~~`/files/data` used a CTE + self-JOIN on `SUBSTRING(tid,1,LENGTH(tid)-1)` — cross-plate file aggregation bug + perf~~ | ~~`routes/mainControlRoutes.js`~~ | **Fixed** (Jun 2026) — replaced with single-pass GROUP BY on event_tid + plate_num; countQuery also aligned |

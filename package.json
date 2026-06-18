@@ -4,7 +4,9 @@
   "description": "Tahakom transfer control backend service",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
     "convert-videos": "node scripts/maintenance/issivs_files_mp4_parallel_remove.js",
     "test-iss-media": "node test_scripts/testISSMediaIndexing.js"
   },
@@ -42,5 +44,8 @@
     "winston-daily-rotate-file": "^5.0.0",
     "ws": "^8.18.2",
     "xml-js": "^1.6.11"
+  },
+  "devDependencies": {
+    "jest": "^30.4.2"
   }
 }
