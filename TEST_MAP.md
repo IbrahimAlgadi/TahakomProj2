@@ -192,17 +192,40 @@ const { createMockPool, createMockRedis, createMockEncryption,
 
 ---
 
+### 8. `tests/logger.test.js`
+
+**Target**: `utils/logger.js`
+
+| # | Test group | What is verified |
+|---|---|---|
+| 1–2 | `newTraceId` | Returns UUID v4 string; unique per call |
+| 3–5 | `runWithTrace` — context access | `getTraceContext` / `getTraceId` return correct values inside scope; return empty/undefined outside scope |
+| 6 | `runWithTrace` — nested contexts | Inner context does not leak to outer scope |
+| 7–8 | `addTraceField` | Adds key to current store in-place; no-op outside scope |
+| 9–10 | `createLogger` | Creates logger without error; injects `traceId`/`jobId` into log entries inside `runWithTrace` |
+| 11 | `createLogger` — no trace | Log entries outside `runWithTrace` contain no `traceId` |
+| 12–15 | `traceMiddleware` | Generates `X-Trace-Id` header; re-uses upstream `X-Trace-Id`; re-uses `X-Request-Id`; `getTraceId()` returns correct value inside `next()` |
+
+**Mocked dependencies**: none (real Winston, real Node `async_hooks.AsyncLocalStorage`)
+
+**Key notes**:
+- Uses a temporary `Writable` stream transport to capture log entries as JSON for assertion — no filesystem writes.
+- Does not use `jest.mock()` for Winston; tests exercise the real format pipeline end-to-end.
+- `silent: true` in jest config suppresses the console transport output from the test logger instances.
+
+---
+
 ## Total Test Count (as of Jun 2026)
 
 | Suites | Tests |
 |---|---|
-| 7 | **139** |
+| 8 | **155** |
 
 Last verified run:
 
 ```
-Test Suites: 7 passed, 7 total
-Tests:       139 passed, 139 total
+Test Suites: 8 passed, 8 total
+Tests:       155 passed, 155 total
 Snapshots:   0 total
 Time:        ~5.8 s
 ```

@@ -1,7 +1,7 @@
 # Technical Architecture
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18
+Last updated: 2026-06-18 (shared logger + trace IDs added)
 
 > For a living service/table map, see [PROJECT_MAP.md](../../PROJECT_MAP.md).  
 > For database schema details, see [database/schema.md](database/schema.md).  
@@ -191,18 +191,69 @@ For video transfers, the pipeline adds a **buffer stage** (`video_converted_buff
 
 ## Logging Architecture
 
-All PM2 services use **Winston** with `winston-daily-rotate-file`:
+### Shared Logger (`utils/logger.js`)
+
+All PM2 services share a single logger factory built on **Winston** + `winston-daily-rotate-file`. Create a logger for any service with:
+
+```js
+const { createLogger } = require('./utils/logger');
+const logger = createLogger({ service: 'MyServiceName' });
+```
+
+**Log files written per service:**
 
 ```
 logs/
-├── <ServiceName>-out.log     — stdout (info + warn)
-└── <ServiceName>-error.log   — stderr (errors)
+├── <service>-app-%DATE%.log    — combined (all levels), JSON, daily rotated, zipped
+├── <service>-error-%DATE%.log  — error level only, daily rotated, zipped
+├── <service>-out.log           — PM2 stdout capture (plain text)
+└── <service>-error.log         — PM2 stderr capture (plain text)
 ```
 
-Log rotation is managed by PM2's `combine_logs: true` + winston daily rotate.  
-Log date format: `YYYY-MM-DD HH:mm:ss`.
+`maxSize` and `maxFiles` are controlled by `LOG_MAX_SIZE` (default `20m`) and `LOG_MAX_FILES` (default `14d`) in `.env`.  
+The Console transport is **TTY-aware**: colorized in a developer terminal, plain text under PM2 so `-out.log` capture files stay clean.
 
-SecurOS scripts log through the SecurOS Script Integration Engine's own log mechanism. Paths are registered in `.cursor/skills/securos-log-registry/SKILL.md`.
+### Correlation / Trace IDs (AsyncLocalStorage)
+
+Trace IDs let you follow one HTTP request or background job across all log lines it produces — including inside shared `services/**` helpers — without threading an ID argument through every function call.
+
+The mechanism uses Node's built-in `AsyncLocalStorage` (`async_hooks`). Any field stored in the current async context (e.g. `traceId`, `jobId`, `camera`) is merged automatically into every log entry emitted within that context.
+
+**Usage in background jobs** (`refactored_autoVideoTransferEDAMicroservice.js` and others):
+
+```js
+const { runWithTrace, newTraceId } = require('./utils/logger');
+
+await runWithTrace({ traceId: newTraceId(), jobId: job.batch_id, camera: cameraId }, async () => {
+    logger.info('Processing job');         // → { traceId, jobId, camera, message, ... }
+    await fileTransferManager.transferFile(...);   // logs inside also carry same traceId
+});
+```
+
+**Usage in HTTP services** (`DashboardReportingBackend.js`):
+
+```js
+const { traceMiddleware } = require('./utils/logger');
+app.use(traceMiddleware);   // reads X-Trace-Id request header or generates UUID v4
+                            // echoes it in X-Trace-Id response header
+                            // all logs during that request carry traceId
+```
+
+**Exported helpers from `utils/logger.js`:**
+
+| Export | Description |
+|---|---|
+| `createLogger({ service })` | Winston logger factory — daily-rotate + console transports |
+| `newTraceId()` | Generates a UUID v4 |
+| `runWithTrace(context, fn)` | Runs `fn` inside ALS context carrying `context` fields |
+| `getTraceContext()` | Returns current ALS store (or `{}` outside scope) |
+| `getTraceId()` | Returns `traceId` from current ALS store |
+| `addTraceField(key, value)` | Adds a field to the current ALS context in-place |
+| `traceMiddleware` | Express middleware for per-request trace ID injection |
+
+### SecurOS Scripts
+
+SecurOS scripts log through the SecurOS Script Integration Engine's own log mechanism. They do **not** use `utils/logger.js` (separate runtime). Paths are registered in `.cursor/skills/securos-log-registry/SKILL.md`.
 
 ---
 

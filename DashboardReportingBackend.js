@@ -4,8 +4,7 @@ const WebSocket = require('ws');
 const { Pool } = require('pg');
 const Redis = require('ioredis');
 const cors = require('cors');
-const winston = require('winston');
-require('winston-daily-rotate-file');
+const { createLogger, traceMiddleware } = require('./utils/logger');
 const fs = require('fs-extra');
 const path = require('path');
 const bodyParser = require('body-parser');
@@ -51,8 +50,6 @@ const DB_PORT = process.env.DB_PORT || 5432;
 const DB_APP = process.env.DB_NAME || "tahakom_transfer";
 
 // Additional environment configurations
-const LOG_LEVEL = process.env.LOG_LEVEL || 'info';
-const LOG_DIRECTORY = process.env.LOG_DIRECTORY || 'logs';
 const CERTIFICATES_DIR = process.env.CERTIFICATES_DIR || 'certs';
 
 const DEFAULT_CONFIG = {
@@ -102,31 +99,7 @@ const DEFAULT_CONFIG = {
 };
 
 // --- Logger Configuration ---
-const logger = winston.createLogger({
-    level: LOG_LEVEL,
-    format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
-    transports: [
-        new winston.transports.DailyRotateFile({ 
-            filename: `${LOG_DIRECTORY}/MainBackend-error-%DATE%.log`, 
-            datePattern: 'YYYY-MM-DD', 
-            level: 'error', 
-            maxSize: process.env.LOG_MAX_SIZE || '20m', 
-            maxFiles: process.env.LOG_MAX_FILES || '14d', 
-            zippedArchive: true 
-        }),
-        new winston.transports.DailyRotateFile({ 
-            filename: `${LOG_DIRECTORY}/MainBackend-combined-%DATE%.log`, 
-            datePattern: 'YYYY-MM-DD', 
-            maxSize: process.env.LOG_MAX_SIZE || '20m', 
-            maxFiles: process.env.LOG_MAX_FILES || '14d', 
-            zippedArchive: true 
-        }),
-        new winston.transports.Console({ 
-            format: winston.format.combine(winston.format.colorize(), winston.format.simple()) 
-        })
-    ]
-});
-if (!fs.existsSync(LOG_DIRECTORY)) fs.mkdirSync(LOG_DIRECTORY);
+const logger = createLogger({ service: 'DashboardReportingBackend' });
 
 // --- Application Setup ---
 const app = express();
@@ -147,6 +120,7 @@ app.set('view engine', 'njk');
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(traceMiddleware);
 app.use((req, res, next) => {
     logger.info(`${req.method} ${req.url}`);
     next();

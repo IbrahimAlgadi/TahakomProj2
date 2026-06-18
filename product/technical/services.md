@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18
+Last updated: 2026-06-18 (shared logger + trace IDs added)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -125,6 +125,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | DB reads | `iss_media_files` |
 | DB writes | `video_transfer_queue_job`, `video_transfer_queue`, `video_converted_buffer`; UPDATE `iss_media_files.is_auto_transferred` |
 | Key services | `services/video-transfer/state/JobManager.js`, `transfer/FileTransferManager.js`, `processors/CompleteBufferManager.js` |
+| Logging | `utils/logger.js` `createLogger({ service: 'autoVideoTransferEDAMicroservice' })`; each job cycle and file transfer wrapped in `runWithTrace({ traceId, jobId, camera })` so all logs for a batch share one `traceId` |
 | Purpose | Transfers ISS video MP4 segments to a configured USB drive in batches; manages per-camera buffering to ensure complete segment groups before transfer |
 
 ### autoFtpVideoTransferService.js
@@ -173,6 +174,7 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | WebSocket | `ws://localhost:8454` — events: handleAutoTransfer, devices, deviceHistory, handleAutoVideoTransfer, processes, startStorageTransfer |
 | Key endpoints | `GET /dashboard/data` (chart aggregates, Redis-cached), `GET /dashboard/table` (paginated detail rows, uncached), `POST /dashboard/refresh` (cache bust + concurrent MV refresh) |
 | Background task | Refreshes all 6 dashboard MVs concurrently on startup and on a timer (`DASHBOARD_MV_REFRESH_INTERVAL_MS`, default 5 min) |
+| Logging | `utils/logger.js` `createLogger({ service: 'DashboardReportingBackend' })`; `traceMiddleware` registered before routes — every HTTP request carries a `traceId` in `X-Trace-Id` header and all related log lines |
 | Purpose | Main web UI — Express server serving the operator dashboard; provides REST API + WebSocket for real-time monitoring, config management, and manual transfer control |
 
 ---
@@ -194,6 +196,9 @@ AES-256-CBC file encryption/decryption + RSA key management functions:
 
 ### utils/envConfig.js
 Environment variable defaults — DB name defaults to `tahakom_transfer`, pg connection params.
+
+### utils/logger.js
+Shared Winston logger factory + AsyncLocalStorage trace helpers. Every service uses `createLogger({ service })` for per-service daily-rotated log files. Trace IDs propagate automatically through async call chains via `runWithTrace` / `AsyncLocalStorage`. See `product/technical/architecture.md` → Logging Architecture for the full API reference.
 
 ### redisKeyStore.js
 Central registry of all Redis key names used across the application.

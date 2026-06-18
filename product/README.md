@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18 (test suite added, TEST_MAP.md created)
+Last updated: 2026-06-18 (shared logger + trace IDs added; ADR-0006 written)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
@@ -85,6 +85,7 @@ This folder is the **single source of truth** for product decisions, requirement
 | ADR-0003 | [decisions/0003-pm2-microservice-topology.md](decisions/0003-pm2-microservice-topology.md) | Use PM2 with a microservice topology for transfer and monitoring services |
 | ADR-0004 | [decisions/0004-redis-state-and-pubsub.md](decisions/0004-redis-state-and-pubsub.md) | Use Redis for inter-service state and configuration propagation |
 | ADR-0005 | [decisions/0005-mcp-read-access-to-databases.md](decisions/0005-mcp-read-access-to-databases.md) | Provide MCP read-only access to PostgreSQL for Cursor AI agents |
+| ADR-0006 | [decisions/0006-shared-logger-trace-ids.md](decisions/0006-shared-logger-trace-ids.md) | Shared Winston logger with AsyncLocalStorage trace IDs for all PM2 services |
 | Template | [decisions/template.md](decisions/template.md) | ADR template for new decisions |
 
 ### Root Maps

@@ -19,7 +19,7 @@ _Update this file whenever a service is added, a table changes, or a decision is
 | Primary database | PostgreSQL | 14+ (localhost:5432) | Database: `tahakom_transfer` — source of truth |
 | DB client | pg | ^8.16.2 | Used by all Node services; Pool pattern throughout |
 | State / queue bus | Redis (ioredis) | ^5.6.1 | Config state, drive state, pub/sub channels, task queues |
-| Logging | Winston + winston-daily-rotate-file | ^3.17.0 / ^5.0.0 | Async file-based logs under `logs/`; per-service out/error files |
+| Logging | Winston + winston-daily-rotate-file | ^3.17.0 / ^5.0.0 | Shared factory `utils/logger.js` — per-service daily-rotate files under `logs/` (`<service>-app-%DATE%.log` + `<service>-error-%DATE%.log`); TTY-aware console (colorized in dev, plain under PM2). AsyncLocalStorage trace IDs: wrap any job/request in `runWithTrace({traceId, jobId, camera})` and every log line inside stamps those fields automatically. Express `traceMiddleware` seeds a per-request `traceId` and echoes it in the `X-Trace-Id` response header. Adopted in `DashboardReportingBackend.js` (HTTP) and `refactored_autoVideoTransferEDAMicroservice.js` (background jobs). |
 | Real-time (UI) | ws (WebSocket) | ^8.18.2 | Dashboard live updates via `ws://localhost:8454` |
 | Charts | Apache ECharts | 5.4.3 (vendored) | Dashboard statistics, vendored in `data_transfer_v2/public/vendors/echarts/` |
 | Date handling | Moment.js + moment-timezone | ^2.30.1 / ^0.5.48 | Transfer scheduling, timestamp formatting |
@@ -351,7 +351,8 @@ npm run test:coverage # Coverage report
 | ImageSpaceValidator | `tests/image-transfer/ImageSpaceValidator.test.js` | 13 | Free-space in MB, per-file/batch checks, drive-near-full threshold |
 | TransferUtils | `tests/shared/TransferUtils.test.js` | 32 | All static DB helpers, error detectors, path generators, file validators |
 | encryptionService | `tests/encryptionService.test.js` | 8 | Real AES-256-CBC and RSA-OAEP round-trips using OS temp dir |
-| **Total** | | **131 unit + 8 real-crypto = 139** | |
+| logger | `tests/logger.test.js` | 16 | `createLogger`, `newTraceId`, `runWithTrace`, `getTraceId`, `addTraceField`, `traceMiddleware` — ALS trace injection verified end-to-end |
+| **Total** | | **131 unit + 8 real-crypto + 16 logger = 155** | |
 
 ### Coverage (as of Jun 2026)
 

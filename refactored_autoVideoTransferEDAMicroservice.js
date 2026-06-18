@@ -6,6 +6,7 @@ const path = require('path');
 const encryptionService = require('./utils/encryptionService');
 const { sleep } = require('./utils.js');
 const { CONFIG_STATE_KEY, CONNECTED_DRIVE_LIST } = require('./redisKeyStore.js');
+const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
 
 // Import external classes
 const VideoProcessor = require('./services/video-transfer/processors/VideoProcessor');
@@ -15,6 +16,8 @@ const ProcessingStateManager = require('./services/video-transfer/state/Processi
 const SpaceValidator = require('./services/video-transfer/validators/SpaceValidator');
 const CleanupService = require('./services/shared/CleanupService');
 const CompleteBufferManager = require('./services/video-transfer/processors/CompleteBufferManager');
+
+const logger = createLogger({ service: 'autoVideoTransferEDAMicroservice' });
 
 class UnifiedVideoTransferService extends EventEmitter {
     constructor(config) {
@@ -182,15 +185,12 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Initialize and start the service
      */
     async start() {
-        console.log('-------------------------------------------------------');
-        console.log('-------------------------------------------------------');
-        console.log('[SERVICE] start: Starting Unified Video Transfer Service...');
-        console.log('-------------------------------------------------------');
-        console.log('-------------------------------------------------------');
+        logger.info('-------------------------------------------------------');
+        logger.info('[SERVICE] start: Starting Unified Video Transfer Service...');
+        logger.info('-------------------------------------------------------');
         this.shouldStop = false;
 
         try {
-            // Initialize database connection
             this.pool = new Pool({
                 user: this.config.database.user,
                 host: this.config.database.host,
@@ -200,7 +200,7 @@ class UnifiedVideoTransferService extends EventEmitter {
             });
 
             this.pool.on('error', (err) => {
-                console.error('[DB_ERROR] start: Unexpected error on idle client', err);
+                logger.error('[DB_ERROR] start: Unexpected error on idle client', { error: err.message, stack: err.stack });
                 this.emit('error', err);
             });
 
@@ -234,7 +234,7 @@ class UnifiedVideoTransferService extends EventEmitter {
             this.emit('start');
 
         } catch (error) {
-            console.error('[SERVICE] start: Failed to initialize:', error);
+            logger.error('[SERVICE] start: Failed to initialize:', { error: error.message, stack: error.stack });
             this.emit('error', error);
         }
     }
@@ -251,7 +251,7 @@ class UnifiedVideoTransferService extends EventEmitter {
         this.cleanupService = new CleanupService(this, this.pool, this.redis, this.config);
         this.bufferManager = new CompleteBufferManager(this, this.pool, this.config, this.videoProcessor, this.jobManager);
         
-        console.log('[SERVICE] _initializeExternalServices: External services initialized successfully');
+        logger.info('[SERVICE] _initializeExternalServices: External services initialized successfully');
     }
 
     /**
@@ -274,9 +274,9 @@ class UnifiedVideoTransferService extends EventEmitter {
             };
             
             this.redisMetrics.publish('usb_video_transfer_metrics', JSON.stringify(metricsPayload));
-            console.log(`[VIDEO_SERVICE] Published metrics: ${type} - Job ${data.jobId || 'unknown'}`);
+            logger.info('[VIDEO_SERVICE] Published metrics', { metricsType: type, jobId: data.jobId || 'unknown' });
         } catch (error) {
-            console.error('[VIDEO_SERVICE] Error publishing metrics:', error);
+            logger.error('[VIDEO_SERVICE] Error publishing metrics:', { error: error.message });
         }
     }
 
@@ -284,7 +284,7 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Stop the service gracefully
      */
     async stop() {
-        console.log('[SERVICE] UnifiedVideoTransferService.stop: Stopping Unified Video Transfer Service...');
+        logger.info('[SERVICE] UnifiedVideoTransferService.stop: Stopping Unified Video Transfer Service...');
         this.shouldStop = true;
         this.removeAllListeners();
 
@@ -293,7 +293,7 @@ class UnifiedVideoTransferService extends EventEmitter {
         if (this.redisMetrics) await this.redisMetrics.quit();
         if (this.pool) await this.pool.end();
 
-        console.log('[SERVICE] UnifiedVideoTransferService.stop: Service stopped gracefully');
+        logger.info('[SERVICE] UnifiedVideoTransferService.stop: Service stopped gracefully');
     }
 
     // ===== EVENT HANDLERS =====
@@ -302,19 +302,14 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Handle service start event
      */
     _handleStart = async () => {
-        console.log('[EVENT] UnifiedVideoTransferService._handleStart: Service started - beginning processing loops');
+        logger.info('[EVENT] UnifiedVideoTransferService._handleStart: Service started - beginning processing loops');
         
         try {
-            // Start main processing loop
             this._runProcessingLoop();
-            
-            // Start cleanup loop
             this._runCleanupLoop();
-            
-            // Start buffer monitoring loop
             this._runBufferMonitoringLoop();
             
-            console.log('[EVENT] All processing loops started successfully');
+            logger.info('[EVENT] All processing loops started successfully');
             
         } catch (error) {
             this.emit('error', error);
@@ -410,20 +405,16 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Handle errors
      */
     _handleError = (error) => {
-        console.error('[EVENT] UnifiedVideoTransferService._handleError: Service error:', error);
+        logger.error('[EVENT] Service error:', { error: error.message, stack: error.stack });
         
-        // Get video stats from BufferManager if available
         if (this.bufferManager) {
             const stats = this.bufferManager.getVideoStats();
             stats.errorsCount++;
         }
     };
 
-    /**
-     * Handle cleanup requests
-     */
     _handleCleanup = async () => {
-        console.log('[EVENT] UnifiedVideoTransferService._handleCleanup: Running cleanup tasks');
+        logger.info('[EVENT] Running cleanup tasks');
         
         try {
             await this.cleanupService.runAllCleanupTasks();
@@ -453,63 +444,61 @@ class UnifiedVideoTransferService extends EventEmitter {
             }
 
             this.isProcessing = true;
-            console.log('[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: running processing loop start point');
+            logger.info('[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: running processing loop start point');
 
-            // Check if video transfer is enabled
             const isEnabled = this.serviceConfig.autoTransfer && this.serviceConfig.autoTransfer.isActive &&
                               ['videos', 'both'].includes(this.serviceConfig.autoTransfer.dataType);
-            console.log({
+            logger.debug('[PROCESSING] Transfer enabled check', {
                 isEnabled,
-                autoTransfer: this.serviceConfig.autoTransfer,
                 dataType: this.serviceConfig.autoTransfer && this.serviceConfig.autoTransfer.dataType,
                 isActive: this.serviceConfig.autoTransfer && this.serviceConfig.autoTransfer.isActive
             });
-            console.log('[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: Video transfer is enabled in config');
 
             if (!isEnabled) {
-                console.log('[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: Video transfer is disabled in config');
+                logger.info('[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: Video transfer is disabled in config');
                 return;
             }
             
-            // Add schedule check
             if (this.isScheduledTransfer && !this.isInScheduledWindow) {
-                console.log('[PROCESSING_SCHEDULE] UnifiedVideoTransferService._runProcessingLoop: Scheduled video transfer - waiting for window. Next run: ' + this.nextScheduledRun + ', Status: ' + this.currentScheduleStatus);
-                this._updateScheduleStatus(); // Re-check schedule status
+                logger.info('[PROCESSING_SCHEDULE] Scheduled video transfer — waiting for window', { nextScheduledRun: this.nextScheduledRun, scheduleStatus: this.currentScheduleStatus });
+                this._updateScheduleStatus();
                 return;
             }
 
             if (this.isScheduledTransfer && this.isInScheduledWindow) {
-                console.log('[PROCESSING_SCHEDULE] UnifiedVideoTransferService._runProcessingLoop: In scheduled transfer window - processing videos');
+                logger.info('[PROCESSING_SCHEDULE] In scheduled transfer window — processing videos');
             }
             
-            // Check drive status using SpaceValidator
             if (!this.spaceValidator.isDriveReady()) {
                 const driveStatus = this.spaceValidator.getDriveStatus();
-                console.log(`[PROCESSING_CHECK_DRIVE] UnifiedVideoTransferService._runProcessingLoop: Paused: ${driveStatus.reason}`);
+                logger.warn(`[PROCESSING_CHECK_DRIVE] Processing paused: ${driveStatus.reason}`);
                 return;
             }
 
             // ===== STEP 1: Look for existing jobs that aren't completed (newest first) =====
             const existingJobs = await this.jobManager.getExistingUncompletedJobs();
-            console.log(`[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: Found ${existingJobs.length} existing uncompleted jobs`);
+            logger.info(`[PROCESSING] Found ${existingJobs.length} existing uncompleted jobs`);
             
             if (existingJobs.length > 0) {
-                const activeJob = existingJobs[0]; // Get the newest job
-                console.log(`[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: Found active job: ${activeJob.batch_id} (status: ${activeJob.status})`);
-                // ===== STEP 2: Handle existing active job based on status =====
-                await this._handleJobProcessing(activeJob);
+                const activeJob = existingJobs[0];
+                await runWithTrace({ traceId: newTraceId(), jobId: activeJob.batch_id, jobStatus: activeJob.status }, async () => {
+                    logger.info('[PROCESSING] Found active job', { jobId: activeJob.batch_id, status: activeJob.status });
+                    await this._handleJobProcessing(activeJob);
+                });
                 return;
             }
 
-            // ===== STEP 3: Create new job (no active job found) =====
+            // ===== STEP 2: Create new job (no active job found) =====
             const newJob = await this._createNewJobIfFilesAvailable();
             if (!newJob) {
-                console.log('[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: No files available to create new job');
+                logger.info('[PROCESSING] No files available to create new job');
                 return;
             }
 
-            console.log(`[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: Created new job: ${newJob.batch_id}`);
-            await this._handleJobProcessing(newJob);
+            await runWithTrace({ traceId: newTraceId(), jobId: newJob.batch_id, jobStatus: 'created' }, async () => {
+                logger.info(`[PROCESSING] Created new job: ${newJob.batch_id}`);
+                await this._handleJobProcessing(newJob);
+            });
             
         } catch (error) {
             this.emit('error', error);
@@ -523,9 +512,8 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Handle job with 'created' status - collecting media files phase
      */
     async _handleJobProcessing(job) {
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Handling created job: ${job.batch_id} (ID: ${job.id})`);
+        logger.info(`[PROCESSING] Handling job: ${job.batch_id}`, { jobId: job.batch_id, jobDbId: job.id });
         
-        // Publish job start metrics
         this.publishVideoTransferMetrics('job_start', {
             jobId: job.batch_id,
             totalCameras: this.ISS_MEDIA_CAMERAS.length,
@@ -544,7 +532,7 @@ class UnifiedVideoTransferService extends EventEmitter {
 
         console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Waiting for all cameras to be processed`);
         await Promise.all(cameraJobPromises);
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - All cameras processed`);
+        logger.info(`[PROCESSING] Job ${job.id} - All cameras processed`);
         
         return null;
     }
@@ -799,97 +787,89 @@ class UnifiedVideoTransferService extends EventEmitter {
         if (this.shouldStop) return;
         
         if (this.pauseVideoTransferFromConfig) {
-            console.log('[TRANSFER TO STORAGE] _startTransferToStorageAsync: Video transfer is disabled in config');
+            logger.info('[TRANSFER TO STORAGE] Video transfer is disabled in config');
             return;
         }
         
-        // Add schedule check for transfers
         if (this.isScheduledTransfer && !this.isInScheduledWindow) {
-            console.log('[TRANSFER TO STORAGE] _startTransferToStorageAsync: Scheduled transfer - outside window. Next run: ' + this.nextScheduledRun);
+            logger.info('[TRANSFER TO STORAGE] Scheduled transfer — outside window', { nextScheduledRun: this.nextScheduledRun });
             return;
         }
 
         if (this.isTransferringToStorageRunning) {
-            console.log('[TRANSFER TO STORAGE] _startTransferToStorageAsync: Transfer is already running');
+            logger.info('[TRANSFER TO STORAGE] Transfer is already running');
             return;
         }
 
         this.isTransferringToStorageRunning = true;
 
-        // Check if transfer should be paused using SpaceValidator
         if (!this.spaceValidator.isDriveReady()) {
             const driveStatus = this.spaceValidator.getDriveStatus();
-            console.log(`[TRANSFER TO STORAGE] _startTransferToStorageAsync: Paused: ${driveStatus.reason}`);
+            logger.warn(`[TRANSFER TO STORAGE] Paused: ${driveStatus.reason}`);
             return;
         }
         
-        // Get pending transfer files using FileTransferManager
         const fileToTransfer = await this.fileTransferManager.getPendingTransferFileForJob(jobId, cameraId);
         
         if (!fileToTransfer) {
             return;
         }
-        
-        console.log(`[TRANSFER TO STORAGE] _startTransferToStorageAsync: Processing ${fileToTransfer.video_file_name} files for transfer`);
-        
-        // Publish transfer start metrics
-        this.publishVideoTransferMetrics('transfer_start', {
-            jobId: jobId,
-            cameraId: cameraId,
-            fileName: fileToTransfer.video_file_name,
-            fileSize: fileToTransfer.file_size,
-            filePath: fileToTransfer.video_file_path
+
+        await runWithTrace({ traceId: newTraceId(), jobId, camera: cameraId, fileName: fileToTransfer.video_file_name }, async () => {
+            logger.info('[TRANSFER TO STORAGE] Starting file transfer', { fileName: fileToTransfer.video_file_name });
+            
+            this.publishVideoTransferMetrics('transfer_start', {
+                jobId: jobId,
+                cameraId: cameraId,
+                fileName: fileToTransfer.video_file_name,
+                fileSize: fileToTransfer.file_size,
+                filePath: fileToTransfer.video_file_path
+            });
+            
+            try {
+                
+                await this.fileTransferManager.transferFile(fileToTransfer);
+                await this.fileTransferManager.markSourceFilesAsTransferred(fileToTransfer);
+                
+                if (fileToTransfer.video_file_path.includes(path.basename(this.VIDEO_TEMP_DIR))) {
+                    await this.fileTransferManager.cleanupTempVideo(fileToTransfer.video_file_path);
+                }
+                
+                await this.jobManager.checkAndCompleteJob(fileToTransfer.job_id);
+                
+                this.publishVideoTransferMetrics('transfer_complete', {
+                    jobId: jobId,
+                    cameraId: cameraId,
+                    fileName: fileToTransfer.video_file_name,
+                    fileSize: fileToTransfer.file_size,
+                    success: true
+                });
+                
+                logger.info('[TRANSFER TO STORAGE] Post-transfer cleanup completed', { fileName: fileToTransfer.video_file_name });
+
+            } catch (error) {
+
+                logger.error('[TRANSFER TO STORAGE] Failed to transfer file', { fileId: fileToTransfer.id, error: error.message, stack: error.stack });
+                
+                this.publishVideoTransferMetrics('transfer_complete', {
+                    jobId: jobId,
+                    cameraId: cameraId,
+                    fileName: fileToTransfer.video_file_name,
+                    fileSize: fileToTransfer.file_size,
+                    success: false,
+                    error: error.message
+                });
+                
+                const errorResult = await this.fileTransferManager.handleTransferError(fileToTransfer, error);
+
+                this.isTransferringToStorageRunning = false;
+                
+                if (errorResult.shouldStopProcessing) {
+                    this.shouldStopProcessing = true;
+                    this.spaceValidator.updateDriveInfo(this.driveInfo, true);
+                }
+            }
         });
-        
-        try {
-            
-            await this.fileTransferManager.transferFile(fileToTransfer);
-            // Mark source files as transferred using FileTransferManager
-            await this.fileTransferManager.markSourceFilesAsTransferred(fileToTransfer);
-            
-            // Clean up temporary video file
-            if (fileToTransfer.video_file_path.includes(path.basename(this.VIDEO_TEMP_DIR))) {
-                await this.fileTransferManager.cleanupTempVideo(fileToTransfer.video_file_path);
-            }
-            
-            // Check if all files in the job have been transferred using JobManager
-            await this.jobManager.checkAndCompleteJob(fileToTransfer.job_id);
-            
-            // Publish transfer completion metrics
-            this.publishVideoTransferMetrics('transfer_complete', {
-                jobId: jobId,
-                cameraId: cameraId,
-                fileName: fileToTransfer.video_file_name,
-                fileSize: fileToTransfer.file_size,
-                success: true
-            });
-            
-            console.log(`[TRANSFER TO STORAGE] _startTransferAsync: Post-transfer cleanup completed for: ${fileToTransfer.video_file_name}`);
-
-        } catch (error) {
-
-            console.error(`[TRANSFER TO STORAGE] _startTransferToStorageAsync: Failed to transfer file ${fileToTransfer.id}:`, error);
-            
-            // Publish transfer error metrics
-            this.publishVideoTransferMetrics('transfer_complete', {
-                jobId: jobId,
-                cameraId: cameraId,
-                fileName: fileToTransfer.video_file_name,
-                fileSize: fileToTransfer.file_size,
-                success: false,
-                error: error.message
-            });
-            
-            const errorResult = await this.fileTransferManager.handleTransferError(fileToTransfer, error);
-
-            this.isTransferringToStorageRunning = false;
-            
-            if (errorResult.shouldStopProcessing) {
-                this.shouldStopProcessing = true;
-                this.spaceValidator.updateDriveInfo(this.driveInfo, true);
-            }
-        }
-
         this.isTransferringToStorageRunning = false;
 
     }
@@ -1094,27 +1074,24 @@ async function main() {
 
     await videoService.start();
 
-    // Graceful shutdown
     process.on('SIGINT', async () => {
-        console.log('[MAIN] Shutting down service...');
+        logger.info('[MAIN] Shutting down service...');
         await videoService.stop();
         process.exit(0);
     });
 
     process.on('SIGTERM', async () => {
-        console.log('[MAIN] Shutting down service...');
+        logger.info('[MAIN] Shutting down service...');
         await videoService.stop();
         process.exit(0);
     });
 }
 
-// Export the class for testing
 module.exports = { UnifiedVideoTransferService };
 
-// Run if this file is executed directly
 if (require.main === module) {
     main().catch(error => {
-        console.error("Fatal error during service initialization:", error);
+        logger.error('Fatal error during service initialization:', { error: error.message, stack: error.stack });
         process.exit(1);
     });
 }

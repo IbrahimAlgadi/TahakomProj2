@@ -1,0 +1,72 @@
+---
+description: Always update PROJECT_MAP.md, product/ docs, and TEST_MAP.md after completing any feature, fix, or adjustment that affects architecture, services, testing, or decisions.
+alwaysApply: true
+---
+
+# Documentation Update Rule
+
+After completing any feature, fix, refactor, or architectural adjustment, always update the relevant documentation before committing. This is not optional — documentation is part of the definition of done.
+
+## When to Update
+
+Update documentation whenever you:
+
+- Add, modify, or remove a service, module, utility, or route
+- Change how logging, tracing, encryption, or other cross-cutting concerns work
+- Add or change database tables, indexes, or queries
+- Add, remove, or significantly change tests (new suite, coverage change, new helpers)
+- Make an architectural decision that future developers need to understand
+- Change `.env` variables, Redis keys, PM2 service names, or log file paths
+
+## Which Files to Update
+
+| Change type | Files to update |
+|---|---|
+| New utility / shared module | `product/technical/services.md` (add entry under Shared Service Modules), `PROJECT_MAP.md` [TECH_STACK] if it introduces a new library |
+| Changed PM2 service behaviour | `product/technical/services.md` (update service entry), `product/technical/architecture.md` if the architecture changes |
+| New or changed architectural pattern | `product/technical/architecture.md`, `product/decisions/000N-<title>.md` (new ADR using the template) |
+| New test suite or coverage change | `TEST_MAP.md` (Suite Index + total count), `PROJECT_MAP.md` [TESTING] total count row |
+| Any of the above | `product/README.md` — update `Last updated` line |
+| Change to DB schema | `product/technical/database/schema.md` |
+| Change to Redis keys | `PROJECT_MAP.md` [ARCHITECTURE] Redis Key Space table |
+| New ADR | `product/README.md` Decisions table, `PROJECT_MAP.md` if it affects tech stack |
+
+## How to Update
+
+### `PROJECT_MAP.md`
+The living external-memory map. Update the relevant section in-place:
+- `[TECH_STACK]` — new or changed library/tool rows
+- `[ARCHITECTURE]` — service topology, Redis key space
+- `[TESTING]` — suite index, total count, coverage table
+- `[ORPHANS & PENDING]` — mark resolved items with strikethrough; add new open items
+
+### `product/technical/architecture.md`
+Update the affected section (Logging, Security, State Management, Transfer Pipeline, etc.). Update the `Last updated` date at the top.
+
+### `product/technical/services.md`
+Update the relevant service entry or Shared Service Modules section. Update the `Last updated` date at the top.
+
+### `TEST_MAP.md`
+Add a numbered Suite entry following the existing pattern. Update the total count table and last verified run block.
+
+### Architecture Decision Records (ADRs)
+When a non-trivial technical decision is made (choice of library, pattern, or approach with real alternatives), create a new ADR:
+
+1. Copy `product/decisions/template.md` to `product/decisions/000N-<kebab-title>.md`
+2. Fill in Status (Accepted), Date, Context, Options Considered, Decision, Consequences, References
+3. Add the ADR row to `product/README.md` Decisions table
+4. Reference the ADR from the relevant `PROJECT_MAP.md` or `architecture.md` section
+
+### `product/README.md`
+Update the `Last updated` line to reflect today's date and a short summary of what changed.
+
+## Quick Checklist
+
+Before every commit that involves code changes, verify:
+
+- [ ] `PROJECT_MAP.md` — tech stack / testing counts / Redis keys updated if affected
+- [ ] `product/technical/architecture.md` — architecture section updated if affected
+- [ ] `product/technical/services.md` — service or module entry updated if affected
+- [ ] `TEST_MAP.md` — suite index + totals updated if tests were added/changed
+- [ ] `product/README.md` — `Last updated` line reflects today's date
+- [ ] New ADR created if a significant technical decision was made
