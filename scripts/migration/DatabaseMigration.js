@@ -178,13 +178,22 @@ ON device_connections(status) WHERE status = 'connected';
 
 -- Improve performance of files
 ALTER TABLE public.files 
-ADD COLUMN ts timestamp GENERATED ALWAYS AS ("date" + "time") STORED;
+ADD COLUMN IF NOT EXISTS ts timestamp GENERATED ALWAYS AS ("date" + "time") STORED;
 
--- CREATE INDEX CONCURRENTLY idx_files_ts ON public.files (ts);
+-- Covering partial indexes for dashboard aggregation queries.
+-- On a fresh migration the table is empty so regular (non-CONCURRENT) creation is used here.
+-- On a live production DB with existing data run these two statements manually with CONCURRENTLY
+-- outside of any transaction block instead of re-running the full migration script.
+CREATE INDEX IF NOT EXISTS idx_files_dashboard_date
+  ON public.files (date)
+  INCLUDE (cam_id, plate_num, file_size, image_export_done_date_time, time)
+  WHERE deleted = false;
 
--- CREATE INDEX CONCURRENTLY idx_files_grouping
--- ON public.files (plate_num, site_id, date_folder, time_folder)
--- WHERE deleted = false;
+-- Supplemental index for the daily "Per Camera" path (filters + groups on cam_id AND date).
+CREATE INDEX IF NOT EXISTS idx_files_dashboard_cam_date
+  ON public.files (cam_id, date)
+  INCLUDE (plate_num, file_size, image_export_done_date_time)
+  WHERE deleted = false;
 
 
 -- Create a function to get uptime in a readable format
@@ -700,6 +709,140 @@ CREATE TRIGGER update_ftp_video_transfer_queue_updated_at
     EXECUTE FUNCTION update_updated_at_column();
 
 
+-- -----------------------------------------------------------------------
+-- Dashboard pre-aggregation rollup materialized views.
+-- These allow chart queries to read from small pre-computed summaries
+-- instead of scanning the full files table on every request.
+-- Refreshed concurrently by DashboardReportingBackend on a timer and on
+-- every POST /dashboard/refresh call.
+-- -----------------------------------------------------------------------
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_files_daily AS
+SELECT
+    date,
+    cam_id,
+    COUNT(DISTINCT plate_num)                                                        AS total_vehicles_count,
+    COUNT(*)                                                                         AS total_files_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL)                  AS success_produced_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)                      AS failed_produce_count,
+    ROUND(
+        CASE WHEN COUNT(*) = 0 THEN 0
+             ELSE COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)::numeric / COUNT(*) * 100
+        END, 2
+    )                                                                                AS failed_produced_percentage,
+    ROUND(SUM(COALESCE(file_size, 0)) / 1024.0 / 1024.0 / 1024.0, 3)               AS total_file_size_in_gb
+FROM files
+WHERE deleted = false
+GROUP BY date, cam_id;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_files_daily_pk ON mv_files_daily (date, cam_id);
+
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_files_monthly AS
+SELECT
+    TO_CHAR(date, 'YYYY-MM')                                                         AS period,
+    cam_id,
+    COUNT(DISTINCT plate_num)                                                        AS total_vehicles_count,
+    COUNT(*)                                                                         AS total_files_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL)                  AS success_produced_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)                      AS failed_produce_count,
+    ROUND(
+        CASE WHEN COUNT(*) = 0 THEN 0
+             ELSE COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)::numeric / COUNT(*) * 100
+        END, 2
+    )                                                                                AS failed_produced_percentage,
+    ROUND(SUM(COALESCE(file_size, 0)) / 1024.0 / 1024.0 / 1024.0, 3)               AS total_file_size_in_gb
+FROM files
+WHERE deleted = false
+GROUP BY TO_CHAR(date, 'YYYY-MM'), cam_id;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_files_monthly_pk ON mv_files_monthly (period, cam_id);
+
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_files_yearly AS
+SELECT
+    TO_CHAR(date, 'YYYY')                                                            AS period,
+    cam_id,
+    COUNT(DISTINCT plate_num)                                                        AS total_vehicles_count,
+    COUNT(*)                                                                         AS total_files_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL)                  AS success_produced_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)                      AS failed_produce_count,
+    ROUND(
+        CASE WHEN COUNT(*) = 0 THEN 0
+             ELSE COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)::numeric / COUNT(*) * 100
+        END, 2
+    )                                                                                AS failed_produced_percentage,
+    ROUND(SUM(COALESCE(file_size, 0)) / 1024.0 / 1024.0 / 1024.0, 3)               AS total_file_size_in_gb
+FROM files
+WHERE deleted = false
+GROUP BY TO_CHAR(date, 'YYYY'), cam_id;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_files_yearly_pk ON mv_files_yearly (period, cam_id);
+
+
+-- Aggregated (no cam_id) variants — give correct COUNT(DISTINCT plate_num) across all cameras.
+-- Used by the dashboard for the default aggregated view (no camera filter selected).
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_files_daily_agg AS
+SELECT
+    date,
+    COUNT(DISTINCT plate_num)                                                        AS total_vehicles_count,
+    COUNT(*)                                                                         AS total_files_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL)                  AS success_produced_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)                      AS failed_produce_count,
+    ROUND(
+        CASE WHEN COUNT(*) = 0 THEN 0
+             ELSE COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)::numeric / COUNT(*) * 100
+        END, 2
+    )                                                                                AS failed_produced_percentage,
+    ROUND(SUM(COALESCE(file_size, 0)) / 1024.0 / 1024.0 / 1024.0, 3)               AS total_file_size_in_gb
+FROM files
+WHERE deleted = false
+GROUP BY date;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_files_daily_agg_pk ON mv_files_daily_agg (date);
+
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_files_monthly_agg AS
+SELECT
+    TO_CHAR(date, 'YYYY-MM')                                                         AS period,
+    COUNT(DISTINCT plate_num)                                                        AS total_vehicles_count,
+    COUNT(*)                                                                         AS total_files_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL)                  AS success_produced_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)                      AS failed_produce_count,
+    ROUND(
+        CASE WHEN COUNT(*) = 0 THEN 0
+             ELSE COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)::numeric / COUNT(*) * 100
+        END, 2
+    )                                                                                AS failed_produced_percentage,
+    ROUND(SUM(COALESCE(file_size, 0)) / 1024.0 / 1024.0 / 1024.0, 3)               AS total_file_size_in_gb
+FROM files
+WHERE deleted = false
+GROUP BY TO_CHAR(date, 'YYYY-MM');
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_files_monthly_agg_pk ON mv_files_monthly_agg (period);
+
+
+CREATE MATERIALIZED VIEW IF NOT EXISTS mv_files_yearly_agg AS
+SELECT
+    TO_CHAR(date, 'YYYY')                                                            AS period,
+    COUNT(DISTINCT plate_num)                                                        AS total_vehicles_count,
+    COUNT(*)                                                                         AS total_files_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL)                  AS success_produced_count,
+    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)                      AS failed_produce_count,
+    ROUND(
+        CASE WHEN COUNT(*) = 0 THEN 0
+             ELSE COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)::numeric / COUNT(*) * 100
+        END, 2
+    )                                                                                AS failed_produced_percentage,
+    ROUND(SUM(COALESCE(file_size, 0)) / 1024.0 / 1024.0 / 1024.0, 3)               AS total_file_size_in_gb
+FROM files
+WHERE deleted = false
+GROUP BY TO_CHAR(date, 'YYYY');
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_files_yearly_agg_pk ON mv_files_yearly_agg (period);
+
+
     `);
       console.log('   ✅ All tables, indexes, and functions created successfully');
 
@@ -752,6 +895,14 @@ CREATE TRIGGER update_ftp_video_transfer_queue_updated_at
       console.log('   🔄 Dropping tables in dependency order...');
       // Drop tables in correct order (child tables first, then parent tables)
       await client.query(`
+        -- Drop dashboard rollup materialized views
+        DROP MATERIALIZED VIEW IF EXISTS mv_files_yearly_agg CASCADE;
+        DROP MATERIALIZED VIEW IF EXISTS mv_files_monthly_agg CASCADE;
+        DROP MATERIALIZED VIEW IF EXISTS mv_files_daily_agg CASCADE;
+        DROP MATERIALIZED VIEW IF EXISTS mv_files_yearly CASCADE;
+        DROP MATERIALIZED VIEW IF EXISTS mv_files_monthly CASCADE;
+        DROP MATERIALIZED VIEW IF EXISTS mv_files_daily CASCADE;
+
         -- Drop child tables first (those with foreign keys)
         DROP TABLE IF EXISTS transfer_queue CASCADE;
         DROP TABLE IF EXISTS video_transfer_queue CASCADE;

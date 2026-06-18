@@ -218,7 +218,7 @@ const { sendProcessUpdates } = setupProcessMonitorListeners({ wss, logger, redis
 const { sendDeviceUpdates } = setupConnectedDevicesListeners({ wss, logger, pool, redisPubSub, clients });
 setupAutoTransferListeners({ wss, logger, redisPubSub, emitEventToClients, readConfig });
 
-app.use('/', createDashboardRouter({ logger, pool, broadcastUpdate }));
+app.use('/', createDashboardRouter({ logger, pool, broadcastUpdate, redis }));
 app.use('/', createProcessMonitorRouter({ logger, redis, sendProcessUpdates }));
 app.use('/', createMainConfigRouter({ logger, redis, writeConfig, emitEventToClients, readConfig }));
 app.use('/', createMainControlRouter({ logger, pool, readConfig, writeConfig, EXPORT_DIR }));
@@ -232,6 +232,36 @@ app.use('/', createMediaFilesRouter({ logger, pool }));
 // --- Start Background Processes ---
 startManualFileTransferProcess({ logger, pool, emitEventToClients, readConfig, writeConfig, ROOT_DIR, EXPORT_DIR });
 // startAutoTransferProcess({ logger, pool, redis, emitEventToClients });
+
+// --- Dashboard Materialized View Refresh ---
+// Refreshes all six rollup MVs on a configurable interval so chart queries stay fast
+// without scanning the full files table. CONCURRENT refresh keeps the MVs readable
+// during the refresh, so there is zero downtime.
+const DASHBOARD_MV_REFRESH_INTERVAL_MS = parseInt(process.env.DASHBOARD_MV_REFRESH_INTERVAL_MS) || 5 * 60 * 1000;
+const DASHBOARD_MVS = [
+    'mv_files_daily', 'mv_files_daily_agg',
+    'mv_files_monthly', 'mv_files_monthly_agg',
+    'mv_files_yearly', 'mv_files_yearly_agg'
+];
+
+async function refreshDashboardMVs() {
+    for (const mv of DASHBOARD_MVS) {
+        try {
+            await pool.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY ${mv}`);
+            logger.info(`[Dashboard MV] Refreshed ${mv}`);
+        } catch (err) {
+            logger.error(`[Dashboard MV] Error refreshing ${mv}:`, err.message);
+        }
+    }
+}
+
+// Initial refresh on startup (non-blocking)
+refreshDashboardMVs().catch(err => logger.error('[Dashboard MV] Initial refresh error:', err.message));
+
+// Periodic refresh
+setInterval(() => {
+    refreshDashboardMVs().catch(err => logger.error('[Dashboard MV] Scheduled refresh error:', err.message));
+}, DASHBOARD_MV_REFRESH_INTERVAL_MS);
 
 // --- Server Start ---
 server.listen(port, () => {

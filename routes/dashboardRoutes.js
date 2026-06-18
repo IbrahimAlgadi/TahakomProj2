@@ -6,7 +6,9 @@ const os = require('os');
 const util = require('util');
 const execAsync = util.promisify(exec);
 
-function createDashboardRouter({ logger, pool, broadcastUpdate }) {
+const DASHBOARD_CACHE_TTL_SECONDS = parseInt(process.env.DASHBOARD_CACHE_TTL_SECONDS) || 60;
+
+function createDashboardRouter({ logger, pool, broadcastUpdate, redis }) {
     const router = express.Router();
 
     // Helper to add filters to query
@@ -225,10 +227,10 @@ function createDashboardRouter({ logger, pool, broadcastUpdate }) {
                 SELECT
                     COUNT(*) as total_files,
                     COUNT(DISTINCT plate_num) as unique_vehicles,
-                    COUNT(CASE WHEN image_export_done_date_time IS NOT NULL THEN 1 END) as successful_exports,
-                    COUNT(CASE WHEN image_export_done_date_time IS NULL THEN 1 END) as failed_exports,
+                    COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL) as successful_exports,
+                    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)     as failed_exports,
                     ROUND(
-                        COUNT(CASE WHEN image_export_done_date_time IS NOT NULL THEN 1 END)::numeric /
+                        COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL)::numeric /
                         NULLIF(COUNT(*), 0) * 100, 2
                     ) as success_rate,
                     SUM(file_size) / 1024.0 / 1024.0 / 1024.0 as total_size_gb,
@@ -490,42 +492,190 @@ function createDashboardRouter({ logger, pool, broadcastUpdate }) {
     }
 
     // Report data functions
-    async function getReportData(groupBy, filters) {
+
+    const groupByClauses = {
+        hourly:  { select: "TO_CHAR(time, 'HH12 AM') as hour_am_pm, TO_CHAR(date, 'YYYY-MM-DD') as date", group: "TO_CHAR(time, 'HH12 AM'), date", order: "MIN(time)" },
+        daily:   { select: "TO_CHAR(date, 'MM/DD/YYYY') as period", group: 'date', order: 'date' },
+        monthly: { select: "TO_CHAR(date, 'YYYY-MM') as period", group: "TO_CHAR(date, 'YYYY-MM')", order: "TO_CHAR(date, 'YYYY-MM')" },
+        yearly:  { select: "TO_CHAR(date, 'YYYY') as period", group: "TO_CHAR(date, 'YYYY')", order: "TO_CHAR(date, 'YYYY')" }
+    };
+
+    // Hourly queries and fallback — always reads from the live files table.
+    // The Phase-1 covering index (idx_files_dashboard_date) makes single-day scans fast.
+    async function getReportDataFromLiveTable(groupBy, filters) {
+        const client = await pool.connect();
         try {
+            await client.query("SET LOCAL statement_timeout = '20s'");
             const selectClause = `
                 SELECT
                     ${groupBy.select},
                     ${groupBy.cam_id ? 'cam_id,' : ''}
                     COUNT(DISTINCT plate_num) AS total_vehicles_count,
                     COUNT(*) AS total_files_count,
-                    COUNT(CASE WHEN image_export_done_date_time IS NOT NULL THEN 1 END) AS success_produced_count,
-                    COUNT(CASE WHEN image_export_done_date_time IS NULL THEN 1 END) AS failed_produce_count,
+                    COUNT(*) FILTER (WHERE image_export_done_date_time IS NOT NULL) AS success_produced_count,
+                    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)     AS failed_produce_count,
                     ROUND(
                         CASE WHEN COUNT(*) = 0 THEN 0
-                             ELSE COUNT(CASE WHEN image_export_done_date_time IS NULL THEN 1 END)::numeric / COUNT(*) * 100
+                             ELSE COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL)::numeric / COUNT(*) * 100
                         END, 2
                     ) AS failed_produced_percentage,
-                    ROUND(SUM(file_size) / 1024.0 / 1024.0 / 1024.0, 3) AS total_file_size_in_gb
+                    ROUND(SUM(COALESCE(file_size, 0)) / 1024.0 / 1024.0 / 1024.0, 3) AS total_file_size_in_gb
             `;
             const params = [];
             let query = applyFilters(selectClause + baseQuery, filters, params);
-
             query += ` GROUP BY ${groupBy.group} ${groupBy.cam_id ? ', cam_id' : ''} ORDER BY ${groupBy.order} ${groupBy.cam_id ? ', cam_id' : ''}`;
-            
-            const result = await pool.query(query, params);
+            const result = await client.query(query, params);
             return result.rows;
         } catch (error) {
-            logger.error(`Error getting ${filters.view} report data:`, error);
+            logger.error(`Error getting ${filters.view} report data from live table:`, error);
             throw error;
+        } finally {
+            client.release();
         }
     }
 
-    const groupByClauses = {
-        hourly: { select: "TO_CHAR(time, 'HH12 AM') as hour_am_pm, TO_CHAR(date, 'YYYY-MM-DD') as date", group: "TO_CHAR(time, 'HH12 AM'), date", order: "MIN(time)" },
-        daily: { select: "TO_CHAR(date, 'MM/DD/YYYY') as period", group: 'date', order: 'date' },
-        monthly: { select: "TO_CHAR(date, 'YYYY-MM') as period", group: "TO_CHAR(date, 'YYYY-MM')", order: "TO_CHAR(date, 'YYYY-MM')" },
-        yearly: { select: "TO_CHAR(date, 'YYYY') as period", group: "TO_CHAR(date, 'YYYY')", order: "TO_CHAR(date, 'YYYY')" }
-    };
+    // Daily/monthly/yearly queries read from pre-aggregated materialized views.
+    // Per-cam MVs (mv_files_daily, mv_files_monthly, mv_files_yearly) are used when a specific
+    // camera is selected or "per_camera" mode is active.
+    // Aggregated MVs (_agg variants) are used otherwise, giving correct COUNT(DISTINCT plate_num)
+    // across all cameras without double-counting.
+    async function getReportDataFromMV(view, filters) {
+        const client = await pool.connect();
+        try {
+            await client.query("SET LOCAL statement_timeout = '20s'");
+
+            const isPerCamera  = filters.cameraFilter === 'per_camera';
+            const isSpecificCam = filters.cameraFilter &&
+                filters.cameraFilter !== 'aggregated' &&
+                filters.cameraFilter !== 'per_camera';
+            const needsPerCamMV = isPerCamera || isSpecificCam;
+
+            const params = [];
+            let pi = 1;
+            const conditions = [];
+            let mvTable, selectExpr, orderExpr;
+
+            if (view === 'daily') {
+                mvTable    = needsPerCamMV ? 'mv_files_daily' : 'mv_files_daily_agg';
+                selectExpr = "TO_CHAR(date, 'MM/DD/YYYY') AS period";
+                if (isPerCamera) selectExpr += ', cam_id';
+                orderExpr  = 'date' + (isPerCamera ? ', cam_id' : '');
+
+                if (filters.startDate) { conditions.push(`date >= $${pi++}`); params.push(filters.startDate); }
+                if (filters.endDate)   { conditions.push(`date <= $${pi++}`); params.push(filters.endDate); }
+                if (filters.date)      { conditions.push(`date = $${pi++}`); params.push(filters.date); }
+
+            } else if (view === 'monthly') {
+                mvTable    = isSpecificCam ? 'mv_files_monthly' : 'mv_files_monthly_agg';
+                selectExpr = 'period';
+                orderExpr  = 'period';
+                if (filters.startDate) { conditions.push(`period >= $${pi++}`); params.push(filters.startDate.substring(0, 7)); }
+                if (filters.endDate)   { conditions.push(`period <= $${pi++}`); params.push(filters.endDate.substring(0, 7)); }
+
+            } else { // yearly
+                mvTable    = isSpecificCam ? 'mv_files_yearly' : 'mv_files_yearly_agg';
+                selectExpr = 'period';
+                orderExpr  = 'period';
+                if (filters.startDate) { conditions.push(`period >= $${pi++}`); params.push(filters.startDate.substring(0, 4)); }
+                if (filters.endDate)   { conditions.push(`period <= $${pi++}`); params.push(filters.endDate.substring(0, 4)); }
+            }
+
+            if (isSpecificCam) {
+                conditions.push(`cam_id = $${pi++}`);
+                params.push(filters.cameraFilter);
+            }
+
+            const whereClause = conditions.length > 0 ? 'WHERE ' + conditions.join(' AND ') : '';
+
+            const query = `
+                SELECT
+                    ${selectExpr},
+                    total_vehicles_count,
+                    total_files_count,
+                    success_produced_count,
+                    failed_produce_count,
+                    failed_produced_percentage,
+                    total_file_size_in_gb
+                FROM ${mvTable}
+                ${whereClause}
+                ORDER BY ${orderExpr}
+            `;
+
+            const result = await client.query(query, params);
+            return result.rows;
+        } catch (error) {
+            logger.error(`MV query failed for view=${view}:`, error.message);
+            throw error;
+        } finally {
+            client.release();
+        }
+    }
+
+    // Dispatcher: hourly always uses the live table; daily/monthly/yearly use MVs with
+    // automatic fallback to the live table if the MV query fails (e.g., not yet populated).
+    async function getReportData(groupBy, filters) {
+        if (filters.view === 'hourly') {
+            return getReportDataFromLiveTable(groupBy, filters);
+        }
+        try {
+            return await getReportDataFromMV(filters.view, filters);
+        } catch (err) {
+            logger.warn(`MV query failed for ${filters.view}, falling back to live table: ${err.message}`);
+            return getReportDataFromLiveTable(groupBy, filters);
+        }
+    }
+
+    // Refresh all dashboard materialized views concurrently (non-blocking reads during refresh).
+    async function refreshMVsConcurrently() {
+        const mvNames = [
+            'mv_files_daily', 'mv_files_daily_agg',
+            'mv_files_monthly', 'mv_files_monthly_agg',
+            'mv_files_yearly', 'mv_files_yearly_agg'
+        ];
+        for (const mv of mvNames) {
+            try {
+                await pool.query(`REFRESH MATERIALIZED VIEW CONCURRENTLY ${mv}`);
+                logger.info(`Refreshed ${mv}`);
+            } catch (err) {
+                logger.error(`Error refreshing ${mv}:`, err.message);
+            }
+        }
+    }
+
+    // Redis cache helpers
+    function buildCacheKey(prefix, params) {
+        return `${prefix}:${JSON.stringify(params)}`;
+    }
+
+    async function getFromCache(key) {
+        if (!redis) return null;
+        try {
+            const cached = await redis.get(key);
+            return cached ? JSON.parse(cached) : null;
+        } catch (err) {
+            logger.warn('Redis cache get error:', err.message);
+            return null;
+        }
+    }
+
+    async function setInCache(key, value, ttl = DASHBOARD_CACHE_TTL_SECONDS) {
+        if (!redis) return;
+        try {
+            await redis.set(key, JSON.stringify(value), 'EX', ttl);
+        } catch (err) {
+            logger.warn('Redis cache set error:', err.message);
+        }
+    }
+
+    async function bustCachePattern(pattern) {
+        if (!redis) return;
+        try {
+            const keys = await redis.keys(pattern);
+            if (keys.length > 0) await redis.del(...keys);
+        } catch (err) {
+            logger.warn('Redis cache bust error:', err.message);
+        }
+    }
 
     async function getOperationHoursReport(filters = {}) {
         try {
@@ -535,7 +685,7 @@ function createDashboardRouter({ logger, pool, broadcastUpdate }) {
                     MIN(time) as start_time,
                     MAX(time) as end_time,
                     COUNT(*) as total_violations,
-                    COUNT(CASE WHEN image_export_done_date_time IS NULL THEN 1 END) as error_count
+                    COUNT(*) FILTER (WHERE image_export_done_date_time IS NULL) as error_count
                 FROM files
                 WHERE deleted = FALSE
             `;
@@ -585,6 +735,15 @@ function createDashboardRouter({ logger, pool, broadcastUpdate }) {
                 return res.status(400).json({ success: false, error: 'Invalid view parameter.' });
             }
 
+            // Attach view to filters so dispatcher functions can reference it
+            filters.view = view;
+
+            const cacheKey = buildCacheKey('dashboard:data', req.query);
+            const cached = await getFromCache(cacheKey);
+            if (cached) {
+                return res.json({ success: true, data: cached, cached: true });
+            }
+
             let data;
             if (view === 'daily' && filters.cameraFilter === 'per_camera') {
                 const perCameraClauses = { ...groupByClauses.daily, cam_id: true };
@@ -592,7 +751,8 @@ function createDashboardRouter({ logger, pool, broadcastUpdate }) {
             } else {
                 data = await getReportData(groupByClauses[view], filters);
             }
-            
+
+            await setInCache(cacheKey, data);
             res.json({ success: true, data });
         } catch (error) {
             logger.error('Error in /dashboard/data endpoint:', error);
@@ -600,12 +760,53 @@ function createDashboardRouter({ logger, pool, broadcastUpdate }) {
         }
     });
 
+    // Paginated table endpoint — same aggregated data but sliced for page-by-page rendering.
+    // Charts use /dashboard/data (fast MV reads). The table uses /dashboard/table so it doesn't
+    // block the chart paint while rows are still loading.
+    router.get('/dashboard/table', async (req, res) => {
+        try {
+            const { view, page = '1', pageSize = '50', ...filters } = req.query;
+            if (!groupByClauses[view]) {
+                return res.status(400).json({ success: false, error: 'Invalid view parameter.' });
+            }
+            filters.view = view;
+
+            const pageNum  = Math.max(1, parseInt(page, 10));
+            const pageSz   = Math.min(200, Math.max(1, parseInt(pageSize, 10)));
+            const offset   = (pageNum - 1) * pageSz;
+
+            const cacheKey = buildCacheKey('dashboard:table', req.query);
+            const cached = await getFromCache(cacheKey);
+            if (cached) {
+                return res.json({ success: true, ...cached, cached: true });
+            }
+
+            let allData;
+            if (view === 'daily' && filters.cameraFilter === 'per_camera') {
+                const perCameraClauses = { ...groupByClauses.daily, cam_id: true };
+                allData = await getReportData(perCameraClauses, filters);
+            } else {
+                allData = await getReportData(groupByClauses[view], filters);
+            }
+
+            const totalRows = allData.length;
+            const data = allData.slice(offset, offset + pageSz);
+            const payload = { data, page: pageNum, pageSize: pageSz, totalRows, totalPages: Math.ceil(totalRows / pageSz) };
+            await setInCache(cacheKey, payload);
+            res.json({ success: true, ...payload });
+        } catch (error) {
+            logger.error('Error in /dashboard/table endpoint:', error);
+            res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
     router.get('/dashboard/export', async (req, res) => {
         try {
             const { view, format, ...filters } = req.query;
-             if (!groupByClauses[view]) {
+            if (!groupByClauses[view]) {
                 return res.status(400).json({ success: false, error: 'Invalid view parameter.' });
             }
+            filters.view = view;
 
             let data;
             if (view === 'daily' && filters.cameraFilter === 'per_camera') {
@@ -737,14 +938,26 @@ function createDashboardRouter({ logger, pool, broadcastUpdate }) {
     router.post('/dashboard/refresh', async (req, res) => {
         try {
             const { view, ...filters } = req.body;
-            let data;
-            if (view === 'hourly') {
-                data = await getReportData(groupByClauses[view], filters);
-            } else if (view === 'daily') {
-                data = await getReportData(groupByClauses[view], filters);
-            } else {
-                return res.status(400).json({ success: false, error: 'Invalid view parameter. Must be "hourly" or "daily"' });
+            if (!groupByClauses[view]) {
+                return res.status(400).json({ success: false, error: 'Invalid view parameter.' });
             }
+            filters.view = view;
+
+            // Bust all dashboard cache entries so next load fetches fresh data
+            await bustCachePattern('dashboard:data:*');
+            await bustCachePattern('dashboard:table:*');
+
+            // Trigger async MV refresh (fire-and-forget; does not block the response)
+            refreshMVsConcurrently().catch(err => logger.error('Background MV refresh error:', err.message));
+
+            let data;
+            if (view === 'daily' && filters.cameraFilter === 'per_camera') {
+                const perCameraClauses = { ...groupByClauses.daily, cam_id: true };
+                data = await getReportData(perCameraClauses, filters);
+            } else {
+                data = await getReportData(groupByClauses[view], filters);
+            }
+
             broadcastUpdate('dashboardUpdate', { view, data });
             res.json({ success: true, data });
         } catch (error) {

@@ -130,7 +130,8 @@
                             <span id="mainChartTitle">Files Processing Overview</span>
                         </h5>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body position-relative">
+                        <div id="mainChartLoading" class="chart-loading-overlay"><div class="spinner-border text-primary"></div></div>
                         <div id="mainChart" style="height: 400px;"></div>
                     </div>
                 </div>
@@ -144,7 +145,8 @@
                             <i class="fas fa-chart-pie me-2"></i>Success Rate
                         </h5>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body position-relative">
+                        <div id="successChartLoading" class="chart-loading-overlay"><div class="spinner-border text-primary"></div></div>
                         <div id="successChart" style="height: 400px;"></div>
                     </div>
                 </div>
@@ -161,7 +163,8 @@
                             <i class="fas fa-chart-bar me-2"></i>File Size Distribution
                         </h5>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body position-relative">
+                        <div id="fileSizeChartLoading" class="chart-loading-overlay"><div class="spinner-border text-primary"></div></div>
                         <div id="fileSizeChart" style="height: 300px;"></div>
                     </div>
                 </div>
@@ -175,7 +178,8 @@
                             <i class="fas fa-chart-area me-2"></i>Vehicle Count Trend
                         </h5>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body position-relative">
+                        <div id="vehicleChartLoading" class="chart-loading-overlay"><div class="spinner-border text-primary"></div></div>
                         <div id="vehicleChart" style="height: 300px;"></div>
                     </div>
                 </div>
@@ -184,12 +188,17 @@
 
         <!-- Data Table -->
         <div class="card">
-            <div class="card-header bg-transparent border-0">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center">
                 <h5 class="card-title mb-0">
                     <i class="fas fa-table me-2"></i>Detailed Data
                 </h5>
+                <small class="text-muted" id="tableInfo"></small>
             </div>
             <div class="card-body">
+                <div id="tableLoading" class="text-center py-4" style="display:none!important;">
+                    <div class="spinner-border text-primary" role="status"></div>
+                    <p class="mt-2 text-muted">Loading table data…</p>
+                </div>
                 <div class="table-responsive">
                     <table class="table table-striped" id="dataTable">
                         <thead>
@@ -202,6 +211,10 @@
                         </tbody>
                     </table>
                 </div>
+                <!-- Pagination controls -->
+                <nav id="tablePagination" aria-label="Table pagination" style="display:none;">
+                    <ul class="pagination pagination-sm justify-content-center mb-0" id="paginationControls"></ul>
+                </nav>
             </div>
         </div>
 
@@ -223,366 +236,458 @@
     <!-- Echarts  -->
     <script src="/vendors/echarts/echarts.min.js"></script>
 
+    <style>
+        .chart-loading-overlay {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255,255,255,0.75);
+            z-index: 10;
+            border-radius: 4px;
+        }
+        .chart-loading-overlay.d-none { display: none !important; }
+    </style>
+
     <script>
         $('.dashboard').addClass('active');
     </script>
 
     <script>
         const DASHBOARD_URL = 'http://localhost:8454';
+        const TABLE_PAGE_SIZE = 50;
+
         let currentView = 'hourly';
         let mainChart, successChart, fileSizeChart, vehicleChart;
+        let tableCurrentPage = 1;
+        let tableTotalPages = 1;
+        let cachedCameras = null; // camera list cached across view switches
+        let applyFiltersDebounceTimer = null;
+        let resizeDebounceTimer = null;
+
+        // ── Utility helpers ─────────────────────────────────────────────────────
 
         function showToast(message, type = 'info') {
             const toast = document.getElementById('notificationToast');
             const toastTitle = document.getElementById('toastTitle');
             const toastBody = document.getElementById('toastMessage');
-
             toast.className = `toast align-items-center text-white bg-${type} border-0`;
             toastTitle.textContent = type.charAt(0).toUpperCase() + type.slice(1);
             toastBody.textContent = message;
-
-            const bsToast = new bootstrap.Toast(toast);
-            bsToast.show();
+            new bootstrap.Toast(toast).show();
         }
 
         function formatNumber(num) {
-            return new Intl.NumberFormat().format(num);
+            return new Intl.NumberFormat().format(num || 0);
         }
 
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 GB';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        function showChartLoading(id) {
+            const el = document.getElementById(id + 'Loading');
+            if (el) el.classList.remove('d-none');
         }
+
+        function hideChartLoading(id) {
+            const el = document.getElementById(id + 'Loading');
+            if (el) el.classList.add('d-none');
+        }
+
+        function showTableLoading(show) {
+            const el = document.getElementById('tableLoading');
+            if (el) el.style.display = show ? '' : 'none';
+            document.getElementById('dataTable').style.opacity = show ? '0.4' : '1';
+        }
+
+        // ── ECharts initialisation ───────────────────────────────────────────────
 
         function initializeCharts() {
-            // Main Chart
-            mainChart = echarts.init(document.getElementById('mainChart'));
-            
-            // Success Rate Chart
-            successChart = echarts.init(document.getElementById('successChart'));
-            
-            // File Size Chart
-            fileSizeChart = echarts.init(document.getElementById('fileSizeChart'));
-            
-            // Vehicle Chart
-            vehicleChart = echarts.init(document.getElementById('vehicleChart'));
+            mainChart      = echarts.init(document.getElementById('mainChart'));
+            successChart   = echarts.init(document.getElementById('successChart'));
+            fileSizeChart  = echarts.init(document.getElementById('fileSizeChart'));
+            vehicleChart   = echarts.init(document.getElementById('vehicleChart'));
 
-            // Resize charts on window resize
-            window.addEventListener('resize', function() {
-                mainChart.resize();
-                successChart.resize();
-                fileSizeChart.resize();
-                vehicleChart.resize();
+            // Debounced resize so many rapid window events don't thrash the canvas
+            window.addEventListener('resize', function () {
+                clearTimeout(resizeDebounceTimer);
+                resizeDebounceTimer = setTimeout(function () {
+                    mainChart.resize();
+                    successChart.resize();
+                    fileSizeChart.resize();
+                    vehicleChart.resize();
+                }, 150);
             });
         }
 
+        // ── Chart update helpers ─────────────────────────────────────────────────
+
         function updateMainChart(data) {
+            hideChartLoading('mainChart');
             if (!data || data.length === 0) {
-                mainChart.setOption({
-                    title: { text: 'No data available', left: 'center' },
-                    series: []
-                });
+                mainChart.setOption({ title: { text: 'No data available', left: 'center' }, series: [] }, true);
                 return;
             }
-            
-            const categories = data.map(item => currentView === 'hourly' ? item.hour_am_pm : item.period);
-            const totalFiles = data.map(item => parseInt(item.total_files_count || 0));
+
+            const isHourly = currentView === 'hourly';
+            const categories  = data.map(item => isHourly ? item.hour_am_pm : item.period);
+            const totalFiles  = data.map(item => parseInt(item.total_files_count   || 0));
             const successFiles = data.map(item => parseInt(item.success_produced_count || 0));
             const failedFiles = data.map(item => parseInt(item.failed_produce_count || 0));
+            const rotateLbl   = (currentView === 'daily' && data.length > 20) ? 45 : 0;
+            const showZoom    = data.length > 30;
 
-            const option = {
+            mainChart.setOption({
                 title: {
-                    text: currentView === 'hourly' ? 'Hourly File Processing' : 'Daily File Processing',
+                    text: `${currentView.charAt(0).toUpperCase() + currentView.slice(1)} File Processing`,
                     left: 'center'
                 },
-                tooltip: {
-                    trigger: 'axis',
-                    axisPointer: {
-                        type: 'cross'
-                    }
-                },
-                legend: {
-                    data: ['Total Files', 'Success', 'Failed'],
-                    top: 30
-                },
-                grid: {
-                    left: '3%',
-                    right: '4%',
-                    bottom: '3%',
-                    containLabel: true
-                },
+                tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
+                legend: { data: ['Total Files', 'Success', 'Failed'], top: 30 },
+                grid: { left: '3%', right: '4%', bottom: showZoom ? '15%' : '3%', containLabel: true },
+                dataZoom: showZoom ? [
+                    { type: 'slider', start: 0, end: 100, bottom: 5 },
+                    { type: 'inside' }
+                ] : [],
                 xAxis: {
                     type: 'category',
                     data: categories,
-                    axisLabel: {
-                        rotate: currentView === 'daily' ? 45 : 0
-                    }
+                    axisLabel: { rotate: rotateLbl, interval: data.length > 60 ? 'auto' : 0 }
                 },
-                yAxis: {
-                    type: 'value'
-                },
+                yAxis: { type: 'value' },
                 series: [
                     {
-                        name: 'Total Files',
-                        type: 'line',
-                        data: totalFiles,
-                        itemStyle: { color: '#2563eb' }
+                        name: 'Total Files', type: 'line', data: totalFiles,
+                        itemStyle: { color: '#2563eb' },
+                        large: true, largeThreshold: 200,
+                        sampling: 'lttb',
+                        progressive: 400, progressiveThreshold: 3000
                     },
                     {
-                        name: 'Success',
-                        type: 'bar',
-                        data: successFiles,
-                        itemStyle: { color: '#059669' }
+                        name: 'Success', type: 'bar', data: successFiles,
+                        itemStyle: { color: '#059669' },
+                        large: true, largeThreshold: 200
                     },
                     {
-                        name: 'Failed',
-                        type: 'bar',
-                        data: failedFiles,
-                        itemStyle: { color: '#dc2626' }
+                        name: 'Failed', type: 'bar', data: failedFiles,
+                        itemStyle: { color: '#dc2626' },
+                        large: true, largeThreshold: 200
                     }
                 ]
-            };
-
-            mainChart.setOption(option);
+            }, true);
         }
 
         function updateSuccessChart(data) {
+            hideChartLoading('successChart');
             if (!data || data.length === 0) {
-                successChart.setOption({
-                    title: { text: 'No data available', left: 'center' },
-                    series: []
-                });
+                successChart.setOption({ title: { text: 'No data available', left: 'center' }, series: [] }, true);
                 return;
             }
-            
-            const totalSuccess = data.reduce((sum, item) => sum + parseInt(item.success_produced_count || 0), 0);
-            const totalFailed = data.reduce((sum, item) => sum + parseInt(item.failed_produce_count || 0), 0);
-
-            const option = {
-                title: {
-                    text: 'Success vs Failed',
-                    left: 'center'
-                },
-                tooltip: {
-                    trigger: 'item',
-                    formatter: '{a} <br/>{b}: {c} ({d}%)'
-                },
-                series: [
-                    {
-                        name: 'Files',
-                        type: 'pie',
-                        radius: ['40%', '70%'],
-                        avoidLabelOverlap: false,
-                        label: {
-                            show: false,
-                            position: 'center'
-                        },
-                        emphasis: {
-                            label: {
-                                show: true,
-                                fontSize: '18',
-                                fontWeight: 'bold'
-                            }
-                        },
-                        labelLine: {
-                            show: false
-                        },
-                        data: [
-                            { value: totalSuccess, name: 'Success', itemStyle: { color: '#059669' } },
-                            { value: totalFailed, name: 'Failed', itemStyle: { color: '#dc2626' } }
-                        ]
-                    }
-                ]
-            };
-
-            successChart.setOption(option);
+            const totalSuccess = data.reduce((s, i) => s + parseInt(i.success_produced_count || 0), 0);
+            const totalFailed  = data.reduce((s, i) => s + parseInt(i.failed_produce_count  || 0), 0);
+            successChart.setOption({
+                title: { text: 'Success vs Failed', left: 'center' },
+                tooltip: { trigger: 'item', formatter: '{a} <br/>{b}: {c} ({d}%)' },
+                series: [{
+                    name: 'Files', type: 'pie', radius: ['40%', '70%'],
+                    avoidLabelOverlap: false,
+                    label: { show: false, position: 'center' },
+                    emphasis: { label: { show: true, fontSize: '18', fontWeight: 'bold' } },
+                    labelLine: { show: false },
+                    data: [
+                        { value: totalSuccess, name: 'Success', itemStyle: { color: '#059669' } },
+                        { value: totalFailed,  name: 'Failed',  itemStyle: { color: '#dc2626' } }
+                    ]
+                }]
+            }, true);
         }
 
         function updateFileSizeChart(data) {
+            hideChartLoading('fileSizeChart');
             if (!data || data.length === 0) {
-                fileSizeChart.setOption({
-                    title: { text: 'No data available', left: 'center' },
-                    series: []
-                });
+                fileSizeChart.setOption({ title: { text: 'No data available', left: 'center' }, series: [] }, true);
                 return;
             }
-            
-            const categories = data.map(item => currentView === 'hourly' ? item.hour_am_pm : item.period);
-            const fileSizes = data.map(item => parseFloat(item.total_file_size_in_gb || 0));
+            const isHourly   = currentView === 'hourly';
+            const categories = data.map(item => isHourly ? item.hour_am_pm : item.period);
+            const fileSizes  = data.map(item => parseFloat(item.total_file_size_in_gb || 0));
+            const showZoom   = data.length > 30;
 
-            const option = {
-                title: {
-                    text: 'File Size Distribution (GB)',
-                    left: 'center'
-                },
+            fileSizeChart.setOption({
+                title: { text: 'File Size Distribution (GB)', left: 'center' },
                 tooltip: {
                     trigger: 'axis',
-                    formatter: function(params) {
-                        return `${params[0].name}<br/>${params[0].seriesName}: ${params[0].value} GB`;
-                    }
+                    formatter: p => `${p[0].name}<br/>${p[0].seriesName}: ${p[0].value} GB`
                 },
+                grid: { left: '3%', right: '4%', bottom: showZoom ? '15%' : '3%', containLabel: true },
+                dataZoom: showZoom ? [{ type: 'slider', start: 0, end: 100, bottom: 5 }, { type: 'inside' }] : [],
                 xAxis: {
-                    type: 'category',
-                    data: categories,
-                    axisLabel: {
-                        rotate: currentView === 'daily' ? 45 : 0
-                    }
+                    type: 'category', data: categories,
+                    axisLabel: { rotate: (currentView === 'daily' && data.length > 20) ? 45 : 0 }
                 },
-                yAxis: {
-                    type: 'value',
-                    name: 'Size (GB)'
-                },
-                series: [
-                    {
-                        name: 'File Size',
-                        type: 'bar',
-                        data: fileSizes,
-                        itemStyle: { color: '#8b5cf6' }
-                    }
-                ]
-            };
-
-            fileSizeChart.setOption(option);
+                yAxis: { type: 'value', name: 'Size (GB)' },
+                series: [{
+                    name: 'File Size', type: 'bar', data: fileSizes,
+                    itemStyle: { color: '#8b5cf6' },
+                    large: true, largeThreshold: 200
+                }]
+            }, true);
         }
 
         function updateVehicleChart(data) {
+            hideChartLoading('vehicleChart');
             if (!data || data.length === 0) {
-                vehicleChart.setOption({
-                    title: { text: 'No data available', left: 'center' },
-                    series: []
-                });
+                vehicleChart.setOption({ title: { text: 'No data available', left: 'center' }, series: [] }, true);
                 return;
             }
-            
-            const categories = data.map(item => currentView === 'hourly' ? item.hour_am_pm : item.period);
+            const isHourly     = currentView === 'hourly';
+            const categories   = data.map(item => isHourly ? item.hour_am_pm : item.period);
             const vehicleCounts = data.map(item => parseInt(item.total_vehicles_count || 0));
+            const showZoom      = data.length > 30;
 
-            const option = {
-                title: {
-                    text: 'Vehicle Count Trend',
-                    left: 'center'
-                },
-                tooltip: {
-                    trigger: 'axis'
-                },
+            vehicleChart.setOption({
+                title: { text: 'Vehicle Count Trend', left: 'center' },
+                tooltip: { trigger: 'axis' },
+                grid: { left: '3%', right: '4%', bottom: showZoom ? '15%' : '3%', containLabel: true },
+                dataZoom: showZoom ? [{ type: 'slider', start: 0, end: 100, bottom: 5 }, { type: 'inside' }] : [],
                 xAxis: {
-                    type: 'category',
-                    data: categories,
-                    axisLabel: {
-                        rotate: currentView === 'daily' ? 45 : 0
-                    }
+                    type: 'category', data: categories,
+                    axisLabel: { rotate: (currentView === 'daily' && data.length > 20) ? 45 : 0 }
                 },
-                yAxis: {
-                    type: 'value',
-                    name: 'Vehicles'
-                },
-                series: [
-                    {
-                        name: 'Vehicles',
-                        type: 'line',
-                        data: vehicleCounts,
-                        smooth: true,
-                        itemStyle: { color: '#f59e0b' },
-                        areaStyle: { opacity: 0.3 }
-                    }
-                ]
-            };
-
-            vehicleChart.setOption(option);
+                yAxis: { type: 'value', name: 'Vehicles' },
+                series: [{
+                    name: 'Vehicles', type: 'line', data: vehicleCounts,
+                    smooth: true, itemStyle: { color: '#f59e0b' }, areaStyle: { opacity: 0.3 },
+                    large: true, largeThreshold: 200,
+                    sampling: 'lttb',
+                    progressive: 400, progressiveThreshold: 3000
+                }]
+            }, true);
         }
 
         function updateStatistics(data) {
-            const totalVehicles = data.reduce((sum, item) => sum + parseInt(item.total_vehicles_count || 0), 0);
-            const totalFiles = data.reduce((sum, item) => sum + parseInt(item.total_files_count || 0), 0);
-            const totalSuccess = data.reduce((sum, item) => sum + parseInt(item.success_produced_count || 0), 0);
-            const totalSize = data.reduce((sum, item) => sum + parseFloat(item.total_file_size_in_gb || 0), 0);
-            
-            const successRate = totalFiles > 0 ? ((totalSuccess / totalFiles) * 100).toFixed(1) : 0;
+            const totalVehicles = data.reduce((s, i) => s + parseInt(i.total_vehicles_count  || 0), 0);
+            const totalFiles    = data.reduce((s, i) => s + parseInt(i.total_files_count     || 0), 0);
+            const totalSuccess  = data.reduce((s, i) => s + parseInt(i.success_produced_count || 0), 0);
+            const totalSize     = data.reduce((s, i) => s + parseFloat(i.total_file_size_in_gb || 0), 0);
+            const successRate   = totalFiles > 0 ? ((totalSuccess / totalFiles) * 100).toFixed(1) : 0;
 
             document.getElementById('totalVehicles').textContent = formatNumber(totalVehicles);
-            document.getElementById('totalFiles').textContent = formatNumber(totalFiles);
-            document.getElementById('successRate').textContent = successRate + '%';
-            document.getElementById('totalSize').textContent = totalSize.toFixed(2) + ' GB';
+            document.getElementById('totalFiles').textContent    = formatNumber(totalFiles);
+            document.getElementById('successRate').textContent   = successRate + '%';
+            document.getElementById('totalSize').textContent     = totalSize.toFixed(2) + ' GB';
         }
 
-        function updateDataTable(data) {
-            const tableHeaders = document.getElementById('tableHeaders');
-            const tableBody = document.getElementById('tableBody');
+        // ── Table rendering with DocumentFragment ────────────────────────────────
 
-            // Clear existing content
-            tableHeaders.innerHTML = '';
-            tableBody.innerHTML = '';
-
-            if (data.length === 0) {
-                tableBody.innerHTML = '<tr><td colspan="100%" class="text-center">No data available</td></tr>';
-                return;
-            }
-
-            // Create headers
+        function buildTableHeaders(hasCamId) {
             const headersMap = {
-                hourly: ['Date', 'Hour', 'Vehicles', 'Total Files', 'Success', 'Failed', 'Failed %', 'Size (GB)'],
-                daily: ['Date', 'Vehicles', 'Total Files', 'Success', 'Failed', 'Failed %', 'Size (GB)'],
-                monthly: ['Month', 'Vehicles', 'Total Files', 'Success', 'Failed', 'Failed %', 'Size (GB)'],
-                yearly: ['Year', 'Vehicles', 'Total Files', 'Success', 'Failed', 'Failed %', 'Size (GB)']
+                hourly:  ['Date', 'Hour',  'Vehicles', 'Total Files', 'Success', 'Failed', 'Failed %', 'Size (GB)'],
+                daily:   ['Date',          'Vehicles', 'Total Files', 'Success', 'Failed', 'Failed %', 'Size (GB)'],
+                monthly: ['Month',         'Vehicles', 'Total Files', 'Success', 'Failed', 'Failed %', 'Size (GB)'],
+                yearly:  ['Year',          'Vehicles', 'Total Files', 'Success', 'Failed', 'Failed %', 'Size (GB)']
             };
-            const headers = headersMap[currentView] || headersMap.daily;
-            if (data.length > 0 && data[0].cam_id) {
-                headers.splice(1, 0, 'Camera');
+            const headers = [...(headersMap[currentView] || headersMap.daily)];
+            if (hasCamId) headers.splice(1, 0, 'Camera');
+            return headers;
+        }
+
+        function renderTablePage(rows, page, totalRows, totalPages) {
+            const tableHeaders = document.getElementById('tableHeaders');
+            const tableBody    = document.getElementById('tableBody');
+            const hasCamId     = rows.length > 0 && rows[0].cam_id !== undefined;
+
+            tableHeaders.innerHTML = '';
+            const hFrag = document.createDocumentFragment();
+            buildTableHeaders(hasCamId).forEach(h => {
+                const th = document.createElement('th');
+                th.textContent = h;
+                hFrag.appendChild(th);
+            });
+            tableHeaders.appendChild(hFrag);
+
+            tableBody.innerHTML = '';
+            if (rows.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="100%" class="text-center">No data available</td></tr>';
+            } else {
+                const bFrag = document.createDocumentFragment();
+                rows.forEach(item => {
+                    const tr = document.createElement('tr');
+                    const totalFilesNum  = parseInt(item.total_files_count || 0);
+                    const failedCount    = parseInt(item.failed_produce_count || 0);
+                    const failedPct      = item.failed_produced_percentage !== undefined
+                        ? item.failed_produced_percentage
+                        : (totalFilesNum > 0 ? ((failedCount / totalFilesNum) * 100).toFixed(2) : 0);
+
+                    const cells = [];
+                    if (currentView === 'hourly') {
+                        cells.push(item.date || 'N/A', item.hour_am_pm || 'N/A');
+                    } else {
+                        cells.push(item.period || 'N/A');
+                    }
+                    if (hasCamId) cells.push(item.cam_id);
+                    cells.push(
+                        formatNumber(item.total_vehicles_count),
+                        formatNumber(totalFilesNum),
+                        formatNumber(item.success_produced_count),
+                        formatNumber(failedCount),
+                        failedPct + '%',
+                        parseFloat(item.total_file_size_in_gb || 0).toFixed(3)
+                    );
+
+                    cells.forEach(c => {
+                        const td = document.createElement('td');
+                        td.textContent = c;
+                        tr.appendChild(td);
+                    });
+                    bFrag.appendChild(tr);
+                });
+                tableBody.appendChild(bFrag);
             }
 
-            headers.forEach(header => {
-                const th = document.createElement('th');
-                th.textContent = header;
-                tableHeaders.appendChild(th);
-            });
+            // Pagination info + controls
+            const info = document.getElementById('tableInfo');
+            info.textContent = totalRows > 0
+                ? `Page ${page} of ${totalPages} (${formatNumber(totalRows)} rows total)`
+                : '';
 
-            // Create rows
-            data.forEach(item => {
-                const row = document.createElement('tr');
-                const totalFiles = parseInt(item.total_files_count || 0);
-                const failedCount = parseInt(item.failed_produce_count || 0);
-                const failedPercentage = item.failed_produced_percentage || (totalFiles > 0 ? ((failedCount / totalFiles) * 100).toFixed(2) : 0);
-                
-                let cells = `
-                    <td>${item.period || 'N/A'}</td>
-                    <td>${formatNumber(item.total_vehicles_count || 0)}</td>
-                    <td>${formatNumber(totalFiles)}</td>
-                    <td>${formatNumber(item.success_produced_count || 0)}</td>
-                    <td>${formatNumber(failedCount)}</td>
-                    <td>${failedPercentage}%</td>
-                    <td>${parseFloat(item.total_file_size_in_gb || 0).toFixed(3)}</td>
-                `;
-
-                if (currentView === 'hourly') {
-                     cells = `
-                        <td>${item.date || 'N/A'}</td>
-                        <td>${item.hour_am_pm || 'N/A'}</td>
-                        <td>${formatNumber(item.total_vehicles_count || 0)}</td>
-                        <td>${formatNumber(totalFiles)}</td>
-                        <td>${formatNumber(item.success_produced_count || 0)}</td>
-                        <td>${formatNumber(failedCount)}</td>
-                        <td>${failedPercentage}%</td>
-                        <td>${parseFloat(item.total_file_size_in_gb || 0).toFixed(3)}</td>
-                    `;
-                }
-
-                if (item.cam_id) {
-                    cells = `<td>${item.period}</td><td>${item.cam_id}</td>` + cells.substring(cells.indexOf('</td>')+5);
-                }
-                
-                row.innerHTML = cells;
-                tableBody.appendChild(row);
-            });
+            renderPagination(page, totalPages);
         }
+
+        function renderPagination(page, totalPages) {
+            const nav  = document.getElementById('tablePagination');
+            const ctrl = document.getElementById('paginationControls');
+            if (totalPages <= 1) { nav.style.display = 'none'; return; }
+            nav.style.display = '';
+
+            ctrl.innerHTML = '';
+            const frag = document.createDocumentFragment();
+
+            const addBtn = (label, targetPage, disabled, active) => {
+                const li = document.createElement('li');
+                li.className = 'page-item' + (disabled ? ' disabled' : '') + (active ? ' active' : '');
+                const a = document.createElement('a');
+                a.className = 'page-link';
+                a.href = '#';
+                a.textContent = label;
+                if (!disabled && !active) {
+                    a.addEventListener('click', e => { e.preventDefault(); loadTablePage(targetPage); });
+                }
+                li.appendChild(a);
+                frag.appendChild(li);
+            };
+
+            addBtn('«', 1,    page === 1,          false);
+            addBtn('‹', page - 1, page === 1,      false);
+
+            const start = Math.max(1, page - 2);
+            const end   = Math.min(totalPages, page + 2);
+            for (let p = start; p <= end; p++) addBtn(String(p), p, false, p === page);
+
+            addBtn('›', page + 1, page === totalPages, false);
+            addBtn('»', totalPages, page === totalPages, false);
+
+            ctrl.appendChild(frag);
+        }
+
+        // ── Data loading ─────────────────────────────────────────────────────────
+
+        function getFilterParams() {
+            const params = new URLSearchParams();
+            params.append('view', currentView);
+
+            if (currentView === 'hourly') {
+                const date      = document.getElementById('hourlyDate')?.value;
+                const startHour = document.getElementById('startHour')?.value;
+                const endHour   = document.getElementById('endHour')?.value;
+                if (date)      params.append('date', date);
+                if (startHour) params.append('startHour', startHour);
+                if (endHour)   params.append('endHour', endHour);
+            } else if (currentView === 'daily') {
+                const startDate = document.getElementById('dailyStartDate')?.value;
+                const endDate   = document.getElementById('dailyEndDate')?.value;
+                if (startDate) params.append('startDate', startDate);
+                if (endDate)   params.append('endDate', endDate);
+            } else if (currentView === 'monthly') {
+                const month = document.getElementById('monthlyDate')?.value;
+                if (month) {
+                    params.append('startDate', `${month}-01`);
+                    const d = new Date(month);
+                    params.append('endDate', new Date(d.getFullYear(), d.getMonth() + 2, 0).toISOString().split('T')[0]);
+                }
+            } else if (currentView === 'yearly') {
+                const year = document.getElementById('yearlyDate')?.value;
+                if (year) {
+                    params.append('startDate', `${year}-01-01`);
+                    params.append('endDate',   `${year}-12-31`);
+                }
+            }
+
+            const cam = document.getElementById('cameraFilter')?.value;
+            if (cam) params.append('cameraFilter', cam);
+            return params;
+        }
+
+        // Step 1: load charts (fast — small aggregated payload from MV or Redis cache)
+        async function loadCharts() {
+            ['mainChart', 'successChart', 'fileSizeChart', 'vehicleChart'].forEach(showChartLoading);
+            const params = getFilterParams();
+
+            try {
+                const response = await fetch(`${DASHBOARD_URL}/dashboard/data?${params.toString()}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+                if (!result.success) throw new Error(result.error || 'Unknown error');
+
+                const data = result.data;
+                updateStatistics(data);
+                updateMainChart(data);
+                updateSuccessChart(data);
+                updateFileSizeChart(data);
+                updateVehicleChart(data);
+            } catch (err) {
+                ['mainChart', 'successChart', 'fileSizeChart', 'vehicleChart'].forEach(hideChartLoading);
+                console.error('Charts load error:', err);
+                showToast('Failed to load charts: ' + err.message, 'danger');
+            }
+        }
+
+        // Step 2: load the paginated table (separate request, does not block chart paint)
+        async function loadTablePage(page = 1) {
+            tableCurrentPage = page;
+            showTableLoading(true);
+            const params = getFilterParams();
+            params.append('page', page);
+            params.append('pageSize', TABLE_PAGE_SIZE);
+
+            try {
+                const response = await fetch(`${DASHBOARD_URL}/dashboard/table?${params.toString()}`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const result = await response.json();
+                if (!result.success) throw new Error(result.error || 'Unknown error');
+
+                tableTotalPages = result.totalPages;
+                renderTablePage(result.data, result.page, result.totalRows, result.totalPages);
+            } catch (err) {
+                console.error('Table load error:', err);
+                document.getElementById('tableBody').innerHTML =
+                    `<tr><td colspan="100%" class="text-center text-danger">Failed to load table: ${err.message}</td></tr>`;
+            } finally {
+                showTableLoading(false);
+            }
+        }
+
+        // Main entry: charts render first, then table loads in the background
+        function loadDashboardData() {
+            tableCurrentPage = 1;
+            loadCharts().then(() => loadTablePage(1));
+        }
+
+        // ── Filters ──────────────────────────────────────────────────────────────
 
         async function renderFilters() {
             const filtersContainer = document.getElementById('filtersContainer');
-            filtersContainer.innerHTML = ''; // Clear existing filters
+            filtersContainer.innerHTML = '';
 
-            const addFilter = (html) => {
+            const addFilter = html => {
                 const col = document.createElement('div');
                 col.className = 'col-md-4';
                 col.innerHTML = html;
@@ -591,65 +696,54 @@
 
             if (currentView === 'hourly') {
                 addFilter('<label class="form-label">Select Date</label><input type="date" class="form-control" id="hourlyDate">');
-                addFilter(`
-                    <label class="form-label">Start Hour</label>
-                    <select class="form-select" id="startHour">
-                        <option value="">All Day</option>
-                        ${Array.from({length: 24}, (_, i) => `<option value="${String(i).padStart(2, '0')}">${moment(String(i).padStart(2, '0'), "HH").format("hh:00 A")}</option>`).join('')}
-                    </select>
-                `);
-                addFilter(`
-                    <label class="form-label">End Hour</label>
-                    <select class="form-select" id="endHour">
-                        <option value="">All Day</option>
-                        ${Array.from({length: 24}, (_, i) => `<option value="${String(i).padStart(2, '0')}">${moment(String(i).padStart(2, '0'), "HH").format("hh:00 A")}</option>`).join('')}
-                    </select>
-                `);
+                addFilter(`<label class="form-label">Start Hour</label><select class="form-select" id="startHour">
+                    <option value="">All Day</option>
+                    ${Array.from({length: 24}, (_, i) => `<option value="${String(i).padStart(2,'0')}">${moment(String(i).padStart(2,'0'),'HH').format('hh:00 A')}</option>`).join('')}
+                </select>`);
+                addFilter(`<label class="form-label">End Hour</label><select class="form-select" id="endHour">
+                    <option value="">All Day</option>
+                    ${Array.from({length: 24}, (_, i) => `<option value="${String(i).padStart(2,'0')}">${moment(String(i).padStart(2,'0'),'HH').format('hh:00 A')}</option>`).join('')}
+                </select>`);
             } else if (currentView === 'daily') {
-                 addFilter('<label class="form-label">Start Date</label><input type="date" class="form-control" id="dailyStartDate">');
-                 addFilter('<label class="form-label">End Date</label><input type="date" class="form-control" id="dailyEndDate">');
+                addFilter('<label class="form-label">Start Date</label><input type="date" class="form-control" id="dailyStartDate">');
+                addFilter('<label class="form-label">End Date</label><input type="date" class="form-control" id="dailyEndDate">');
             } else if (currentView === 'monthly') {
-                addFilter(`
-                    <label class="form-label">Select Month</label>
-                    <input type="month" class="form-control" id="monthlyDate">
-                `);
+                addFilter('<label class="form-label">Select Month</label><input type="month" class="form-control" id="monthlyDate">');
             } else if (currentView === 'yearly') {
-                addFilter(`
-                    <label class="form-label">Select Year</label>
-                    <input type="number" class="form-control" id="yearlyDate" placeholder="YYYY" min="2020" max="2100">
-                `);
+                addFilter('<label class="form-label">Select Year</label><input type="number" class="form-control" id="yearlyDate" placeholder="YYYY" min="2020" max="2100">');
             }
 
-            // Common filters
-            const responseCameras = await fetch(`${DASHBOARD_URL}/dashboard/cameras`);
-            const cameraData = await responseCameras.json();
+            // Camera filter — use cached camera list to avoid re-fetching on every view switch
+            if (!cachedCameras) {
+                try {
+                    const r = await fetch(`${DASHBOARD_URL}/dashboard/cameras`);
+                    const d = await r.json();
+                    cachedCameras = d.success ? d.cameras : [];
+                } catch (_) {
+                    cachedCameras = [];
+                }
+            }
+
             let cameraOptions = '<option value="">All Cameras</option>';
-            if (currentView === 'daily') {
-                cameraOptions += '<option value="per_camera">Per Camera</option>';
-            }
-            if (cameraData.success) {
-                cameraData.cameras.forEach(cam => {
-                    cameraOptions += `<option value="${cam}">${cam}</option>`;
-                });
-            }
-             addFilter(`<label class="form-label">Camera</label><select class="form-select" id="cameraFilter">${cameraOptions}</select>`);
+            if (currentView === 'daily') cameraOptions += '<option value="per_camera">Per Camera</option>';
+            cachedCameras.forEach(cam => {
+                cameraOptions += `<option value="${cam}">${cam}</option>`;
+            });
+            addFilter(`<label class="form-label">Camera</label><select class="form-select" id="cameraFilter">${cameraOptions}</select>`);
 
-
-            
             setDefaultFilters();
         }
 
         function setDefaultFilters() {
-            const today = new Date();
+            const today    = new Date();
             const todayStr = today.toISOString().split('T')[0];
-
             if (currentView === 'hourly') {
                 document.getElementById('hourlyDate').value = todayStr;
             } else if (currentView === 'daily') {
                 const weekAgo = new Date(today);
                 weekAgo.setDate(today.getDate() - 7);
                 document.getElementById('dailyStartDate').value = weekAgo.toISOString().split('T')[0];
-                document.getElementById('dailyEndDate').value = todayStr;
+                document.getElementById('dailyEndDate').value   = todayStr;
             } else if (currentView === 'monthly') {
                 document.getElementById('monthlyDate').value = today.toISOString().slice(0, 7);
             } else if (currentView === 'yearly') {
@@ -657,133 +751,55 @@
             }
         }
 
-        function getFilterParams() {
-            const params = new URLSearchParams();
-            params.append('view', currentView);
+        // ── Event wiring ─────────────────────────────────────────────────────────
 
-            if (currentView === 'hourly') {
-                const date = document.getElementById('hourlyDate').value;
-                const startHour = document.getElementById('startHour').value;
-                const endHour = document.getElementById('endHour').value;
-                if (date) params.append('date', date);
-                if (startHour) params.append('startHour', startHour);
-                if (endHour) params.append('endHour', endHour);
-            } else if (currentView === 'daily') {
-                const startDate = document.getElementById('dailyStartDate').value;
-                const endDate = document.getElementById('dailyEndDate').value;
-                if (startDate) params.append('startDate', startDate);
-                if (endDate) params.append('endDate', endDate);
-            } else if (currentView === 'monthly') {
-                const month = document.getElementById('monthlyDate').value;
-                if(month) {
-                    params.append('startDate', `${month}-01`);
-                    const date = new Date(month);
-                    params.append('endDate', new Date(date.getFullYear(), date.getMonth() + 2, 0).toISOString().split('T')[0]);
-                }
-            } else if (currentView === 'yearly') {
-                const year = document.getElementById('yearlyDate').value;
-                if (year) {
-                    params.append('startDate', `${year}-01-01`);
-                    params.append('endDate', `${year}-12-31`);
-                }
-            }
-
-            const cameraFilter = document.getElementById('cameraFilter')?.value;
-            if (cameraFilter) params.append('cameraFilter', cameraFilter);
-            
-            return params;
-        }
-
-        async function loadDashboardData() {
-            const params = getFilterParams();
-            
-            try {
-                const response = await fetch(`${DASHBOARD_URL}/dashboard/data?${params.toString()}`);
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const data = await response.json();
-                console.log('Dashboard data received:', data);
-                
-                if (data.success) {
-                    updateStatistics(data.data);
-                    updateMainChart(data.data);
-                    updateSuccessChart(data.data);
-                    updateFileSizeChart(data.data);
-                    updateVehicleChart(data.data);
-                    updateDataTable(data.data);
-                    showToast('Dashboard data loaded successfully', 'success');
-                } else {
-                    console.error('API returned error:', data.error);
-                    showToast(`Failed to load dashboard data: ${data.error || 'Unknown error'}`, 'error');
-                }
-            } catch (error) {
-                console.error('Error loading dashboard data:', error);
-                showToast(`Failed to load dashboard data: ${error.message}`, 'error');
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', async function() {
-            // Initialize charts
+        document.addEventListener('DOMContentLoaded', async function () {
             initializeCharts();
-
             await renderFilters();
             loadDashboardData();
 
-            // View toggle buttons
             document.querySelectorAll('#viewToggle .btn').forEach(button => {
-                button.addEventListener('click', async function() {
+                button.addEventListener('click', async function () {
                     const view = this.dataset.view;
-                    if (view !== currentView) {
-                        currentView = view;
-                        
-                        // Update button states
-                        document.querySelectorAll('#viewToggle .btn').forEach(btn => btn.classList.remove('active'));
-                        this.classList.add('active');
-                        
-                        // Update chart title
-                        document.getElementById('mainChartTitle').textContent = 
-                            `${view.charAt(0).toUpperCase() + view.slice(1)} Files Processing Overview`;
-                        
-                        // Set default filters and load data
-                        await renderFilters();
-                        loadDashboardData();
-                    }
+                    if (view === currentView) return;
+                    currentView = view;
+                    document.querySelectorAll('#viewToggle .btn').forEach(btn => btn.classList.remove('active'));
+                    this.classList.add('active');
+                    document.getElementById('mainChartTitle').textContent =
+                        `${view.charAt(0).toUpperCase() + view.slice(1)} Files Processing Overview`;
+                    await renderFilters();
+                    loadDashboardData();
                 });
             });
 
-            // Apply filters button
-            document.getElementById('applyFilters').addEventListener('click', loadDashboardData);
+            document.getElementById('applyFilters').addEventListener('click', function () {
+                clearTimeout(applyFiltersDebounceTimer);
+                applyFiltersDebounceTimer = setTimeout(loadDashboardData, 300);
+            });
 
-            // Reset filters button
-            document.getElementById('resetFilters').addEventListener('click', async function() {
+            document.getElementById('resetFilters').addEventListener('click', async function () {
                 await renderFilters();
                 loadDashboardData();
             });
 
-            // Refresh button
             document.getElementById('refreshDashboard').addEventListener('click', loadDashboardData);
 
-            // Export listeners
-            document.getElementById('exportPdf').addEventListener('click', () => exportData('pdf'));
+            document.getElementById('exportPdf').addEventListener('click',  () => exportData('pdf'));
             document.getElementById('exportJson').addEventListener('click', () => exportData('json'));
-            document.getElementById('exportXml').addEventListener('click', () => exportData('xml'));
-            document.getElementById('exportOperationReport').addEventListener('click', () => exportOperationReport('json'));
+            document.getElementById('exportXml').addEventListener('click',  () => exportData('xml'));
+            document.getElementById('exportOperationReport').addEventListener('click',    () => exportOperationReport('json'));
             document.getElementById('exportOperationReportXml').addEventListener('click', () => exportOperationReport('xml'));
         });
 
         function exportData(format) {
             const params = getFilterParams();
             params.append('format', format);
-            const url = `${DASHBOARD_URL}/dashboard/export?${params.toString()}`;
-            window.open(url, '_blank');
+            window.open(`${DASHBOARD_URL}/dashboard/export?${params.toString()}`, '_blank');
         }
 
         function exportOperationReport(format) {
             const date = document.getElementById('hourlyDate')?.value || new Date().toISOString().split('T')[0];
-            const url = `${DASHBOARD_URL}/dashboard/operation-report?format=${format}&date=${date}`;
-            window.open(url, '_blank');
+            window.open(`${DASHBOARD_URL}/dashboard/operation-report?format=${format}&date=${date}`, '_blank');
         }
     </script>
 {% endblock %} 
