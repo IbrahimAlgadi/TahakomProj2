@@ -1,0 +1,71 @@
+---
+description: PowerShell-safe shell command patterns — heredoc, multiline strings, git commits
+alwaysApply: true
+---
+
+# PowerShell Shell Command Rules
+
+The shell in this workspace is **PowerShell on Windows**. Bash syntax does NOT work here.
+
+## Heredoc / Multiline Strings
+
+PowerShell does NOT support bash heredoc (`<<'EOF' ... EOF`).
+
+### Git commit with multiline message
+
+❌ BAD — bash heredoc (breaks in PowerShell):
+```bash
+git commit -m "$(cat <<'EOF'
+My message
+EOF
+)"
+```
+
+✅ GOOD — PowerShell here-string piped to `git commit -F -`:
+```powershell
+$msg = @"
+Subject line here
+
+- Bullet one
+- Bullet two
+"@
+$msg | git commit -F -
+```
+
+## General multiline strings
+
+Use PowerShell here-strings (`@" ... "@`) — the closing `"@` must be at column 0:
+
+```powershell
+$text = @"
+line one
+line two
+"@
+```
+
+## Unix/Linux commands that do NOT exist in PowerShell
+
+NEVER use these in the Shell tool — use the alternatives shown:
+
+| ❌ Linux command | ✅ PowerShell / Cursor tool alternative |
+|---|---|
+| `head -N file` | Use the **Read tool** with `limit: N` |
+| `tail -N file` | Use the **Read tool** with `offset: -N` |
+| `cat file` | Use the **Read tool** |
+| `grep pattern file` | Use the **Grep tool** |
+| `find . -name "*.js"` | Use the **Glob tool** |
+| `touch file` | `New-Item -ItemType File file` |
+| `rm file` | `Remove-Item file` |
+| `cp src dst` | `Copy-Item src dst` |
+| `mv src dst` | `Move-Item src dst` |
+| `mkdir -p dir` | `New-Item -ItemType Directory -Force dir` |
+| `echo "text" > file` | Use the **Write tool** |
+| `sed`, `awk` | Use the **StrReplace tool** or **Read + Write** |
+| `export VAR=val` | `$env:VAR = "val"` |
+
+**Rule**: If a task only needs to read or search a file, always prefer the dedicated Cursor tools (Read, Grep, Glob) over any shell command. Reserve the Shell tool for commands that genuinely require the terminal (git, npm, node, etc.).
+
+## Other common pitfalls
+
+- Use `;` not `&&` to chain commands (or use separate Shell calls)
+- Quoting: use double quotes `"..."` for strings with variables; single quotes `'...'` for literals
