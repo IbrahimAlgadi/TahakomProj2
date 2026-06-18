@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-17
+Last updated: 2026-06-18
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -166,10 +166,13 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 |---|---|
 | PM2 name | `DashboardReportingBackend` |
 | Port | `8454` |
-| Dependencies | monitorConnectedExternalDrivesMicroservice |
-| DB reads | All tables (via route handlers) |
+| Dependencies | monitorConnectedExternalDrivesMicroservice, Redis |
+| DB reads | All tables (via route handlers); dashboard chart queries use `mv_files_daily/monthly/yearly[_agg]` materialized views; hourly view queries `files` directly via covering indexes |
+| Redis keys (write) | `dashboard:data:<hash>` — chart aggregate cache (TTL 60 s); busted on `POST /dashboard/refresh` |
 | Template engine | Nunjucks (views in `data_transfer_v2/views/`) |
 | WebSocket | `ws://localhost:8454` — events: handleAutoTransfer, devices, deviceHistory, handleAutoVideoTransfer, processes, startStorageTransfer |
+| Key endpoints | `GET /dashboard/data` (chart aggregates, Redis-cached), `GET /dashboard/table` (paginated detail rows, uncached), `POST /dashboard/refresh` (cache bust + concurrent MV refresh) |
+| Background task | Refreshes all 6 dashboard MVs concurrently on startup and on a timer (`DASHBOARD_MV_REFRESH_INTERVAL_MS`, default 5 min) |
 | Purpose | Main web UI — Express server serving the operator dashboard; provides REST API + WebSocket for real-time monitoring, config management, and manual transfer control |
 
 ---

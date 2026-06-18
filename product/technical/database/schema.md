@@ -2,7 +2,7 @@
 
 **Database: `tahakom_transfer`** (localhost:5432)  
 **Schema source**: `scripts/migration/DatabaseMigration.js`  
-Last updated: 2026-06-17
+Last updated: 2026-06-18
 
 > The `auto` database (also on localhost:5432) is accessed only by the `postgresql-securos_auto-mcp` Cursor tool. No application code connects to it. Its schema is not documented here — inspect via MCP if needed.
 
@@ -70,14 +70,24 @@ ALTER TABLE files ADD COLUMN updated_at TIMESTAMP DEFAULT NOW();
 -- Also adds update trigger for updated_at
 ```
 
-**Indexes** (commented out in migration — not currently active):
+**Indexes** (active — migration L187-196):
 
 ```sql
--- CREATE INDEX idx_files_ts ON files(ts);            -- L183-184 (commented out)
--- CREATE INDEX idx_files_grouping ON files(...);      -- L185-187 (commented out)
+-- Covering partial index: enables index-only scans for all dashboard date-range,
+-- hourly, monthly, and yearly GROUP BY / FILTER patterns on non-deleted rows.
+CREATE INDEX IF NOT EXISTS idx_files_dashboard_date
+  ON public.files (date)
+  INCLUDE (cam_id, plate_num, file_size, image_export_done_date_time, time)
+  WHERE deleted = false;
+
+-- Supplemental index for the dashboard "Per Camera" daily path.
+CREATE INDEX IF NOT EXISTS idx_files_dashboard_cam_date
+  ON public.files (cam_id, date)
+  INCLUDE (plate_num, file_size, image_export_done_date_time)
+  WHERE deleted = false;
 ```
 
-> **Tech debt T-1**: These indexes are disabled. At high plate-volume, queries that scan by `ts`, `deleted`, `file_size` will do sequential scans. Recommend enabling or tuning indexes.
+> **Note on live-DB upgrades**: when adding these indexes to a production table that already has data, run the two `CREATE INDEX` statements manually using `CONCURRENTLY` (outside of any transaction) instead of re-running the full migration.
 
 **`export_retry_log_object` schema** (each element in the JSONB array):
 
@@ -328,6 +338,36 @@ CREATE FUNCTION update_transfer_queue_job_updated_at() RETURNS TRIGGER ...
 
 ---
 
+## Dashboard Materialized Views
+
+Six pre-aggregation views introduced in the 2026-06-18 performance overhaul. They are refreshed concurrently by `DashboardReportingBackend.js` on a timer (default every 5 minutes, configurable via `DASHBOARD_MV_REFRESH_INTERVAL_MS`) and on every `POST /dashboard/refresh` call.
+
+| View | Group key | Unique index | Used by |
+|---|---|---|---|
+| `mv_files_daily` | `(date, cam_id)` | `idx_mv_files_daily_pk` | Dashboard daily Per-Camera view |
+| `mv_files_daily_agg` | `(date)` | `idx_mv_files_daily_agg_pk` | Dashboard daily All-Cameras view |
+| `mv_files_monthly` | `(period='YYYY-MM', cam_id)` | `idx_mv_files_monthly_pk` | Dashboard monthly Per-Camera view |
+| `mv_files_monthly_agg` | `(period='YYYY-MM')` | `idx_mv_files_monthly_agg_pk` | Dashboard monthly All-Cameras view |
+| `mv_files_yearly` | `(period='YYYY', cam_id)` | `idx_mv_files_yearly_pk` | Dashboard yearly Per-Camera view |
+| `mv_files_yearly_agg` | `(period='YYYY')` | `idx_mv_files_yearly_agg_pk` | Dashboard yearly All-Cameras view |
+
+Each view exposes: `total_vehicles_count`, `total_files_count`, `success_produced_count`, `failed_produce_count`, `failed_produced_percentage`, `total_file_size_in_gb`.
+
+> Hourly dashboard data is never pre-aggregated — it always hits the `files` table directly via the covering index.
+
+**Concurrent refresh** (run manually or called from backend):
+
+```sql
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_files_daily;
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_files_daily_agg;
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_files_monthly;
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_files_monthly_agg;
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_files_yearly;
+REFRESH MATERIALIZED VIEW CONCURRENTLY mv_files_yearly_agg;
+```
+
+---
+
 ## Key Query Patterns
 
 ### Find stuck exports (file_size=0, not yet exported)
@@ -363,6 +403,29 @@ SELECT
 FROM files
 WHERE deleted = false
   AND pending_deletion = false;
+```
+
+### Dashboard daily summary (all cameras — uses MV)
+
+```sql
+SELECT date, total_vehicles_count, total_files_count,
+       success_produced_count, failed_produce_count,
+       failed_produced_percentage, total_file_size_in_gb
+FROM mv_files_daily_agg
+WHERE date BETWEEN $1 AND $2
+ORDER BY date;
+```
+
+### Dashboard daily summary (per camera — uses MV)
+
+```sql
+SELECT date, cam_id, total_vehicles_count, total_files_count,
+       success_produced_count, failed_produce_count,
+       failed_produced_percentage, total_file_size_in_gb
+FROM mv_files_daily
+WHERE cam_id = $1
+  AND date BETWEEN $2 AND $3
+ORDER BY date;
 ```
 
 ### Retry backlog summary

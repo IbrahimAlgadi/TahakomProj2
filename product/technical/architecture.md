@@ -1,7 +1,7 @@
 # Technical Architecture
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-17
+Last updated: 2026-06-18
 
 > For a living service/table map, see [PROJECT_MAP.md](../../PROJECT_MAP.md).  
 > For database schema details, see [database/schema.md](database/schema.md).  
@@ -247,3 +247,4 @@ PM2 services are started with `--require startup.js` (see `ecosystem.config.js` 
 | File I/O during transfer | Sequential copy per queue item | Increase `p-limit` concurrency in transfer managers |
 | IMAGE_EXPORT queue depth | Load-balanced across N exporters | Add more IMAGE_EXPORT objects in SecurOS config |
 | Disk capacity | FIFO + retention via ExportDirectoryControlV3 | Tune `maxCapacity` and `retentionDays` in dataTransferConfig.json |
+| Dashboard chart query latency at high `files` volume | Six materialized views (`mv_files_daily/monthly/yearly[_agg]`) pre-aggregate data; `GET /dashboard/data` Redis-cached (TTL 60 s); covering partial indexes for live hourly queries | Decrease MV refresh interval (`DASHBOARD_MV_REFRESH_INTERVAL_MS`); add `pg_cron` for finer scheduling |

@@ -273,7 +273,7 @@ services/
 | `/auto-transfer` | routes/autoTransferRoutes.js | transfer_queue_job, transfer_queue; WS: handleAutoTransfer |
 | `/ftp-transfer` | routes/ftpTransferRoutes.js | ftp_image_transfer_queue_*; WS: handleFtpTransfer |
 | `/manual-transfer` | routes/manualTransferRoutes.js | files, transfer_job, transfer_job_log |
-| `/dashboard` | routes/dashboardRoutes.js | files (read), iss_media_files (read) |
+| `/dashboard` | routes/dashboardRoutes.js | `files` (live queries via covering indexes), `mv_files_daily/monthly/yearly[_agg]` (pre-aggregated chart data); `GET /dashboard/data` Redis-cached (TTL 60 s), `GET /dashboard/table` paginated detail rows, `POST /dashboard/refresh` busts cache + triggers concurrent MV refresh |
 | `/devices` | routes/connectedDevicesRoutes.js | device_connections; WS: devices, deviceHistory |
 | `/media-files` | routes/mediaFilesRoutes.js | iss_media_files |
 | `/processes` | routes/processMonitorRoutes.js | PM2 state (Redis); WS: processes |
@@ -291,6 +291,7 @@ services/
 | `PROCESS_MONITOR_UPDATE` (pub/sub) | monitorSpecialProcesses | DashboardReportingBackend |
 | `image_file_transfer_queue` | (legacy FileTransferRedisService — archived) | Archived |
 | `image_file_transfer_result_queue` | (legacy — archived) | Archived |
+| `dashboard:data:<hash>` | DashboardReportingBackend (`/dashboard/data`) | Browser dashboard chart load — TTL 60 s; busted on `POST /dashboard/refresh` |
 
 ### Database Summary
 
@@ -355,7 +356,7 @@ These archived files contain detail that should eventually be verified and lifte
 
 | # | Item | Location | Priority |
 |---|---|---|---|
-| T-1 | `files` table indexes commented out | `DatabaseMigration.js` L183–187 | Medium — `idx_files_ts`, `idx_files_grouping` not active; may hurt transfer query performance at scale |
+| ~~T-1~~ | ~~`files` table indexes commented out~~ | ~~`DatabaseMigration.js`~~ | **Resolved** (Jun 2026) — two covering partial indexes `idx_files_dashboard_date` + `idx_files_dashboard_cam_date` are active; six dashboard materialized views (`mv_files_daily/monthly/yearly[_agg]`) added for pre-aggregated chart queries |
 | T-2 | `pending_deletion` + `updated_at` added at runtime | `ExportDirectoryControlV3.js` L587–628 | Low — schema alterations should be in migration, not in a script loop |
 | T-3 | Inline JSONB retry log on `files` | `files.export_retry_log_object` | Low — bloat risk at high plate-volume; consider extracting to a dedicated `export_retry_log` table |
 | T-4 | `transfer_job` / `transfer_job_log` (legacy manual flow) | `routes/mainControlRoutes.js`, `manualTransferRoutes.js` | Low — assess whether this flow is still used or fully superseded by `transfer_queue_job` |
