@@ -6,7 +6,7 @@ const path = require('path');
 const encryptionService = require('./utils/encryptionService');
 const { sleep } = require('./utils.js');
 const { CONFIG_STATE_KEY, CONNECTED_DRIVE_LIST } = require('./redisKeyStore.js');
-const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
+const { createLogger, runWithTrace, newTraceId, addTraceField } = require('./utils/logger');
 
 // Import external classes
 const VideoProcessor = require('./services/video-transfer/processors/VideoProcessor');
@@ -164,7 +164,7 @@ class UnifiedVideoTransferService extends EventEmitter {
             this.nextScheduledRun = this._calculateNextScheduledRun(this.scheduleConfig);
         }
 
-        console.log('[VIDEO_SERVICE_SCHEDULE] _updateScheduleStatus: Status: ' + this.currentScheduleStatus + ', Next run: ' + this.nextScheduledRun + ', In window: ' + this.isInScheduledWindow);
+        logger.info('[VIDEO_SERVICE_SCHEDULE] _updateScheduleStatus: Status: ' + this.currentScheduleStatus + ', Next run: ' + this.nextScheduledRun + ', In window: ' + this.isInScheduledWindow);
     }
 
     /**
@@ -320,7 +320,7 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Handle files ready for processing
      */
     _handleFilesReady = async (files, job) => {
-        console.log(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Processing ${files.length} files ready for video creation for job ${job.id}`);
+        logger.info(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Processing ${files.length} files ready for video creation for job ${job.id}`);
         
         try {
             // Mark files as being processed
@@ -329,22 +329,22 @@ class UnifiedVideoTransferService extends EventEmitter {
             // Group files by camera
             const groups = this.processingStateManager.groupFilesByCamera(files, job.id);
             
-            console.log(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Job ${job.id} - Created ${groups.length} groups from ${files.length} files`);
+            logger.info(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Job ${job.id} - Created ${groups.length} groups from ${files.length} files`);
             
             for (const group of groups) {
-                console.log(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Job ${job.id} - Processing group for camera ${group.camera_id}, date ${group.date}, interval ${group.interval_start}-${group.interval_end}`);
+                logger.info(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Job ${job.id} - Processing group for camera ${group.camera_id}, date ${group.date}, interval ${group.interval_start}-${group.interval_end}`);
                 
                 // Check for duplicate video
                 const isDuplicate = await this.processingStateManager.checkDuplicateVideo(group, job.id);
                 if (isDuplicate) {
-                    console.log(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Job ${job.id} - Skipping duplicate video for camera ${group.camera_id}, interval ${group.interval_start}-${group.interval_end}`);
+                    logger.info(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Job ${job.id} - Skipping duplicate video for camera ${group.camera_id}, interval ${group.interval_start}-${group.interval_end}`);
                     continue;
                 }
                 
                 // Check space before processing using SpaceValidator
                 const spaceValidation = this.spaceValidator.validateProcessingSpace(group.files);
                 if (!spaceValidation.canProceed) {
-                    console.log(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Job ${job.id} - ${spaceValidation.reason}: ${spaceValidation.estimatedSpaceMB}MB needed`);
+                    logger.info(`[EVENT] UnifiedVideoTransferService._handleFilesReady: Job ${job.id} - ${spaceValidation.reason}: ${spaceValidation.estimatedSpaceMB}MB needed`);
                     continue;
                 }
                 
@@ -363,7 +363,7 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Handle video creation completion
      */
     _handleVideoCreated = async (videoData, jobId) => {
-        console.log(`[EVENT] UnifiedVideoTransferService._handleVideoCreated: Video created: ${videoData.videoName} for job ${jobId}`);
+        logger.info(`[EVENT] UnifiedVideoTransferService._handleVideoCreated: Video created: ${videoData.videoName} for job ${jobId}`);
         
         try {
             // // Add video to transfer queue using JobManager
@@ -379,7 +379,7 @@ class UnifiedVideoTransferService extends EventEmitter {
             const sourceFiles = videoData.sourceFileIds.map(id => ({ id }));
             await this.processingStateManager.removeProcessingMarkers(sourceFiles);
             
-            console.log(`[EVENT] UnifiedVideoTransferService._handleVideoCreated: Video queued for transfer: ${videoData.videoName}`);
+            logger.info(`[EVENT] UnifiedVideoTransferService._handleVideoCreated: Video queued for transfer: ${videoData.videoName}`);
             
         } catch (error) {
             this.emit('error', error);
@@ -432,7 +432,7 @@ class UnifiedVideoTransferService extends EventEmitter {
 
         if (this.shouldStop) return;
         if (this.pauseVideoTransferFromConfig) {
-            console.log('[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: Video transfer is disabled in config');
+            logger.info('[PROCESSING] UnifiedVideoTransferService._runProcessingLoop: Video transfer is disabled in config');
             setTimeout(() => this._runProcessingLoop(), 2000);
             return;
         }
@@ -481,8 +481,8 @@ class UnifiedVideoTransferService extends EventEmitter {
             
             if (existingJobs.length > 0) {
                 const activeJob = existingJobs[0];
-                await runWithTrace({ traceId: newTraceId(), jobId: activeJob.batch_id, jobStatus: activeJob.status }, async () => {
-                    logger.info('[PROCESSING] Found active job', { jobId: activeJob.batch_id, status: activeJob.status });
+                await runWithTrace({ traceId: activeJob.batch_id, jobId: activeJob.batch_id, jobDbId: activeJob.id, jobStatus: activeJob.status }, async () => {
+                    logger.info('[PROCESSING] Found active job', { jobId: activeJob.batch_id, jobDbId: activeJob.id, status: activeJob.status, phase: 'session-resume' });
                     await this._handleJobProcessing(activeJob);
                 });
                 return;
@@ -495,8 +495,8 @@ class UnifiedVideoTransferService extends EventEmitter {
                 return;
             }
 
-            await runWithTrace({ traceId: newTraceId(), jobId: newJob.batch_id, jobStatus: 'created' }, async () => {
-                logger.info(`[PROCESSING] Created new job: ${newJob.batch_id}`);
+            await runWithTrace({ traceId: newJob.batch_id, jobId: newJob.batch_id, jobDbId: newJob.id, jobStatus: 'created' }, async () => {
+                logger.info(`[PROCESSING] Created new job: ${newJob.batch_id}`, { jobId: newJob.batch_id, jobDbId: newJob.id, phase: 'session-start', cameras: this.ISS_MEDIA_CAMERAS });
                 await this._handleJobProcessing(newJob);
             });
             
@@ -530,7 +530,7 @@ class UnifiedVideoTransferService extends EventEmitter {
             cameraJobPromises.push(singleCameraJobPromise);
         }
 
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Waiting for all cameras to be processed`);
+        logger.info(`[PROCESSING] Job ${job.id} - Waiting for all cameras to be processed`);
         await Promise.all(cameraJobPromises);
         logger.info(`[PROCESSING] Job ${job.id} - All cameras processed`);
         
@@ -538,16 +538,16 @@ class UnifiedVideoTransferService extends EventEmitter {
     }
 
     async _processSingleCameraJob(job, cameraId) {
-        console.log(`[PROCESSING] UnifiedVideoTransferService._processSingleCameraJob: Processing camera ${cameraId} for job ${job.id}`);
-        
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Video in transfer queue for camera ${cameraId}`);
+        addTraceField('camera', cameraId);
+        logger.info(`[PROCESSING] Processing camera ${cameraId} for job ${job.id}`, { phase: 'camera-start' });
+
+        logger.info(`[PROCESSING] Checking transfer queue for camera ${cameraId}`, { phase: 'camera-start' });
 
         let videoInTransferQueue = await this.jobManager.getVideoInTransferQueue(job.id, cameraId);
-        // console.log(videoInTransferQueue);
         if (videoInTransferQueue) {
-            console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Video already in transfer queue for camera ${cameraId}`);
+            logger.info(`[PROCESSING] Video already in transfer queue for camera ${cameraId}`, { queueStatus: videoInTransferQueue.status });
             if (videoInTransferQueue.status === 'pending') {
-                this.emit('startTransferToStorage', job.id, cameraId);
+                this.emit('startTransferToStorage', job.id, cameraId, job.batch_id);
             }
             return;
         }
@@ -557,11 +557,11 @@ class UnifiedVideoTransferService extends EventEmitter {
         const cameraConvertedCount = cameraFileStatusCounts.converted || 0;
         const cameraGroupedCount = cameraFileStatusCounts.grouped || 0;
 
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Camera ${cameraId}: ${cameraPendingCount} pending, ${cameraConvertedCount} converted, ${cameraGroupedCount} grouped`);
+        logger.info(`[PROCESSING] Camera ${cameraId}: ${cameraPendingCount} pending, ${cameraConvertedCount} converted, ${cameraGroupedCount} grouped`, { phase: 'buffer-status', cameraPendingCount, cameraConvertedCount, cameraGroupedCount });
         const currentCount = cameraPendingCount + cameraConvertedCount + cameraGroupedCount;
         const convertedGroupeCount = cameraGroupedCount + cameraConvertedCount;
         
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Camera ${cameraId}: ${convertedGroupeCount}/${this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT} files in buffer`);
+        logger.info(`[PROCESSING] Camera ${cameraId}: ${convertedGroupeCount}/${this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT} files in buffer`, { phase: 'buffer-status', progress: convertedGroupeCount, target: this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT });
 
         // Publish camera progress metrics
         this.publishVideoTransferMetrics('camera_progress', {
@@ -577,22 +577,17 @@ class UnifiedVideoTransferService extends EventEmitter {
         });
 
         if (convertedGroupeCount < this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
-            // Request additional files for this camera and job
-            console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Requesting additional files for camera ${cameraId}`);
+            addTraceField('phase', 'buffer-fill');
+            logger.info(`[PROCESSING] Camera ${cameraId}: requesting additional files`, { phase: 'buffer-fill' });
             
             if (cameraPendingCount > 0) {
-                console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Camera ${cameraId} has ${cameraPendingCount} pending files`);
-                // get pending records 
+                logger.info(`[PROCESSING] Camera ${cameraId} has ${cameraPendingCount} pending files to convert`, { phase: 'buffer-fill' });
                 const buffereRecords = await this.jobManager.requestPendingRecordsForCamera(cameraId, job.id);
-                console.log({
-                    buffereRecords
-                });
-                console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Camera ${cameraId} has ${buffereRecords.length} pending records`);
+                logger.info(`[PROCESSING] Camera ${cameraId}: ${buffereRecords.length} pending records`, { phase: 'buffer-fill', recordCount: buffereRecords.length });
                 for (const record of buffereRecords) {
                     const file = await this.jobManager.getMediaFileById(record.source_file_id);
                     if (!file) {
-                        console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - File not found for record ${record.id}`);
-                        // should clean the record from buffer as pending...
+                        logger.warn(`[PROCESSING] File not found for buffer record ${record.id}`, { phase: 'buffer-fill', bufferId: record.id });
                         await this.bufferManager.markBufferEntryAsFailed(record.id, 'File not found');
                         continue;
                     }
@@ -607,7 +602,7 @@ class UnifiedVideoTransferService extends EventEmitter {
                 );
 
                 if (additionalFiles.length > 0) {
-                    console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Adding ${additionalFiles.length} files for camera ${cameraId} to processing queue`);
+                    logger.info(`[PROCESSING] Camera ${cameraId}: adding ${additionalFiles.length} files to processing queue`, { phase: 'buffer-fill', fileCount: additionalFiles.length });
                     
                     await this.processingStateManager.markFilesAsProcessing(additionalFiles);
 
@@ -617,11 +612,9 @@ class UnifiedVideoTransferService extends EventEmitter {
                         );
                         await this.bufferManager.convertSingleFile(file, bufferRecord, null);
                     }
-                    
-                    // Mark files as being processed
 
                 } else {
-                    console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - No additional files available for camera ${cameraId}`);
+                    logger.info(`[PROCESSING] Camera ${cameraId}: no additional files available`, { phase: 'buffer-fill' });
                 }
 
             }
@@ -630,17 +623,17 @@ class UnifiedVideoTransferService extends EventEmitter {
         }
 
         if (cameraPendingCount > 0) {
-            // There are camera files require conversion
             if (job.status !== 'pending') {
                 await this.jobManager.updateJobStatus(job.id, 'pending');
             }
-            console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - is processing pending files`);
+            logger.info(`[PROCESSING] Camera ${cameraId}: processing pending conversions`, { phase: 'buffer-fill' });
         }
         
         if (cameraConvertedCount >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
+            addTraceField('phase', 'group');
             const groupName = await this.processingStateManager.groupFilesByCamera(cameraId, job.id);
             if (groupName) {
-                console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Grouped files for camera ${cameraId} - ${groupName}`);
+                logger.info(`[PROCESSING] Camera ${cameraId}: grouped files`, { phase: 'group', groupName });
             }
         }
 
@@ -648,29 +641,34 @@ class UnifiedVideoTransferService extends EventEmitter {
             let videoInTransferQueue = false;
 
             videoInTransferQueue = await this.jobManager.getVideoInTransferQueue(job.id, cameraId);
-            console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Video in transfer queue for camera ${cameraId}`);
-            // console.log(videoInTransferQueue);
+            logger.info(`[PROCESSING] Camera ${cameraId}: checking transfer queue after grouping`, { phase: 'pre-concat', hasQueue: !!videoInTransferQueue });
 
             if (videoInTransferQueue) {
                 if (videoInTransferQueue.status === 'pending') {
-                    console.log(`[PROCESSING] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - Video already in transfer queue for camera ${cameraId}`);
-                    this.emit('startTransferToStorage', job.id, cameraId);
+                    logger.info(`[PROCESSING] Camera ${cameraId}: video pending in transfer queue, triggering transfer`, { phase: 'pre-concat' });
+                    this.emit('startTransferToStorage', job.id, cameraId, job.batch_id);
                 }
                 return;
             }
 
-            // Check space before processing using SpaceValidator
             const spaceValidation = this.spaceValidator.validateProcessingSpace();
             if (!spaceValidation.canProceed) {
-                console.log(`[EVENT] UnifiedVideoTransferService._handleJobProcessing: Job ${job.id} - ${spaceValidation.reason}: ${spaceValidation.estimatedSpaceMB}MB needed`);
+                logger.warn(`[PROCESSING] Camera ${cameraId}: insufficient space for video build`, { phase: 'pre-concat', reason: spaceValidation.reason, estimatedSpaceMB: spaceValidation.estimatedSpaceMB });
                 return;
             }
-            // There are enough converted files for this camera to do the video creation
+
+            addTraceField('phase', 'concat');
+            const t0 = Date.now();
             const videoData = await this.bufferManager.createVideoFromBuffer(job.id, cameraId);
+            const buildDurationMs = Date.now() - t0;
 
-            console.log(`[EVENT] UnifiedVideoTransferService._handleJobProcessing: Video created: ${videoData.videoName} for job ${job.id}`);
+            if (!videoData) {
+                logger.error(`[PROCESSING] Camera ${cameraId}: video build returned null`, { phase: 'concat', durationMs: buildDurationMs });
+                return;
+            }
 
-            // Publish video creation metrics
+            logger.info(`[EVENT] Video created for camera ${cameraId}`, { phase: 'concat', videoName: videoData.videoName, durationMs: buildDurationMs, groupKey: videoData.group_key });
+
             this.publishVideoTransferMetrics('video_created', {
                 jobId: job.batch_id,
                 cameraId: cameraId,
@@ -680,22 +678,15 @@ class UnifiedVideoTransferService extends EventEmitter {
             });
 
             try {
-                // Add video to transfer queue using JobManager
                 await this.jobManager.addVideoToTransferQueue(videoData, job.id);
-                
-                // Mark camera as processed
                 await this.jobManager.addCameraToProcessed(job.id, videoData.camera_id);
-                
-                // Update job stats
                 await this.jobManager.updateJobStatsToTransfered(job.id);
-                
-                // Remove processing markers for source files for this camera
                 const sourceFiles = videoData.sourceFileIds.map(id => ({ id }));
                 await this.processingStateManager.removeProcessingMarkers(sourceFiles);
                 
-                console.log(`[EVENT] UnifiedVideoTransferService._handleJobProcessing: Video queued for transfer: ${videoData.videoName}`);
+                logger.info(`[EVENT] Video queued for transfer: ${videoData.videoName}`, { phase: 'concat' });
 
-                this.emit('startTransferToStorage', job.id, videoData.camera_id);
+                this.emit('startTransferToStorage', job.id, videoData.camera_id, job.batch_id);
                 
             } catch (error) {
                 this.emit('error', error);
@@ -709,18 +700,18 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Handle job with 'pending' or 'processing' status - conversion phase
      */
     async _handlePendingProcessingJobStatus(job) {
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handlePendingProcessingJobStatus: Handling ${job.status} job: ${job.batch_id}`);
+        logger.info(`[PROCESSING] UnifiedVideoTransferService._handlePendingProcessingJobStatus: Handling ${job.status} job: ${job.batch_id}`);
         
         // Check if job is actually complete
         const isComplete = await this.jobManager.checkJobCompletion(job.id) && await this.jobManager.checkJobVideoTransferCompletion(job.id);
         
         if (isComplete) {
-            console.log(`[PROCESSING] UnifiedVideoTransferService._handlePendingProcessingJobStatus: Job ${job.batch_id} is complete - updating to transferred status`);
+            logger.info(`[PROCESSING] UnifiedVideoTransferService._handlePendingProcessingJobStatus: Job ${job.batch_id} is complete - updating to transferred status`);
             await this.jobManager.updateJobStatus(job.id, 'transferred');
             return null;
         }
         
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handlePendingProcessingJobStatus: Job ${job.batch_id} is not complete - waiting for processing to finish`);
+        logger.info(`[PROCESSING] UnifiedVideoTransferService._handlePendingProcessingJobStatus: Job ${job.batch_id} is not complete - waiting for processing to finish`);
         return null; // Wait for completion
     }
 
@@ -728,12 +719,12 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Handle job with 'transferring' status
      */
     async _handleTransferringJobStatus(job) {
-        console.log(`[PROCESSING] UnifiedVideoTransferService._handleTransferringJobStatus: Job ${job.batch_id} is transferring - checking completion`);
+        logger.info(`[PROCESSING] UnifiedVideoTransferService._handleTransferringJobStatus: Job ${job.batch_id} is transferring - checking completion`);
         
         const isComplete = await this.jobManager.checkJobCompletion(job.id);
         if (isComplete) {
             await this.jobManager.updateJobStatus(job.id, 'transferred');
-            console.log(`[PROCESSING] UnifiedVideoTransferService._handleTransferringJobStatus: Job ${job.batch_id} transfer completed`);
+            logger.info(`[PROCESSING] UnifiedVideoTransferService._handleTransferringJobStatus: Job ${job.batch_id} transfer completed`);
         }
         
         return null; // Don't process new files during transfer
@@ -743,38 +734,38 @@ class UnifiedVideoTransferService extends EventEmitter {
      * Create new job if files are available for processing
      */
     async _createNewJobIfFilesAvailable() {
-        console.log('[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: Checking file availability before creating job...');
+        logger.info('[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: Checking file availability before creating job...');
 
         // ===== STEP 1: Check file availability BEFORE creating job =====
         let totalAvailableFiles = 0;
         const expectedCameras = this.ISS_MEDIA_CAMERAS.map(cam => cam.replace('CAM_', ''));
         
-        console.log(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: Checking availability for cameras: ${expectedCameras.join(', ')}`);
+        logger.info(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: Checking availability for cameras: ${expectedCameras.join(', ')}`);
         
         for (const cameraId of expectedCameras) {
             // Check how many files are available for this camera without creating a job
             const files = await this.jobManager.requestAdditionalFilesForCamera(cameraId, 0, 38, null);
             
             if (files.length === 0) {
-                console.log(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: No files available for camera ${cameraId}`);
+                logger.info(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: No files available for camera ${cameraId}`);
                 continue;
             }
             
-            console.log(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: Found ${files.length} available files for camera ${cameraId}`);
+            logger.info(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: Found ${files.length} available files for camera ${cameraId}`);
             totalAvailableFiles += files.length;
         }
         
         // ===== STEP 2: If no files available, don't create job - just return null =====
         if (totalAvailableFiles === 0) {
-            console.log(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: No files available across all cameras. Will retry in next cycle.`);
+            logger.info(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: No files available across all cameras. Will retry in next cycle.`);
             return null;
         }
         
         // ===== STEP 3: Files are available, now create the job =====
-        console.log(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: Found ${totalAvailableFiles} total files available. Creating new job...`);
+        logger.info(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: Found ${totalAvailableFiles} total files available. Creating new job...`);
         
         const newJob = await this.jobManager.createNewJobWithUUID();
-        console.log(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: ✓ Created new job: ${newJob.batch_id} (ID: ${newJob.id})`);
+        logger.info(`[PROCESSING] UnifiedVideoTransferService._createNewJobIfFilesAvailable: ✓ Created new job: ${newJob.batch_id} (ID: ${newJob.id})`);
         
         return newJob;
     }
@@ -782,7 +773,7 @@ class UnifiedVideoTransferService extends EventEmitter {
     /**
      * Start transfer to storage
      */
-    async _startTransferToStorageAsync(jobId, cameraId) {
+    async _startTransferToStorageAsync(jobId, cameraId, jobBatchId) {
 
         if (this.shouldStop) return;
         
@@ -815,8 +806,10 @@ class UnifiedVideoTransferService extends EventEmitter {
             return;
         }
 
-        await runWithTrace({ traceId: newTraceId(), jobId, camera: cameraId, fileName: fileToTransfer.video_file_name }, async () => {
-            logger.info('[TRANSFER TO STORAGE] Starting file transfer', { fileName: fileToTransfer.video_file_name });
+        const sessionTraceId = jobBatchId || newTraceId();
+        const t0Transfer = Date.now();
+        await runWithTrace({ traceId: sessionTraceId, jobId: sessionTraceId, jobDbId: jobId, camera: cameraId, fileName: fileToTransfer.video_file_name, phase: 'transfer', queueId: fileToTransfer.id }, async () => {
+            logger.info('[TRANSFER TO STORAGE] Starting file transfer', { fileName: fileToTransfer.video_file_name, fileSize: fileToTransfer.file_size });
             
             this.publishVideoTransferMetrics('transfer_start', {
                 jobId: jobId,
@@ -837,6 +830,7 @@ class UnifiedVideoTransferService extends EventEmitter {
                 
                 await this.jobManager.checkAndCompleteJob(fileToTransfer.job_id);
                 
+                const transferDurationMs = Date.now() - t0Transfer;
                 this.publishVideoTransferMetrics('transfer_complete', {
                     jobId: jobId,
                     cameraId: cameraId,
@@ -845,7 +839,7 @@ class UnifiedVideoTransferService extends EventEmitter {
                     success: true
                 });
                 
-                logger.info('[TRANSFER TO STORAGE] Post-transfer cleanup completed', { fileName: fileToTransfer.video_file_name });
+                logger.info('[TRANSFER TO STORAGE] Transfer session complete', { fileName: fileToTransfer.video_file_name, durationMs: transferDurationMs, phase: 'transfer-done' });
 
             } catch (error) {
 
@@ -881,20 +875,20 @@ class UnifiedVideoTransferService extends EventEmitter {
         if (this.shouldStop) return;
         
         if (this.pauseVideoTransferFromConfig) {
-            console.log('[CLEANUP] _runCleanupLoop: Video transfer is disabled in config');
+            logger.info('[CLEANUP] _runCleanupLoop: Video transfer is disabled in config');
             setTimeout(() => this._runCleanupLoop(), 300000);
             return;
         }
         
         // Add schedule check for cleanup
         if (this.isScheduledTransfer && !this.isInScheduledWindow) {
-            console.log('[CLEANUP] _runCleanupLoop: Scheduled transfer - skipping cleanup outside window');
+            logger.info('[CLEANUP] _runCleanupLoop: Scheduled transfer - skipping cleanup outside window');
             setTimeout(() => this._runCleanupLoop(), 300000);
             return;
         }
 
         if (true) {
-            console.log('[CLEANUP] _runCleanupLoop: Stop termperory running cleanup tasks');
+            logger.info('[CLEANUP] _runCleanupLoop: Stop termperory running cleanup tasks');
             setTimeout(() => this._runCleanupLoop(), 300000);
             return;
         }
@@ -915,19 +909,19 @@ class UnifiedVideoTransferService extends EventEmitter {
     async _runBufferMonitoringLoop() {
         if (this.shouldStop) return;
         if (true) {
-            console.log('[BUFFER_MONITOR] _runBufferMonitoringLoop: Stop termperory running buffer monitoring tasks');
+            logger.info('[BUFFER_MONITOR] _runBufferMonitoringLoop: Stop termperory running buffer monitoring tasks');
             setTimeout(() => this._runCleanupLoop(), 300000);
             return;
         }
         if (this.pauseVideoTransferFromConfig) {
-            console.log('[BUFFER_MONITOR] _runBufferMonitoringLoop: Video transfer is disabled in config');
+            logger.info('[BUFFER_MONITOR] _runBufferMonitoringLoop: Video transfer is disabled in config');
             setTimeout(() => this._runBufferMonitoringLoop(), 30000);
             return;
         }
         
         // Add schedule check for buffer monitoring
         if (this.isScheduledTransfer && !this.isInScheduledWindow) {
-            console.log('[BUFFER_MONITOR] _runBufferMonitoringLoop: Scheduled transfer - skipping buffer monitoring outside window');
+            logger.info('[BUFFER_MONITOR] _runBufferMonitoringLoop: Scheduled transfer - skipping buffer monitoring outside window');
             setTimeout(() => this._runBufferMonitoringLoop(), 30000);
             return;
         }
@@ -998,7 +992,7 @@ class UnifiedVideoTransferService extends EventEmitter {
                 // Update schedule status
                 this._updateScheduleStatus();
 
-                console.log('[VIDEO_SERVICE_CONFIG] _updateServiceConfig: Schedule config updated:', {
+                logger.info('[VIDEO_SERVICE_CONFIG] _updateServiceConfig: Schedule config updated:', {
                     type: this.scheduleConfig.type,
                     mode: this.scheduleConfig.mode,
                     isScheduled: this.isScheduledTransfer,
@@ -1007,7 +1001,7 @@ class UnifiedVideoTransferService extends EventEmitter {
                 });
             }
         } catch (error) {
-            console.error('[CONFIG_ERROR] _updateServiceConfig: Failed to update service config:', error);
+            logger.error('[CONFIG_ERROR] _updateServiceConfig: Failed to update service config:', error);
         }
     }
 
@@ -1053,7 +1047,7 @@ class UnifiedVideoTransferService extends EventEmitter {
             }
             
         } catch (error) {
-            console.error('[DRIVE_ERROR] UnifiedVideoTransferService._updateDriveInfo: Failed to update drive info:', error);
+            logger.error('[DRIVE_ERROR] UnifiedVideoTransferService._updateDriveInfo: Failed to update drive info:', error);
             this.isDriveConnected = false;
             this.shouldStopProcessing = true;
             this.spaceValidator.updateDriveInfo(null, true);

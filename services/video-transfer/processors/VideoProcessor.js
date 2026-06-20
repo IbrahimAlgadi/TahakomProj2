@@ -19,6 +19,7 @@ class VideoProcessor {
      * Convert .issvd file to .mp4 using ffmpeg
      */
     convertToMp4(inputFile, outputFile) {
+        const t0 = Date.now();
         return new Promise((resolve, reject) => {
             const args = [
                 '-f', 'h264',
@@ -45,13 +46,14 @@ class VideoProcessor {
                     try {
                         await sleep(200);
                         await this.waitForFileAccess(outputFile, this.waitFileAccessTimeout);
+                        logger.info(`[VIDEO_CONVERT] FFmpeg convert complete`, { phase: 'ffmpeg-convert', durationMs: Date.now() - t0, sourceFile: inputFile, outputFile });
                         resolve(true);
                     } catch (error) {
                         logger.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: File access check failed for ${outputFile}: ${error.message}`);
                         reject(error);
                     }
                 } else {
-                    logger.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: Error converting ${inputFile}: ${stderr}`);
+                    logger.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: Error converting ${inputFile}: ${stderr}`, { phase: 'ffmpeg-convert', durationMs: Date.now() - t0 });
                     reject(new Error(`FFmpeg process exited with code ${code}`));
                 }
             });
@@ -67,6 +69,7 @@ class VideoProcessor {
      * Concatenate multiple mp4 files
      */
     async concatenateMp4Files(mp4Files, outputFile) {
+        const t0Concat = Date.now();
         try {
             // logger.info(`[VIDEO] VideoProcessor.concatenateMp4Files: Concatenating files: ${mp4Files.length} to ${outputFile}`);
             const outputDir = path.dirname(outputFile);
@@ -129,13 +132,14 @@ class VideoProcessor {
                         try {
                             await sleep(500);
                             await this.waitForFileAccess(outputFile, 3000);
+                            logger.info(`[VIDEO_CONCAT] FFmpeg concat complete`, { phase: 'ffmpeg-concat', durationMs: Date.now() - t0Concat, segmentCount: mp4Files.length, outputFile });
                             resolve(true);
                         } catch (error) {
                             logger.error(`[VIDEO] VideoProcessor.concatenateMp4Files: Output file verification failed: ${error.message}`);
                             resolve(false);
                         }
                     } else {
-                        logger.error(`[VIDEO_CONCAT_ERROR] VideoProcessor.concatenateMp4Files: Error concatenating files: ${stderr}`);
+                        logger.error(`[VIDEO_CONCAT_ERROR] VideoProcessor.concatenateMp4Files: Error concatenating files: ${stderr}`, { phase: 'ffmpeg-concat', durationMs: Date.now() - t0Concat });
                         resolve(false);
                     }
                 });

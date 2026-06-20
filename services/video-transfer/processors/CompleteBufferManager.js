@@ -369,10 +369,11 @@ class CompleteBufferManager {
      * Create final video from buffer when group is ready
      */
     async createVideoFromBuffer(jobId, cameraId) {
+        const t0Build = Date.now();
         try {
             let videoResult;
 
-            logger.info(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: Creating video from buffer for camera ${cameraId} - ${jobId}`);
+            logger.info(`[BUFFER] CompleteBufferManager.createVideoFromBuffer: Creating video from buffer for camera ${cameraId} - ${jobId}`, { phase: 'video-build', cameraId, jobId });
             
             const cameraFileStatusCounts = await this.jobManager.getCameraFileCountsStatusBufferCheck(jobId, cameraId);
 
@@ -415,7 +416,7 @@ class CompleteBufferManager {
             }
 
             if (videoResult) {
-                logger.info(`[VIDEO] CompleteBufferManager.createVideoFromBuffer: ✓ Created: ${videoResult.videoName} (${(videoResult.fileSize/1024/1024).toFixed(2)} MB)`);
+                logger.info(`[VIDEO] CompleteBufferManager.createVideoFromBuffer: ✓ Created: ${videoResult.videoName} (${(videoResult.fileSize/1024/1024).toFixed(2)} MB)`, { phase: 'video-build', durationMs: Date.now() - t0Build, cameraId, groupKey, segmentCount: groupedFiles.length });
                 
                 // Mark buffer files as grouped
                 // await this.markFilesAsGrouped(bufferIds);
@@ -447,7 +448,7 @@ class CompleteBufferManager {
                 
                 return videoData;
             } else {
-                logger.error(`[VIDEO] CompleteBufferManager.createVideoFromBuffer: ✗ Failed to create video for group ${cameraId}_${groupKey}`);
+                logger.error(`[VIDEO] CompleteBufferManager.createVideoFromBuffer: ✗ Failed to create video for group ${cameraId}_${groupKey}`, { phase: 'video-build', durationMs: Date.now() - t0Build, cameraId, groupKey });
                 return null;
             }
             

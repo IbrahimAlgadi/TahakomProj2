@@ -1,6 +1,9 @@
 const fs = require('fs-extra');
 const path = require('path');
 const { sleep } = require('../../../utils.js');
+const { createLogger } = require('../../../utils/logger');
+
+const logger = createLogger({ service: 'FileTransferManager' });
 
 class FileTransferManager {
     constructor(eventEmitter, pool, redis, encryptionService, config) {
@@ -95,7 +98,7 @@ class FileTransferManager {
      * Transfer a video file to USB
      */
     async transferFile(file) {
-        console.log(`[FILE TRANSFER] FileTransferManager.transferFile: Processing video file: ${file.video_file_path}`);
+        logger.info(`[FILE TRANSFER] Processing video file`, { filePath: file.video_file_path, fileId: file.id });
         
         const shouldEncrypt = this.isEncryptionRequired;
         
@@ -109,25 +112,23 @@ class FileTransferManager {
             const relativePath = path.join('videos', videoFileName);
             const destinationPath = path.join(usb_path, relativePath);
             
-            // Update transfer queue with paths
             await this.pool.query(`
                 UPDATE video_transfer_queue 
                 SET destination_path = $1, usb_path = $2, updated_at = CURRENT_TIMESTAMP 
                 WHERE id = $3
             `, [destinationPath, usb_path, file.id]);
 
+            const t0 = Date.now();
             if (shouldEncrypt) {
-                // Get public key path from config for metadata encryption
-                console.log({
-                    'config': this.serviceConfig
-                })
+                logger.info(`[FILE TRANSFER] Encrypting video file`, { fileId: file.id, phase: 'encrypt' });
                 const publicKeyPath = "certs/" + this.serviceConfig.certificates.publicKeyFilename;
                 if (!publicKeyPath) {
-                    console.warn(`[VIDEO_TRANSFER] No public key path configured, falling back to basic encryption`);
+                    logger.warn(`[FILE TRANSFER] No public key path configured, falling back to basic encryption`, { fileId: file.id });
                     await this.processEncryptedVideoFile(file, usb_path);
                 } else {
                     await this.processEncryptedVideoBatch(file, usb_path, publicKeyPath);
                 }
+                logger.info(`[FILE TRANSFER] Encryption complete`, { fileId: file.id, durationMs: Date.now() - t0, phase: 'encrypt-done' });
             } else {
                 await fs.ensureDir(path.dirname(destinationPath));
                 
@@ -136,7 +137,6 @@ class FileTransferManager {
                     throw new Error(`Source video file not found: ${file.video_file_path}`);
                 }
                 
-                // Check if file already exists with same size
                 let shouldCopy = true;
                 const destExists = await fs.pathExists(destinationPath);
                 
@@ -146,31 +146,30 @@ class FileTransferManager {
                         const destStat = await fs.stat(destinationPath);
                         
                         if (sourceStat.size === destStat.size) {
-                            console.log(`[FILE TRANSFER] FileTransferManager.transferFile: File already exists with same size, skipping: ${destinationPath}`);
+                            logger.info(`[FILE TRANSFER] File already exists with same size, skipping`, { destPath: destinationPath, fileId: file.id });
                             shouldCopy = false;
                         }
                     } catch (statError) {
-                        console.warn(`[FILE TRANSFER] FileTransferManager.transferFile: Could not compare file stats: ${statError.message}`);
+                        logger.warn(`[FILE TRANSFER] Could not compare file stats`, { error: statError.message, fileId: file.id });
                     }
                 }
                 
                 if (shouldCopy) {
                     await this.copyWithRetry(file.video_file_path, destinationPath, 3, 1000);
-                    console.log(`[FILE TRANSFER] FileTransferManager.transferFile: Copied: ${file.video_file_path} to ${destinationPath}`);
+                    logger.info(`[FILE TRANSFER] USB copy complete`, { phase: 'usb-copy', durationMs: Date.now() - t0, destPath: destinationPath, fileId: file.id });
                 }
             }
             
-            // Mark as transferred
             await this.pool.query(`
                 UPDATE video_transfer_queue 
                 SET status = 'transferred', transferred_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
                 WHERE id = $1
             `, [file.id]);
             
-            console.log(`[FILE TRANSFER] FileTransferManager.transferFile: Successfully transferred video file ID: ${file.id}`);
+            logger.info(`[FILE TRANSFER] Successfully transferred video file`, { fileId: file.id, phase: 'usb-copy-done' });
             
         } catch (error) {
-            console.error(`[FILE TRANSFER] FileTransferManager.transferFile: Failed to process video file ${file.id}:`, error);
+            logger.error(`[FILE TRANSFER] Failed to process video file`, { fileId: file.id, error: error.message, stack: error.stack });
             throw error;
         }
     }
@@ -189,7 +188,7 @@ class FileTransferManager {
                 lastError = error;
                 
                 if (error.code === 'EBUSY' && attempt < maxRetries) {
-                    console.warn(`[FILE TRANSFER] FileTransferManager.copyWithRetry: Copy attempt ${attempt} failed with EBUSY error, retrying in ${delay}ms...`);
+                    logger.warn(`[FILE TRANSFER] Copy attempt ${attempt} failed with EBUSY, retrying in ${delay}ms`, { destPath, attempt, maxRetries });
                     await sleep(delay);
                     continue;
                 }
@@ -251,7 +250,7 @@ class FileTransferManager {
         const newFilename = `${file.id}`;
         const encryptedFilePath = path.join(destinationGroupDir, newFilename);
         
-        console.log(`[FILE TRANSFER] FileTransferManager.processEncryptedVideoFile: Encrypting: ${file.video_file_path} to ${encryptedFilePath}`);
+        logger.info(`[FILE TRANSFER] Encrypting video file (basic)`, { filePath: file.video_file_path, encryptedFilePath, phase: 'encrypt' });
         await this.encryptionService.encryptFileAES(file.video_file_path, encryptedFilePath, aesKey, aesIv);
         
         await this.pool.query(`
@@ -283,7 +282,8 @@ class FileTransferManager {
         const newFilename = originalFilename; // Use original name without .mp4
         const encryptedFilePath = path.join(destinationGroupDir, newFilename);
         
-        console.log(`[VIDEO_TRANSFER] FileTransferManager.processEncryptedVideoBatch: Encrypting: ${file.video_file_path} to ${encryptedFilePath}`);
+        const t0Encrypt = Date.now();
+        logger.info(`[FILE TRANSFER] Encrypting video file (batch)`, { filePath: file.video_file_path, encryptedFilePath, phase: 'encrypt' });
         await this.encryptionService.encryptFileAES(file.video_file_path, encryptedFilePath, aesKey, aesIv);
         
         // Create metadata structure following same pattern as images
@@ -313,7 +313,7 @@ class FileTransferManager {
         const metadataJson = JSON.stringify(metadata, null, 2);
         const metadataPath = path.join(destinationGroupDir, `${newFilename}_metadata.json`);
         
-        console.log(`[VIDEO_TRANSFER] FileTransferManager.processEncryptedVideoBatch: Creating encrypted metadata file: ${metadataPath}`);
+        logger.info(`[FILE TRANSFER] Creating encrypted metadata file`, { metadataPath, phase: 'encrypt' });
         await fs.writeFile(metadataPath, metadataJson);
         
         // Update database with metadata
@@ -328,7 +328,7 @@ class FileTransferManager {
             iv: aesIv.toString('hex')
         }), file.id]);
         
-        console.log(`[VIDEO_TRANSFER] FileTransferManager.processEncryptedVideoBatch: Created encrypted video with metadata: ${destinationGroupDir}`);
+        logger.info(`[FILE TRANSFER] Encrypted video with metadata created`, { destDir: destinationGroupDir, durationMs: Date.now() - t0Encrypt, phase: 'encrypt-done' });
     }
 
     /**
@@ -343,14 +343,14 @@ class FileTransferManager {
             `, [file.id]);
             
             if (sourceFileIdsResult.rows.length === 0) {
-                console.warn(`[FILE TRANSFER] FileTransferManager.markSourceFilesAsTransferred: No video transfer queue record found for file ID: ${file.id}`);
+                logger.warn(`[FILE TRANSFER] No video transfer queue record found for file`, { fileId: file.id, phase: 'mark-transferred' });
                 return;
             }
             
             const sourceFileIds = sourceFileIdsResult.rows[0].source_file_ids;
             
             if (!sourceFileIds || sourceFileIds.length === 0) {
-                console.warn(`[FILE TRANSFER] FileTransferManager.markSourceFilesAsTransferred: No source file IDs found for video: ${path.basename(file.video_file_path)}`);
+                logger.warn(`[FILE TRANSFER] No source file IDs found for video`, { videoName: path.basename(file.video_file_path), phase: 'mark-transferred' });
                 return;
             }
             
@@ -360,10 +360,10 @@ class FileTransferManager {
                 WHERE id = ANY($1)
             `, [sourceFileIds]);
             
-            console.log(`[FILE TRANSFER] FileTransferManager.markSourceFilesAsTransferred: ✓ Marked ${sourceFileIds.length} source files as transferred for video: ${path.basename(file.video_file_path)}`);
+            logger.info(`[FILE TRANSFER] Marked source files as transferred`, { sourceFileCount: sourceFileIds.length, videoName: path.basename(file.video_file_path), phase: 'mark-transferred' });
             
         } catch (error) {
-            console.error(`[FILE TRANSFER] FileTransferManager.markSourceFilesAsTransferred: Failed to mark source files as transferred for ${file.video_file_path}:`, error);
+            logger.error(`[FILE TRANSFER] Failed to mark source files as transferred`, { filePath: file.video_file_path, error: error.message, stack: error.stack });
         }
     }
 
@@ -373,16 +373,16 @@ class FileTransferManager {
     async cleanupTempVideo(videoPath) {
         try {
             await fs.unlink(videoPath);
-            console.log(`[FILE TRANSFER] FileTransferManager.cleanupTempVideo: Deleted temporary video: ${videoPath}`);
+            logger.info(`[FILE TRANSFER] Deleted temporary video`, { videoPath, phase: 'cleanup' });
             
             const parentDir = path.dirname(videoPath);
             const files = await fs.readdir(parentDir);
             if (files.length === 0) {
                 await fs.rmdir(parentDir);
-                console.log(`[FILE TRANSFER] FileTransferManager.cleanupTempVideo: Removed empty temporary directory: ${parentDir}`);
+                logger.info(`[FILE TRANSFER] Removed empty temporary directory`, { parentDir, phase: 'cleanup' });
             }
         } catch (error) {
-            console.warn(`[FILE TRANSFER] FileTransferManager.cleanupTempVideo: Could not clean up temporary file/directory: ${videoPath}`, error.message);
+            logger.warn(`[FILE TRANSFER] Could not clean up temporary file/directory`, { videoPath, error: error.message, phase: 'cleanup' });
         }
     }
 }
