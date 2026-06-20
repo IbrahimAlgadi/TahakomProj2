@@ -1,6 +1,6 @@
 const { createLogger } = require('../../utils/logger');
 
-const logger = createLogger({ service: 'CleanupService' });
+const logger = createLogger({ service: 'CleanupService', logFile: 'video-usb-pipeline' });
 const fs = require('fs-extra');
 const path = require('path');
 

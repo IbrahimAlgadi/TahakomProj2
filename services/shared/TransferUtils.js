@@ -1,6 +1,6 @@
 const { createLogger } = require('../../utils/logger');
 
-const logger = createLogger({ service: 'TransferUtils' });
+const logger = createLogger({ service: 'TransferUtils', logFile: 'image-usb-pipeline' });
 
 /**
  * Shared Transfer Utilities

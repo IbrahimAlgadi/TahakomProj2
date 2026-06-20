@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'ImageJobManager' });
+const logger = createLogger({ service: 'ImageJobManager', logFile: 'image-usb-pipeline' });
 const { v4: uuidv4 } = require('uuid');
 const { calculateBatchStats } = require('../../../utils/batchUtils.js');
 

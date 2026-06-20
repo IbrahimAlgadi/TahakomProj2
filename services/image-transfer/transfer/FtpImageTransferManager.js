@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'FtpImageTransferManager' });
+const logger = createLogger({ service: 'FtpImageTransferManager', logFile: 'image-ftp-pipeline' });
 const ImageTransferManager = require('./ImageTransferManager');
 const TransferUtils = require('../../shared/TransferUtils');
 const ftp = require('basic-ftp');

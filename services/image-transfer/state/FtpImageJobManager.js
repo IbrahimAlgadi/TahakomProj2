@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'FtpImageJobManager' });
+const logger = createLogger({ service: 'FtpImageJobManager', logFile: 'image-ftp-pipeline' });
 const ImageJobManager = require('./ImageJobManager');
 const { v4: uuidv4 } = require('uuid');
 

@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'SpaceValidator' });
+const logger = createLogger({ service: 'SpaceValidator', logFile: 'video-usb-pipeline' });
 class SpaceValidator {
     constructor(eventEmitter, config) {
         this.eventEmitter = eventEmitter;

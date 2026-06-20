@@ -6,7 +6,7 @@ const { exec } = require('child_process');
 const { CONFIG_STATE_KEY, CONFIG_FTP_STATE_KEY } = require('./redisKeyStore');
 const { createLogger } = require('./utils/logger');
 
-const logger = createLogger({ service: 'ConfigStateServiceRedis' });
+const logger = createLogger({ service: 'ConfigStateServiceRedis', logFile: 'system' });
 
 // Load environment variables
 require('dotenv').config();

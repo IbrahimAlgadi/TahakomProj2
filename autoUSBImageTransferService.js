@@ -10,7 +10,7 @@ const encryptionService = require('./utils/encryptionService');
 const config = require('./utils/envConfig');
 const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
 
-const logger = createLogger({ service: 'autoUSBImageTransferService' });
+const logger = createLogger({ service: 'autoUSBImageTransferService', logFile: 'image-usb-pipeline' });
 
 // Database Configuration
 let DB_USER = "postgres";

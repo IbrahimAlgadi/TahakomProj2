@@ -17,7 +17,7 @@ const SpaceValidator = require('./services/video-transfer/validators/SpaceValida
 const CleanupService = require('./services/shared/CleanupService');
 const CompleteBufferManager = require('./services/video-transfer/processors/CompleteBufferManager');
 
-const logger = createLogger({ service: 'autoVideoTransferEDAMicroservice' });
+const logger = createLogger({ service: 'autoVideoTransferEDAMicroservice', logFile: 'video-usb-pipeline' });
 
 class UnifiedVideoTransferService extends EventEmitter {
     constructor(config) {

@@ -4,7 +4,7 @@ const { sleep } = require('./utils.js');
 const { PROCESS_MONITOR_KEY, PROCESS_MONITOR_UPDATE } = require('./redisKeyStore.js');
 const { createLogger } = require('./utils/logger');
 
-const logger = createLogger({ service: 'monitorSpecialProcesses' });
+const logger = createLogger({ service: 'monitorSpecialProcesses', logFile: 'monitor' });
 
 // Initialize Redis client
 const config = require('./utils/envConfig');

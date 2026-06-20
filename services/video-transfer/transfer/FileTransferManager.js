@@ -3,7 +3,7 @@ const path = require('path');
 const { sleep } = require('../../../utils.js');
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'FileTransferManager' });
+const logger = createLogger({ service: 'FileTransferManager', logFile: 'video-usb-pipeline' });
 
 class FileTransferManager {
     constructor(eventEmitter, pool, redis, encryptionService, config) {

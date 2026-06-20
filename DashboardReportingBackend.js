@@ -99,7 +99,7 @@ const DEFAULT_CONFIG = {
 };
 
 // --- Logger Configuration ---
-const logger = createLogger({ service: 'DashboardReportingBackend' });
+const logger = createLogger({ service: 'DashboardReportingBackend', logFile: 'system' });
 
 // --- Application Setup ---
 const app = express();

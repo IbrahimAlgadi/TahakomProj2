@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'ImageSpaceValidator' });
+const logger = createLogger({ service: 'ImageSpaceValidator', logFile: 'image-usb-pipeline' });
 class ImageSpaceValidator {
     constructor(config) {
         this.config = config;

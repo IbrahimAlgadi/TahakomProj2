@@ -5,7 +5,7 @@ const { sleep, formatGB } = require('./utils.js');
 const { Pool } = require('pg');
 const { createLogger } = require('./utils/logger');
 
-const logger = createLogger({ service: 'monitorConnectedExternalDrives' });
+const logger = createLogger({ service: 'monitorConnectedExternalDrives', logFile: 'monitor' });
 
 let DB_USER = "postgres";
 let DB_PASSWORD = "postgres";

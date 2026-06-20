@@ -100,42 +100,46 @@ const LOG_DIRECTORY = process.env.LOG_DIRECTORY  || 'logs';
 const LOG_MAX_SIZE  = process.env.LOG_MAX_SIZE   || '20m';
 const LOG_MAX_FILES = process.env.LOG_MAX_FILES  || '14d';
 
-/**
- * Ensure the log directory exists (mirrors the existing behaviour in
- * DashboardReportingBackend.js).
- */
+// Root log dir
 if (!fs.existsSync(LOG_DIRECTORY)) {
     fs.mkdirSync(LOG_DIRECTORY, { recursive: true });
 }
 
+// Audit files go here — keeps the root log folder clean
+const AUDIT_DIR = `${LOG_DIRECTORY}/.audit`;
+if (!fs.existsSync(AUDIT_DIR)) {
+    fs.mkdirSync(AUDIT_DIR, { recursive: true });
+}
+
 /**
- * Build the console transport format.
- * Under PM2 (or any non-TTY context) colorize is disabled so that the
- * captured `-out.log` / `-error.log` files stay clean.
+ * Build the console transport format (dev/TTY only).
  */
 function buildConsoleFormat() {
-    if (process.stdout.isTTY) {
-        return format.combine(format.colorize(), format.simple());
-    }
-    return format.combine(format.timestamp(), format.simple());
+    return format.combine(format.colorize(), format.simple());
 }
 
 /**
  * Create a Winston logger bound to `service`.
  *
+ * @param {{ service: string, logFile?: string }} options
+ *   service  — identifies the component in every JSON log line (`service` field)
+ *   logFile  — optional pipeline/group name used as the FILE prefix.
+ *              Multiple services can share one log file by passing the same
+ *              logFile value (e.g. all video-USB helpers pass
+ *              logFile: 'video-usb-pipeline').
+ *              Defaults to `service` when omitted.
+ *
  * Writes:
- *   logs/<service>-app-%DATE%.log    — combined (all levels)
- *   logs/<service>-error-%DATE%.log  — error level only
- *   console / stdout                 — captured by PM2 into -out/-error.log
- *
- * Every entry carries: timestamp, level, service, message, and any fields
- * currently held in the AsyncLocalStorage trace context (traceId, jobId, …).
- *
- * @param {{ service: string }} options
- * @returns {import('winston').Logger}
+ *   logs/<logFile>-app-%DATE%.log   — combined (all levels)
+ *   logs/<logFile>-error-%DATE%.log — errors only
+ *   console/stdout                  — only when attached to a real TTY (dev).
+ *                                     Under PM2 (no TTY) the console transport
+ *                                     is skipped, eliminating the duplicate
+ *                                     *-out.log / *-error.log PM2 files.
  */
-function createLogger({ service } = {}) {
-    const svcName = service || 'app';
+function createLogger({ service, logFile } = {}) {
+    const svcName   = service  || 'app';
+    const fileGroup = logFile  || svcName;
 
     const baseFormat = format.combine(
         format.timestamp(),
@@ -144,30 +148,38 @@ function createLogger({ service } = {}) {
         format.json()
     );
 
+    const fileTransports = [
+        new transports.DailyRotateFile({
+            filename:  `${LOG_DIRECTORY}/${fileGroup}-error-%DATE%.log`,
+            auditFile: `${AUDIT_DIR}/${fileGroup}-error-audit.json`,
+            datePattern: 'YYYY-MM-DD',
+            level: 'error',
+            maxSize: LOG_MAX_SIZE,
+            maxFiles: LOG_MAX_FILES,
+            zippedArchive: true,
+        }),
+        new transports.DailyRotateFile({
+            filename:  `${LOG_DIRECTORY}/${fileGroup}-app-%DATE%.log`,
+            auditFile: `${AUDIT_DIR}/${fileGroup}-app-audit.json`,
+            datePattern: 'YYYY-MM-DD',
+            maxSize: LOG_MAX_SIZE,
+            maxFiles: LOG_MAX_FILES,
+            zippedArchive: true,
+        }),
+    ];
+
+    // Console only in interactive terminals (local dev).
+    // PM2 sets isTTY = false/undefined → no console transport →
+    // no duplicate -out.log / -error.log files.
+    if (process.stdout.isTTY) {
+        fileTransports.push(new transports.Console({ format: buildConsoleFormat() }));
+    }
+
     return winstonCreateLogger({
         level: LOG_LEVEL,
         format: baseFormat,
         defaultMeta: { service: svcName },
-        transports: [
-            new transports.DailyRotateFile({
-                filename: `${LOG_DIRECTORY}/${svcName}-error-%DATE%.log`,
-                datePattern: 'YYYY-MM-DD',
-                level: 'error',
-                maxSize: LOG_MAX_SIZE,
-                maxFiles: LOG_MAX_FILES,
-                zippedArchive: true,
-            }),
-            new transports.DailyRotateFile({
-                filename: `${LOG_DIRECTORY}/${svcName}-app-%DATE%.log`,
-                datePattern: 'YYYY-MM-DD',
-                maxSize: LOG_MAX_SIZE,
-                maxFiles: LOG_MAX_FILES,
-                zippedArchive: true,
-            }),
-            new transports.Console({
-                format: buildConsoleFormat(),
-            }),
-        ],
+        transports: fileTransports,
     });
 }
 

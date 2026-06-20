@@ -1,7 +1,7 @@
 const fs = require('fs-extra');
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'CompleteBufferManager' });
+const logger = createLogger({ service: 'CompleteBufferManager', logFile: 'video-usb-pipeline' });
 const path = require('path');
 const { sleep } = require('../../../utils.js');
 

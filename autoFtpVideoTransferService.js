@@ -18,7 +18,7 @@ const FtpTransferManager = require('./services/video-transfer/transfer/FtpTransf
 const FtpJobManager = require('./services/video-transfer/state/FtpJobManager.js');
 const FtpCompleteBufferManager = require('./services/video-transfer/processors/FtpCompleteBufferManager.js');
 
-const logger = createLogger({ service: 'autoFtpVideoTransferService' });
+const logger = createLogger({ service: 'autoFtpVideoTransferService', logFile: 'video-ftp-pipeline' });
 
 class AutoFtpVideoTransferService extends EventEmitter {
     constructor(config) {

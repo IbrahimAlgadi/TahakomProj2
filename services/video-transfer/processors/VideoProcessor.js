@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'VideoProcessor' });
+const logger = createLogger({ service: 'VideoProcessor', logFile: 'video-usb-pipeline' });
 const fs = require('fs-extra');
 const path = require('path');
 const { spawn } = require('child_process');

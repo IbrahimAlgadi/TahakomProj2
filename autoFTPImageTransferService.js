@@ -10,7 +10,7 @@ const TransferUtils = require('./services/shared/TransferUtils');
 const config = require('./utils/envConfig');
 const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
 
-const logger = createLogger({ service: 'autoFTPImageTransferService' });
+const logger = createLogger({ service: 'autoFTPImageTransferService', logFile: 'image-ftp-pipeline' });
 
 // Database Configuration
 let DB_USER = "postgres";

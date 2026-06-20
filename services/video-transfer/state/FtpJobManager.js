@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'FtpJobManager' });
+const logger = createLogger({ service: 'FtpJobManager', logFile: 'video-ftp-pipeline' });
 const { v4: uuidv4 } = require('uuid');
 const TransferUtils = require('../../shared/TransferUtils');
 

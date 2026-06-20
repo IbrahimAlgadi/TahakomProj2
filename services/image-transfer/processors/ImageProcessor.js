@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'ImageProcessor' });
+const logger = createLogger({ service: 'ImageProcessor', logFile: 'image-usb-pipeline' });
 const fs = require('fs-extra');
 const path = require('path');
 

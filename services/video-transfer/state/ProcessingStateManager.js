@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'ProcessingStateManager' });
+const logger = createLogger({ service: 'ProcessingStateManager', logFile: 'video-usb-pipeline' });
 class ProcessingStateManager {
     constructor(eventEmitter, pool, redis, config) {
         this.eventEmitter = eventEmitter;

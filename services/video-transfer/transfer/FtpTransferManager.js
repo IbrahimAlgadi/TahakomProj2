@@ -1,6 +1,6 @@
 const { createLogger } = require('../../../utils/logger');
 
-const logger = createLogger({ service: 'FtpTransferManager' });
+const logger = createLogger({ service: 'FtpTransferManager', logFile: 'video-ftp-pipeline' });
 const fs = require('fs-extra');
 const path = require('path');
 const { sleep } = require('../../../utils.js');
