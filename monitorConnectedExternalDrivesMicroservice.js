@@ -45,6 +45,10 @@ let CONFIG_STATE = {};
 let lastUptimeUpdate = 0;
 const UPTIME_UPDATE_INTERVAL = 60000; // Update uptime every minute
 
+// Cache for inaccessible drives — shared across reconcile calls
+const inaccessibleDrives = new Map(); // Map<driveLetter, lastCheckTime>
+const INACCESSIBLE_RECHECK_INTERVAL = 30000; // Recheck inaccessible drives every 30 seconds
+
 // Subscribe to config updates
 redisPubSub.subscribe(CONFIG_STATE_KEY + '_update', (err, count) => {
     if (err) {
@@ -58,6 +62,8 @@ redisPubSub.on('message', async (channel, message) => {
     if (channel === CONFIG_STATE_KEY + '_update') {
         CONFIG_STATE = JSON.parse(message);
         logger.info('[CONFIG UPDATE] Config updated', { drive: CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive });
+        // Immediately refresh specific drive state when config changes
+        triggerReconcile('config-change');
     }
 });
 
@@ -210,7 +216,8 @@ async function getSpecificDriveInfo(driveLetter) {
             };
         }
 
-        if (!fs.size || !fs.used || !fs.available) {
+        // Use nullish checks so a valid 0-byte drive is not mistaken for inaccessible
+        if (fs.size == null || fs.used == null || fs.available == null) {
             logger.warn(`[GET DRIVE INFO] Drive ${driveLetter} has incomplete filesystem data`, { drive: driveLetter });
             return {
                 isConnected: false,
@@ -248,167 +255,243 @@ async function getSpecificDriveInfo(driveLetter) {
     }
 }
 
-// Run the enhanced monitor service
-async function runEnhancedMonitor() {
-    await redis.del(CONNECTED_DRIVE_LIST);
+// ─── Core reconcile function ─────────────────────────────────────────────────
+// Idempotent: safe to call at any time from any trigger (hotplug event,
+// safety-net timer, config change, or polling fallback).
+// Produces identical Redis/Postgres outputs as the original polling loop.
+async function reconcileDrives(reason) {
+    const now = Date.now();
+    let driveList = [];
+    let driveListString = JSON.stringify(driveList);
 
-    logger.info('[START DRIVE MONITOR] Starting Enhanced Drive Monitor Service...');
+    try {
+        // 1. Monitor ALL external drives
+        const blockData = await si.blockDevices();
+        const systemDrives = ['C:', 'D:', 'I:'];
+        const externalDrives = blockData.filter(drive => !systemDrives.includes(drive.name));
 
-    // Cache for inaccessible drives to avoid repeated expensive checks
-    const inaccessibleDrives = new Map(); // Map<driveLetter, lastCheckTime>
-    const INACCESSIBLE_RECHECK_INTERVAL = 30000; // Recheck inaccessible drives every 30 seconds
+        // Get current drive letters
+        const currentDrives = new Set(externalDrives.map(drive => drive.name.slice(0, 2)));
 
-    while (true) {
-        const now = Date.now();
-        let driveList = [];
-        let driveListString = JSON.stringify(driveList);
-
-        try {
-            // 1. Monitor ALL external drives (existing functionality)
-            const blockData = await si.blockDevices();
-            const systemDrives = ['C:', 'D:', 'I:'];
-            const externalDrives = blockData.filter(drive => !systemDrives.includes(drive.name));
-
-            // Get current drive letters
-            const currentDrives = new Set(externalDrives.map(drive => drive.name.slice(0, 2)));
-
-            // Clean up cache for disconnected drives
-            for (const [cachedDrive] of inaccessibleDrives) {
-                if (!currentDrives.has(cachedDrive)) {
-                    inaccessibleDrives.delete(cachedDrive);
-                }
+        // Clean up inaccessible cache for drives no longer present
+        for (const [cachedDrive] of inaccessibleDrives) {
+            if (!currentDrives.has(cachedDrive)) {
+                inaccessibleDrives.delete(cachedDrive);
             }
-
-            // Check for disconnected drives
-            for (const drive of connectedDrives) {
-                if (!currentDrives.has(drive)) {
-                    await markDeviceDisconnected(drive);
-                    connectedDrives.delete(drive);
-                    logger.info(`[DRIVE DISCONNECTED] Drive ${drive} disconnected`, { drive });
-                }
-            }
-
-            // Process connected external drives
-            for (const drive of externalDrives) {
-                const driveLetter = drive.name.slice(0, 2);
-
-                // Skip drives we know are inaccessible (but recheck periodically)
-                const lastCheck = inaccessibleDrives.get(driveLetter);
-                if (lastCheck && (now - lastCheck) < INACCESSIBLE_RECHECK_INTERVAL) {
-                    continue; // Skip this drive for now
-                }
-
-                try {
-                    const fsData = await si.fsSize(drive.mount);
-
-                    // Check if filesystem data exists
-                    if (!fsData || fsData.length === 0 || !fsData[0]) {
-                        if (!inaccessibleDrives.has(driveLetter)) {
-                            logger.warn(`[SKIP DRIVE] Drive ${driveLetter} has no accessible filesystem`, { drive: driveLetter });
-                        }
-                        inaccessibleDrives.set(driveLetter, now);
-                        continue;
-                    }
-
-                    const fs = fsData[0];
-
-                    if (!fs.size || !fs.used || !fs.available) {
-                        if (!inaccessibleDrives.has(driveLetter)) {
-                            logger.warn(`[SKIP DRIVE] Drive ${driveLetter} has incomplete filesystem data`, { drive: driveLetter });
-                        }
-                        inaccessibleDrives.set(driveLetter, now);
-                        continue;
-                    }
-
-                    if (inaccessibleDrives.has(driveLetter)) {
-                        logger.info(`[DRIVE ACCESSIBLE] Drive ${driveLetter} is now accessible`, { drive: driveLetter });
-                        inaccessibleDrives.delete(driveLetter);
-                    }
-
-                    const driveInfo = {
-                        isConnected: true,
-                        drive: driveLetter,
-                        label: drive.label,
-                        totalSpace: formatGB(fs.size),
-                        usedSpace: formatGB(fs.used),
-                        remainingSpace: formatGB(fs.available),
-                        usedPercentage: fs.use,
-                        type: fs.type ? fs.type.toUpperCase() : 'UNKNOWN',
-                        readWrite: fs.rw ? 'Yes' : 'No'
-                    };
-
-                    // If drive is newly connected, insert new record
-                    if (!connectedDrives.has(driveInfo.drive)) {
-                        await insertDeviceConnection(driveInfo);
-                        connectedDrives.add(driveInfo.drive);
-                        logger.info(`[DRIVE CONNECTED] Drive ${driveInfo.drive} connected`, { drive: driveInfo.drive });
-                    } else {
-                        // Update existing record (silently, no log spam)
-                        await updateDeviceInfo(driveInfo);
-                    }
-
-                    driveList.push(driveInfo);
-                } catch (error) {
-                    logger.error('[PROCESS DRIVE ERROR] Error processing drive:', { error: error.message });
-                }
-            }
-
-            // 2. Handle specific drive for auto-transfer
-            const autoTransferDrive = CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive;
-            const specificDriveState = await getSpecificDriveInfo(autoTransferDrive);
-
-            // 3. Update Redis and publish updates
-            driveListString = JSON.stringify(driveList);
-
-            // Publish to both channels
-            await redis.set(CONNECTED_DRIVE_LIST, driveListString);
-            await redis.publish(CONNECTED_DRIVE_LIST_UPDATE, driveListString);
-
-            await redis.set(CONNECTED_DRIVE_STATE, JSON.stringify(specificDriveState));
-            await redis.publish(CONNECTED_DRIVE_STATE + '_update', JSON.stringify(specificDriveState));
-
-            // 4. Update uptime periodically
-            if (now - lastUptimeUpdate > UPTIME_UPDATE_INTERVAL) {
-                await calculateAndUpdateUptime();
-                lastUptimeUpdate = now;
-            }
-
-            logger.info(`[MONITOR] Drives: ${driveList.length} accessible, ${inaccessibleDrives.size} cached as inaccessible`, { accessible: driveList.length, inaccessible: inaccessibleDrives.size });
-
-            await sleep(1000); // Keep 1 second for real-time detection
-
-        } catch (error) {
-            logger.error('[MONITOR ERROR] Enhanced Monitor error:', { error: error.message });
-            // Still publish empty data on error
-            await redis.set(CONNECTED_DRIVE_LIST, driveListString);
-            await redis.publish(CONNECTED_DRIVE_LIST_UPDATE, driveListString);
-
-            const disconnectedState = {
-                isConnected: false,
-                drive: (CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive) || 'N/A',
-                totalSpace: 0,
-                usedSpace: 0,
-                remainingSpace: 0,
-                usedPercentage: 0
-            };
-            await redis.set(CONNECTED_DRIVE_STATE, JSON.stringify(disconnectedState));
-            await redis.publish(CONNECTED_DRIVE_STATE + '_update', JSON.stringify(disconnectedState));
-
-            await sleep(1000);
-            continue;
         }
+
+        // Check for disconnected drives
+        for (const drive of connectedDrives) {
+            if (!currentDrives.has(drive)) {
+                await markDeviceDisconnected(drive);
+                connectedDrives.delete(drive);
+                logger.info(`[DRIVE DISCONNECTED] Drive ${drive} disconnected`, { drive, reason });
+            }
+        }
+
+        // Process connected external drives
+        for (const drive of externalDrives) {
+            const driveLetter = drive.name.slice(0, 2);
+
+            // Skip drives cached as inaccessible (recheck after interval)
+            const lastCheck = inaccessibleDrives.get(driveLetter);
+            if (lastCheck && (now - lastCheck) < INACCESSIBLE_RECHECK_INTERVAL) {
+                continue;
+            }
+
+            try {
+                const fsData = await si.fsSize(drive.mount);
+
+                // Check if filesystem data exists
+                if (!fsData || fsData.length === 0 || !fsData[0]) {
+                    if (!inaccessibleDrives.has(driveLetter)) {
+                        logger.warn(`[SKIP DRIVE] Drive ${driveLetter} has no accessible filesystem`, { drive: driveLetter });
+                    }
+                    inaccessibleDrives.set(driveLetter, now);
+                    continue;
+                }
+
+                const fs = fsData[0];
+
+                // Use nullish checks — a drive with used=0 or available=0 is valid
+                if (fs.size == null || fs.used == null || fs.available == null) {
+                    if (!inaccessibleDrives.has(driveLetter)) {
+                        logger.warn(`[SKIP DRIVE] Drive ${driveLetter} has incomplete filesystem data`, { drive: driveLetter });
+                    }
+                    inaccessibleDrives.set(driveLetter, now);
+                    continue;
+                }
+
+                if (inaccessibleDrives.has(driveLetter)) {
+                    logger.info(`[DRIVE ACCESSIBLE] Drive ${driveLetter} is now accessible`, { drive: driveLetter });
+                    inaccessibleDrives.delete(driveLetter);
+                }
+
+                const driveInfo = {
+                    isConnected: true,
+                    drive: driveLetter,
+                    label: drive.label,
+                    totalSpace: formatGB(fs.size),
+                    usedSpace: formatGB(fs.used),
+                    remainingSpace: formatGB(fs.available),
+                    usedPercentage: fs.use,
+                    type: fs.type ? fs.type.toUpperCase() : 'UNKNOWN',
+                    readWrite: fs.rw ? 'Yes' : 'No'
+                };
+
+                if (!connectedDrives.has(driveInfo.drive)) {
+                    await insertDeviceConnection(driveInfo);
+                    connectedDrives.add(driveInfo.drive);
+                    logger.info(`[DRIVE CONNECTED] Drive ${driveInfo.drive} connected`, { drive: driveInfo.drive, reason });
+                } else {
+                    await updateDeviceInfo(driveInfo);
+                }
+
+                driveList.push(driveInfo);
+            } catch (error) {
+                logger.error('[PROCESS DRIVE ERROR] Error processing drive:', { error: error.message });
+            }
+        }
+
+        // 2. Handle specific drive for auto-transfer
+        const autoTransferDrive = CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive;
+        const specificDriveState = await getSpecificDriveInfo(autoTransferDrive);
+
+        // 3. Update Redis and publish updates
+        driveListString = JSON.stringify(driveList);
+
+        await redis.set(CONNECTED_DRIVE_LIST, driveListString);
+        await redis.publish(CONNECTED_DRIVE_LIST_UPDATE, driveListString);
+
+        await redis.set(CONNECTED_DRIVE_STATE, JSON.stringify(specificDriveState));
+        await redis.publish(CONNECTED_DRIVE_STATE + '_update', JSON.stringify(specificDriveState));
+
+        // 4. Update uptime periodically
+        if (now - lastUptimeUpdate > UPTIME_UPDATE_INTERVAL) {
+            await calculateAndUpdateUptime();
+            lastUptimeUpdate = now;
+        }
+
+        logger.info(`[MONITOR] reason=${reason} Drives: ${driveList.length} accessible, ${inaccessibleDrives.size} cached as inaccessible`, { accessible: driveList.length, inaccessible: inaccessibleDrives.size, reason });
+
+    } catch (error) {
+        logger.error('[MONITOR ERROR] reconcileDrives error:', { error: error.message, reason });
+        // Still publish empty / disconnected data on error so consumers don't stall
+        await redis.set(CONNECTED_DRIVE_LIST, driveListString);
+        await redis.publish(CONNECTED_DRIVE_LIST_UPDATE, driveListString);
+
+        const disconnectedState = {
+            isConnected: false,
+            drive: (CONFIG_STATE.autoTransfer && CONFIG_STATE.autoTransfer.drive) || 'N/A',
+            totalSpace: 0,
+            usedSpace: 0,
+            remainingSpace: 0,
+            usedPercentage: 0
+        };
+        await redis.set(CONNECTED_DRIVE_STATE, JSON.stringify(disconnectedState));
+        await redis.publish(CONNECTED_DRIVE_STATE + '_update', JSON.stringify(disconnectedState));
     }
 }
 
+// ─── Concurrency guard ────────────────────────────────────────────────────────
+// Ensures only one reconcileDrives() runs at a time. If a second trigger
+// arrives while one is in flight, it is coalesced into a single follow-up run.
+let _running = false;
+let _rerun = false;
+
+function triggerReconcile(reason) {
+    if (_running) {
+        _rerun = true;
+        return;
+    }
+    _running = true;
+    (async () => {
+        try {
+            do {
+                _rerun = false;
+                await reconcileDrives(reason);
+            } while (_rerun);
+        } catch (e) {
+            logger.error('[RECONCILE] Unhandled error in triggerReconcile', { error: e.message, reason });
+        } finally {
+            _running = false;
+        }
+    })();
+}
+
+// ─── USB hotplug (usb@3 WebUSB API) ──────────────────────────────────────────
+// Loaded in try/catch: if the native module fails to load we fall back to the
+// original 1s polling loop so the service can never be worse than before.
+let usbModule = null;
+let onUsbConnect = null;
+let onUsbDisconnect = null;
+
+try {
+    const { usb } = require('usb');
+    usbModule = usb;
+    logger.info('[USB] usb@3 loaded successfully — event-driven mode active');
+} catch (e) {
+    logger.warn('[USB] usb@3 native module failed to load — using 1s poll fallback', { error: e.message });
+}
+
+function onUsbChange(kind) {
+    // Schedule reconciles at 400 ms / 1200 ms / 3000 ms after the event so
+    // Windows has time to assign the drive letter after a plug, and to fully
+    // remove the drive after an unplug.
+    [400, 1200, 3000].forEach(ms => setTimeout(() => triggerReconcile('usb-' + kind), ms));
+}
+
+// ─── Safety-net timer handle (kept for SIGINT cleanup) ────────────────────────
+let safetyNetTimer = null;
+const SAFETY_NET_MS = 15000;
+
+// ─── Service entry point ──────────────────────────────────────────────────────
 async function startService() {
     logger.info('[MONITOR START] Initializing Enhanced Drive Monitor...');
-    await runEnhancedMonitor();
+    await redis.del(CONNECTED_DRIVE_LIST);
+
+    if (usbModule) {
+        // ── Event-driven path ──────────────────────────────────────────────
+        onUsbConnect = () => onUsbChange('connect');
+        onUsbDisconnect = () => onUsbChange('disconnect');
+        usbModule.addEventListener('connect', onUsbConnect);
+        usbModule.addEventListener('disconnect', onUsbDisconnect);
+
+        // Run an initial reconcile so the state is correct at startup
+        await reconcileDrives('startup');
+
+        // Safety-net: catches non-USB removable media, missed events, and
+        // refreshes space / uptime even when no plug/unplug occurs
+        safetyNetTimer = setInterval(() => triggerReconcile('safety-net'), SAFETY_NET_MS);
+
+        logger.info(`[USB] Hotplug listeners registered; safety-net interval ${SAFETY_NET_MS}ms`);
+    } else {
+        // ── Polling fallback path (original behaviour) ─────────────────────
+        logger.warn('[USB] Running 1s polling loop (usb module unavailable)');
+        await runPollingFallback();
+    }
+}
+
+// Original 1-second polling loop, preserved verbatim as fallback.
+// Now delegates to reconcileDrives() so both paths share identical logic.
+async function runPollingFallback() {
+    while (true) {
+        triggerReconcile('poll');
+        await sleep(1000);
+    }
 }
 
 startService();
 
 process.on('SIGINT', async () => {
-    logger.info('[MONITRO CLOSE] Cleaning up Enhanced Drive Monitor...');
+    logger.info('[MONITOR CLOSE] Cleaning up Enhanced Drive Monitor...');
+    if (safetyNetTimer) {
+        clearInterval(safetyNetTimer);
+    }
+    if (usbModule && onUsbConnect) {
+        usbModule.removeEventListener('connect', onUsbConnect);
+        usbModule.removeEventListener('disconnect', onUsbDisconnect);
+    }
     await redis.quit();
     await redisPubSub.quit();
     await pool.end();

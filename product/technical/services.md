@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18 (full logger rollout — all services migrated)
+Last updated: 2026-06-20 (event-driven USB detection — monitorConnectedExternalDrivesMicroservice refactored to usb@3 WebUSB hotplug + safety-net + polling fallback; ADR-0007 added)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -94,10 +94,13 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | PM2 name | `monitorConnectedExternalDrivesMicroservice` |
 | Dependencies | None |
 | Redis keys | `CONNECTED_DRIVE_STATE`, `CONNECTED_DRIVE_LIST` |
-| Redis channels | `CONNECTED_DRIVE_LIST_UPDATE` |
-| DB writes | `device_connections` (INSERT on connect, UPDATE on disconnect) |
+| Redis channels | `CONNECTED_DRIVE_LIST_UPDATE`, `CONNECTED_DRIVE_STATE_update` |
+| DB writes | `device_connections` (INSERT on connect, UPDATE space on each reconcile, UPDATE status/disconnected_at on disconnect, UPDATE uptime every 60s) |
 | Logging | `utils/logger.js` `createLogger({ service: 'monitorConnectedExternalDrives' })` |
-| Purpose | Polls connected drives via `systeminformation`; persists drive history to DB; publishes state to Redis for transfer services to consume |
+| Detection mode | **Event-driven** (primary): `usb@3.0.0` WebUSB `connect`/`disconnect` events via `addEventListener`. USB hotplug fires immediately on plug/unplug; 3 staggered reconciles at 400 ms / 1200 ms / 3000 ms handle Windows drive-letter assignment delay. **Safety-net** (secondary): 15-second `setInterval` catches non-USB removable media, missed events, and refreshes drive space/uptime. **Polling fallback** (tertiary): if the `usb` native module fails to load, the original 1-second `systeminformation` poll loop runs unchanged, so the service is never worse than before. |
+| Key lib | `usb@3.0.0` (NAPI-rs prebuilt, `@node-usb/usb-win32-x64-msvc`); `systeminformation@^5.22.11` |
+| Config reactivity | Subscribes to `CONFIG_STATE_KEY_update`; on config change immediately triggers a reconcile to refresh the auto-transfer specific-drive state. |
+| See ADR | ADR-0007 — Event-driven USB detection |
 
 ### monitorSpecialProcessesMicroservice.js
 

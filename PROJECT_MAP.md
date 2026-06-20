@@ -5,6 +5,8 @@ _Update this file whenever a service is added, a table changes, or a decision is
 
 > **For AI agents**: load this file at the start of every session. It is the canonical context for all architecture, data flow, and service decisions. Do not rely on parametric memory — trust this map.
 
+> **Related maps**: `FILES_VIDEOS_AUTO_TRANSFER_MAP.md` — deep dive on auto-transfer timing, ordering (oldest vs. newest per pipeline), and unhandled cases that can stall image/video transfer.
+
 ---
 
 ## [TECH_STACK]
@@ -31,6 +33,7 @@ _Update this file whenever a service is added, a table changes, or a decision is
 | Embedded DB (config) | NeDB | ^1.8.0 | Lightweight local config store (secondary to Redis) |
 | PDF generation | pdfkit | ^0.12.3 | Dashboard export reports |
 | System info | systeminformation | ^5.22.11 | Drive/system metrics |
+| USB hotplug | usb | ^3.0.0 (NAPI-rs) | WebUSB `connect`/`disconnect` events for instant drive detection; prebuilt `@node-usb/usb-win32-x64-msvc` (no build step); falls back to 1s polling if native load fails. See ADR-0007 |
 | MCP tooling | @henkey/postgres-mcp-server | npx (latest) | Cursor agent DB access (read-only SELECT) |
 | SecurOS host | ISS SecurOS Script Integration Engine | Site-specific | Hosts securos-scripts; provides `securos` module + event bus |
 
@@ -142,10 +145,10 @@ ConfigStateServiceRedis.js
   ← All services subscribe and reload config on change
 
 monitorConnectedExternalDrivesMicroservice.js
-  Detects USB/external drives (systeminformation)
+  Detects USB/external drives — event-driven via usb@3 WebUSB hotplug (near-instant) + 15s safety-net + 1s poll fallback
   WRITE → Redis: CONNECTED_DRIVE_STATE, CONNECTED_DRIVE_LIST
-  PUBLISH → Redis channel: CONNECTED_DRIVE_LIST_UPDATE
-  INSERT → device_connections (PostgreSQL)
+  PUBLISH → Redis channel: CONNECTED_DRIVE_LIST_UPDATE, CONNECTED_DRIVE_STATE_update
+  INSERT/UPDATE → device_connections (PostgreSQL)
 
 DashboardReportingBackend.js  [Express, port 8454]
   Serves Nunjucks pages + REST JSON API + WebSocket

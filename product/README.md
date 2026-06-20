@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18 (full logger rollout complete — all 23 services/helpers migrated to utils/logger.js)
+Last updated: 2026-06-20 (event-driven USB detection — usb@3 WebUSB hotplug, safety-net, fallback; ADR-0007 added)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
@@ -86,6 +86,7 @@ This folder is the **single source of truth** for product decisions, requirement
 | ADR-0004 | [decisions/0004-redis-state-and-pubsub.md](decisions/0004-redis-state-and-pubsub.md) | Use Redis for inter-service state and configuration propagation |
 | ADR-0005 | [decisions/0005-mcp-read-access-to-databases.md](decisions/0005-mcp-read-access-to-databases.md) | Provide MCP read-only access to PostgreSQL for Cursor AI agents |
 | ADR-0006 | [decisions/0006-shared-logger-trace-ids.md](decisions/0006-shared-logger-trace-ids.md) | Shared Winston logger with AsyncLocalStorage trace IDs for all PM2 services |
+| ADR-0007 | [decisions/0007-event-driven-usb-detection.md](decisions/0007-event-driven-usb-detection.md) | Replace polling with usb@3 WebUSB hotplug events + safety-net for instant drive detection |
 | Template | [decisions/template.md](decisions/template.md) | ADR template for new decisions |
 
 ### Root Maps

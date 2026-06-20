@@ -1,7 +1,7 @@
 # Technical Architecture
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-18 (full logger rollout complete — all 23 services/helpers migrated)
+Last updated: 2026-06-20 (event-driven USB detection — monitorConnectedExternalDrivesMicroservice refactored to usb@3 WebUSB hotplug + 15s safety-net + polling fallback; ADR-0007 added)
 
 > For a living service/table map, see [PROJECT_MAP.md](../../PROJECT_MAP.md).  
 > For database schema details, see [database/schema.md](database/schema.md).  
@@ -120,15 +120,26 @@ On change: re-read from Redis, restart relevant internal loops.
 ### Drive State (Redis + PostgreSQL)
 
 ```
-monitorConnectedExternalDrivesMicroservice.js
-        │  systeminformation.fsSize()
+USB plug/unplug
+        │  usb@3 WebUSB connect/disconnect event (near-instant, ~400ms latency)
+        │  [fallback: systeminformation.blockDevices() 1s polling loop]
+        ▼
+monitorConnectedExternalDrivesMicroservice.js  (reconcileDrives)
+        │  systeminformation.blockDevices() + fsSize()
         │  SET Redis: CONNECTED_DRIVE_STATE, CONNECTED_DRIVE_LIST
-        │  PUBLISH: CONNECTED_DRIVE_LIST_UPDATE
+        │  PUBLISH: CONNECTED_DRIVE_LIST_UPDATE, CONNECTED_DRIVE_STATE_update
         │  INSERT/UPDATE: device_connections (PostgreSQL)
         ▼
 Transfer services: read drive state before starting a transfer batch.
 DashboardReportingBackend: reads via Redis for real-time UI updates.
+
+Safety-net: 15s setInterval re-runs reconcileDrives() regardless of events
+(covers non-USB removable media, missed events, and space/uptime refresh).
+Config change: CONFIG_STATE_KEY_update subscription triggers an immediate
+reconcile to refresh the specific auto-transfer drive state.
 ```
+
+See **ADR-0007** for the decision to use event-driven detection.
 
 ### Process State (Redis)
 

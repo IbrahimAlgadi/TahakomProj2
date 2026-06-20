@@ -39,6 +39,7 @@
     "pdfkit": "^0.12.3",
     "pg": "^8.16.2",
     "systeminformation": "^5.22.11",
+    "usb": "^3.0.0",
     "uuid": "^9.0.1",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",
