@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-20 (event-driven USB detection — usb@3 WebUSB hotplug, safety-net, fallback; ADR-0007 added)
+Last updated: 2026-06-21 (O-B fixed — non-encrypted image USB path now uses successfulFileIds with correct file.file_id values and awaits markUSBSourceFilesAsTransferred; early-break batches no longer mark uncopied files)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
@@ -37,6 +37,7 @@ This folder is the **single source of truth** for product decisions, requirement
 | Diagrams Overview | [technical/diagrams/diagrams.md](technical/diagrams/diagrams.md) | Mermaid system/service architecture and file-transfer flow diagrams |
 | Auto USB Video Flow | [technical/diagrams/refactored_autoVideoTransferEDAMicroservice-activity.md](technical/diagrams/refactored_autoVideoTransferEDAMicroservice-activity.md) | Detailed activity diagram: USB video transfer (job mgmt, scheduling, encryption) |
 | Auto FTP Video Flow | [technical/diagrams/autoFtpVideoTransferService-activity.md](technical/diagrams/autoFtpVideoTransferService-activity.md) | Detailed activity diagram: FTP video transfer (scheduling, monitoring, buffer loops) |
+| Auto USB Image Flow | [technical/diagrams/autoUSBImageTransferService-activity.md](technical/diagrams/autoUSBImageTransferService-activity.md) | Detailed activity & behaviour map: USB image transfer (start/stop control, USB connect/disconnect, resume, continuous loop, exactly-3 rule, error handling, stall risks) |
 | Auto FTP Image Flow | [technical/diagrams/autoFTPImageTransferService-activity.md](technical/diagrams/autoFTPImageTransferService-activity.md) | Detailed activity diagram: FTP image transfer (batch-50, FTP readiness, retries) |
 | File Transfer Modes | [technical/diagrams/File transfer Modes.drawio](technical/diagrams/File%20transfer%20Modes.drawio) | Editable Draw.io diagram for VMS storage indexing workflow |
 

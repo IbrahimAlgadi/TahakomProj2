@@ -514,6 +514,7 @@ async function consumer() {
                         }
                     }
                 } else {
+                    const successfulFileIds = [];
                     for (const file of filesToProcess) {
                         try {
                             if (!IS_AUTO_TRANSFER_ACTIVE || !IS_DRIVE_CONNECTED || SHOULD_STOP_TRANSFER) {
@@ -531,6 +532,7 @@ async function consumer() {
 
                             await imageTransferManager.processImageFile(file);
                             processedCount++;
+                            successfulFileIds.push(file.file_id);
 
                             if (processedCount % 5 === 0 || processedCount === filesToProcess.length) {
                                 publishImageTransferMetrics('batch_progress', {
@@ -574,7 +576,9 @@ async function consumer() {
                         }
                     }
 
-                    TransferUtils.markUSBSourceFilesAsTransferred(pool, filesToProcess.map(f => f.id), "auto");
+                    if (successfulFileIds.length > 0) {
+                        await TransferUtils.markUSBSourceFilesAsTransferred(pool, successfulFileIds, "auto");
+                    }
                 }
 
                 const endTime = process.hrtime(startTime);
