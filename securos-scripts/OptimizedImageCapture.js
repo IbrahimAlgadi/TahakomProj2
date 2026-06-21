@@ -12,6 +12,7 @@ const { Pool } = require('pg');
 
 let ROOT_DIR = 'D:\\ISS\\SA\\6_Tahakom\\TahakomDataTransfer2026\\VideoTransferApp\\VideoTransferApp\\app';
 
+
 let SECUROS_CORE = null;
 let SITE_ID = '';
 let BASE_PATH = '';
@@ -166,44 +167,6 @@ let LPR_CAM = {
     '1': {
         'cam_ids': [
             {
-                id: '4',
-                format: 'jpg',
-                quality: 50
-            },
-            {
-                id: '3',
-                format: 'jpg',
-                quality: 70
-            },
-            {
-                id: '7',
-                format: 'jpg',
-                quality: 50
-            }
-        ]
-    },
-    '11': {
-        'cam_ids': [
-            {
-                id: '4',
-                format: 'jpg',
-                quality: 50
-            },
-            {
-                id: '3',
-                format: 'jpg',
-                quality: 70
-            },
-            {
-                id: '7',
-                format: 'jpg',
-                quality: 50
-            }
-        ]
-    },
-    '2': {
-        'cam_ids': [
-            {
                 id: '1',
                 format: 'jpg',
                 quality: 50
@@ -220,15 +183,15 @@ let LPR_CAM = {
             }
         ]
     },
-    '3': {
+    '2': {
         'cam_ids': [
             {
-                id: '6',
+                id: '3',
                 format: 'jpg',
                 quality: 50
             },
             {
-                id: '5',
+                id: '4',
                 format: 'jpg',
                 quality: 70
             },
@@ -239,6 +202,25 @@ let LPR_CAM = {
             }
         ]
     },
+    '3': {
+        'cam_ids': [
+            {
+                id: '5',
+                format: 'jpg',
+                quality: 50
+            },
+            {
+                id: '6',
+                format: 'jpg',
+                quality: 70
+            },
+            {
+                id: '7',
+                format: 'jpg',
+                quality: 50
+            }
+        ]
+    }
 }
 
 /**
@@ -256,26 +238,27 @@ async function loadImageExports(core) {
 }
 
 /**
- * Find the smallest image export queue size source ID
+ * Find the smallest image export queue size source ID.
+ * Prefers exporters whose queue_load is not 'OVER'. When all exporters are
+ * OVER the function falls back to the least-loaded one so dispatching never
+ * stops due to transient overload. NaN queue sizes (missing event params) are
+ * treated as 0 so they are always selectable and never cause null to be returned.
  * @param {Object} imageExports - Image export configuration
- * @returns {string} Smallest queue size source ID
+ * @returns {string|null} Smallest queue size source ID, or null if map is empty
  */
 function findSmallestImageExportQueueSizeSourceId(imageExports) {
-    let smallestQueueSize = Infinity;
-    let smallestSourceId = null;
+    let best = { id: null, size: Infinity };      // prefers queue_load !== 'OVER'
+    let fallback = { id: null, size: Infinity };   // any exporter, ignores OVER status
 
-    // Loop through all entries in IMAGE_EXPORTS
     Object.entries(imageExports).forEach(([sourceId, data]) => {
-        const queueSize = parseInt(data.queue_size);
-        const queueStatus = data.queue_load;
-        
-        if (queueSize < smallestQueueSize && queueStatus !== 'OVER') {
-            smallestQueueSize = queueSize;
-            smallestSourceId = sourceId;
-        }
+        let queueSize = parseInt(data.queue_size);
+        if (Number.isNaN(queueSize)) queueSize = 0;
+        if (queueSize < fallback.size) fallback = { id: sourceId, size: queueSize };
+        if (data.queue_load !== 'OVER' && queueSize < best.size) best = { id: sourceId, size: queueSize };
     });
 
-    return smallestSourceId;
+    // Use a healthy exporter if one exists; fall back to least-loaded when all are OVER
+    return best.id ?? fallback.id;
 }
 
 /**
@@ -491,38 +474,47 @@ function createFileObject(tid, camera_id, folderInfo, car_number, file_name, wri
  * @param {Array<string>} folderInfo - Folder information
  */
 async function processCameraCapture(core, dbHandler, camConfig, e, writeDir, folderInfo) {
-    const camera = await core.getObject("CAM", camConfig.id);
-    const tid = e.params.tid;
-    const car_number = e.params.number || "without_plate";
-    
-    // Create file name with specific format
-    const file_name = createFileName(e.params.time_leave, camera.params.name, car_number, camConfig.format);
-    // console.log("Image: ", file_name + "." + camConfig.format);
-
-    // Get image export ID for load balancing
-    const imageExportId = findSmallestImageExportQueueSizeSourceId(IMAGE_EXPORTS);
-    console.log("Image Processor: ", imageExportId);
-
-    // Create and log export parameters with camera-specific format and quality
-    const exportParams = createExportParams(tid, camConfig.id, e.params.time_leave, file_name, writeDir, camConfig);
-
-    console.log(exportParams);
-
-    // Trigger image export
-    core.doReact("IMAGE_EXPORT", imageExportId, "EXPORT", exportParams);
-    IMAGE_EXPORTS[imageExportId].queue_size += 1;
-
-    // Create file object and insert to database directly
-    const fileObject = createFileObject(tid, camConfig.id, folderInfo, car_number, file_name, writeDir, e.params.time_leave, camConfig.format);
-    // Add export parameters to file object
-    fileObject.export_params = exportParams;
-    
-    // Direct database call (no microservice)
     try {
-        await dbHandler.insertFileToDatabase(fileObject);
-    } catch (error) {
-        console.error('Failed to insert file to database:', error);
-        // Handle error appropriately - maybe retry or log for later processing
+        const camera = await core.getObject("CAM", camConfig.id);
+        const tid = e.params.tid;
+        const car_number = e.params.number || "without_plate";
+        
+        // Create file name with specific format
+        const file_name = createFileName(e.params.time_leave, camera.params.name, car_number, camConfig.format);
+        // console.log("Image: ", file_name + "." + camConfig.format);
+
+        // Get image export ID for load balancing
+        const imageExportId = findSmallestImageExportQueueSizeSourceId(IMAGE_EXPORTS);
+        console.log("Image Processor: ", imageExportId);
+
+        // Guard: IMAGE_EXPORTS map is empty (no exporters loaded yet)
+        if (imageExportId == null || !IMAGE_EXPORTS[imageExportId]) {
+            console.warn(`[!] No IMAGE_EXPORT available for ${file_name}; IMAGE_EXPORTS map is empty. Skipping dispatch.`);
+            return;
+        }
+
+        // Create and log export parameters with camera-specific format and quality
+        const exportParams = createExportParams(tid, camConfig.id, e.params.time_leave, file_name, writeDir, camConfig);
+
+        console.log(exportParams);
+
+        // Trigger image export
+        core.doReact("IMAGE_EXPORT", imageExportId, "EXPORT", exportParams);
+        IMAGE_EXPORTS[imageExportId].queue_size += 1;
+
+        // Create file object and insert to database directly
+        const fileObject = createFileObject(tid, camConfig.id, folderInfo, car_number, file_name, writeDir, e.params.time_leave, camConfig.format);
+        // Add export parameters to file object
+        fileObject.export_params = exportParams;
+        
+        // Direct database call (no microservice)
+        try {
+            await dbHandler.insertFileToDatabase(fileObject);
+        } catch (error) {
+            console.error('Failed to insert file to database:', error);
+        }
+    } catch (err) {
+        console.error('[!] processCameraCapture failed:', err);
     }
 }
 
@@ -530,7 +522,7 @@ loadConfig();
 
 securos.connect(async (core) => {
     SECUROS_CORE = core;
-    loadImageExports(core);
+    await loadImageExports(core);
 
     // Create direct database handler instead of microservice sender
     const dbHandler = new DirectDatabaseHandler();

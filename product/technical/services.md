@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-20 (event-driven USB detection — monitorConnectedExternalDrivesMicroservice refactored to usb@3 WebUSB hotplug + safety-net + polling fallback; ADR-0007 added)
+Last updated: 2026-06-21 (SecurOS export crash fixes — OptimizedImageCapture.js load balancer OVER-fallback, null guard, outer try/catch, await startup; Export Fixer unawaited pool.query deadlock crash fixed)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -20,8 +20,8 @@ Executed by the **ISS SecurOS Script Integration Engine**. They share the same S
 | File | `securos-scripts/OptimizedImageCapture.js` |
 | Config reads | `dataTransferConfig.json`: `storage.directory`, `storage.siteId` |
 | DB writes | INSERT `files` (plate, camera, path, export_params; `file_size=0`) |
-| Key logic | Builds target path `BASE_PATH/SITE_ID/DATE/TIME`; dispatches `IMAGE_EXPORT` to the least-busy exporter via load-balanced queue depth check |
-| Error handling | Logs DB insert failures; does not retry capture (relies on Export Fixer) |
+| Key logic | Builds target path `BASE_PATH/SITE_ID/DATE/TIME`; dispatches `IMAGE_EXPORT` to the least-busy non-`OVER` exporter. **When all exporters are `OVER`, falls back to the globally least-loaded one** so capture never stops under burst load. `NaN` queue sizes (missing event params) are treated as 0. Initial exporter map load is `await`ed to avoid a startup race. |
+| Error handling | Each `processCameraCapture` call is wrapped in a top-level `try/catch` so no single capture failure can throw to the SecurOS runtime and crash the script process. Logs DB insert failures and null-exporter warnings; does not retry capture (relies on Export Fixer). |
 
 ### ImageExportSuccessOptimized.js
 
@@ -49,7 +49,7 @@ Executed by the **ISS SecurOS Script Integration Engine**. They share the same S
 | File | `securos-scripts/Export Fixer Microservice.js` |
 | DB reads | SELECT `files` WHERE `file_size=0` AND `image_export_done_date_time IS NULL` AND `deleted=false` AND `export_retry_count < 1` AND within today's time window |
 | DB writes | UPDATE `export_retry_count`, `export_retry_log_object` |
-| Key logic | Safety net for exports that never fired EXPORT_DONE or EXPORT_FAILED; re-dispatches IMAGE_EXPORT |
+| Key logic | Safety net for exports that never fired EXPORT_DONE or EXPORT_FAILED; re-dispatches IMAGE_EXPORT. `NaN` queue sizes are treated as 0 in the load balancer. **Null guard** before `queue_size += 1` — empty map skips with a warning. **`await pool.query`** on the retry-count UPDATE — previously unawaited, causing concurrent UPDATEs that deadlocked PostgreSQL (40P01) and crashed the process via unhandled Promise rejection. |
 
 ### ExportDirectoryControlV3.js
 

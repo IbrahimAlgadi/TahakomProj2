@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-21 (O-D fixed — processImageFile and processEncryptedImageBatch now call markImageFilesAsTransferred to correctly update files.is_auto_transferred; encrypted-path files no longer re-queued indefinitely)
+Last updated: 2026-06-21 (SecurOS export crash fixes — OptimizedImageCapture.js OVER-fallback + null guard + try/catch (T-7); Export Fixer unawaited pool.query deadlock crash fixed (T-8))
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

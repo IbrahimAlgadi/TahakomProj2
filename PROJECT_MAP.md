@@ -53,7 +53,10 @@ OptimizedImageCapture.js
   ├─ INSERT files (tid, plate_num, cam_id, site_id, file_path, file_name,
   │                date_folder, time_folder, date, time, export_params,
   │                file_size=0, deleted=false, is_auto_transferred=false)
-  └─ Dispatches IMAGE_EXPORT → EXPORT reaction (load-balanced to least-busy IMAGE_EXPORT object)
+  └─ Dispatches IMAGE_EXPORT → EXPORT reaction
+       Load-balancer: prefers least-busy non-OVER exporter;
+       falls back to globally least-loaded when ALL exporters are OVER.
+       Each capture wrapped in try/catch — no single event can crash the process.
 
 SecurOS IMAGE_EXPORT Engine
   ├─ EXPORT_DONE  ──► ImageExportSuccessOptimized.js
@@ -426,3 +429,5 @@ These archived files contain detail that should eventually be verified and lifte
 | T-5b | No unit tests for SecurOS scripts | `securos-scripts/` | Low — not possible without the SecurOS runtime injection; consider a mock harness |
 | T-5c | No tests for FTP transfer managers, JobManager, CompleteBufferManager, dashboard routes | `services/*/Ftp*.js`, `state/`, `routes/` | Medium — integration test suite planned; see `TEST_MAP.md` §Gaps |
 | ~~T-6~~ | ~~`/files/data` used a CTE + self-JOIN on `SUBSTRING(tid,1,LENGTH(tid)-1)` — cross-plate file aggregation bug + perf~~ | ~~`routes/mainControlRoutes.js`~~ | **Fixed** (Jun 2026) — replaced with single-pass GROUP BY on event_tid + plate_num; countQuery also aligned |
+| ~~T-7~~ | ~~`OptimizedImageCapture.js` crashed (TypeError: Cannot read properties of undefined, 'queue_size') when all IMAGE_EXPORT queues flipped OVER — load balancer returned null; unguarded dereference exited the SecurOS node process (exit code 1), stopping all ALPR capture~~ | ~~`securos-scripts/OptimizedImageCapture.js`, `securos-scripts/Export Fixer Microservice.js`~~ | **Fixed 2026-06-21** — load balancer falls back to least-loaded when all OVER; NaN→0 for missing queue_size; null guard + outer try/catch in `processCameraCapture`; `await loadImageExports` at startup; matching NaN + null guard added to Export Fixer |
+| ~~T-8~~ | ~~`Export Fixer Microservice.js` crashed (PostgreSQL 40P01 deadlock + unhandled Promise rejection, exit code 1) — `pool.query(updateRetryCountQuery)` was not awaited, firing 8 concurrent UPDATEs on `files` that deadlocked each other; Node.js 22 treats unhandled rejections as fatal~~ | ~~`securos-scripts/Export Fixer Microservice.js` line 238~~ | **Fixed 2026-06-21** — added `await` to `pool.query(updateRetryCountQuery)`; UPDATEs are now serialised; any transient deadlock propagates to the surrounding try/catch instead of killing the process |

@@ -88,9 +88,11 @@ async function loadImageExports(core) {
 }
 
 /**
- * Find the smallest image export queue size source ID
+ * Find the smallest image export queue size source ID.
+ * NaN queue sizes (missing event params) are treated as 0 so they are always
+ * selectable and never cause null to be returned on a non-empty map.
  * @param {Object} imageExports - Image export configuration
- * @returns {string} Smallest queue size source ID
+ * @returns {string|null} Smallest queue size source ID, or null if map is empty
  */
 function findSmallestImageExportQueueSizeSourceId(imageExports) {
     let smallestQueueSize = Infinity;
@@ -98,7 +100,8 @@ function findSmallestImageExportQueueSizeSourceId(imageExports) {
 
     // Loop through all entries in IMAGE_EXPORTS
     Object.entries(imageExports).forEach(([sourceId, data]) => {
-        const queueSize = parseInt(data.queue_size);
+        let queueSize = parseInt(data.queue_size);
+        if (Number.isNaN(queueSize)) queueSize = 0;
 
         if (queueSize < smallestQueueSize) {
             smallestQueueSize = queueSize;
@@ -207,6 +210,11 @@ ORDER BY id DESC;
 
             let CURRENT_PROCESSOR = findSmallestImageExportQueueSizeSourceId(IMAGE_EXPORTS);
 
+            if (CURRENT_PROCESSOR == null || !IMAGE_EXPORTS[CURRENT_PROCESSOR]) {
+                console.warn(`[!] No IMAGE_EXPORT available (empty map); skipping retry for tid=${tid}.`);
+                continue;
+            }
+
             if (export_retry_count > 2) {
                 timestamp = formatTimestampRemoveMillis(fileRecord.timestamp);
             }
@@ -227,8 +235,7 @@ ORDER BY id DESC;
             console.log("------------------");
 
             const updateRetryCountQuery = "UPDATE files SET export_retry_count=$1, export_retry_log_object=$3 where tid=$2";
-            pool.query(updateRetryCountQuery, [export_retry_count + 1, tid, JSON.stringify(export_retry_log_object)]);
-            // pool.query(updateRetryCountQuery, [export_retry_count + 1, tid, JSON.stringify(export_retry_log_object)]);
+            await pool.query(updateRetryCountQuery, [export_retry_count + 1, tid, JSON.stringify(export_retry_log_object)]);
 
             core.doReact(
                 "IMAGE_EXPORT",
