@@ -39,7 +39,7 @@ These are in `product/technical/diagrams/autoUSBImageTransferService-activity.md
 | ID | Location | Status | Issue |
 |---|---|---|---|
 | ~~O-B~~ | `autoUSBImageTransferService.js` | **Fixed 2026-06-21** | `markUSBSourceFilesAsTransferred` now receives `successfulFileIds` (array of `file.file_id` values) built inside the per-file loop; call is guarded by `length > 0` and awaited. Early-break batches no longer mark uncopied files. |
-| O-C | Consumer loop + DB job model | Open | USB disconnect leaves job `status='transferring'` — monitoring queries see a "live" job even when the loop is idling. |
+| ~~O-C~~ | Consumer loop + DB job model | **Fixed 2026-06-21** | `!IS_DRIVE_CONNECTED` gate now calls `await imageJobManager.pauseActiveJobs('USB drive disconnected')` before sleeping, mirroring the other idle gates. Resume is unchanged — `getOrCreateActiveJob` auto-resumes `paused` jobs on reconnect. |
 | O-D | Source-marking inconsistency | Open | `processImageFile` calls `markSourceFilesAsTransferred` (updates `iss_media_files`); `markUSBSourceFilesAsTransferred` updates `files`. `getFilesToTransfer` filters on `files.is_auto_transferred`. If the two tables diverge, files could be re-queued. |
 | O-E | Unused query | Open | `query2` in `getFilesToTransfer` (today-only filter) is defined but never called. |
 

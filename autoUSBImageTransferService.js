@@ -397,6 +397,7 @@ async function consumer() {
 
             if (!IS_DRIVE_CONNECTED) {
                 logger.info("[USB_IMAGE_CONSUMER] Drive not connected - service paused");
+                await imageJobManager.pauseActiveJobs('USB drive disconnected');
                 await sleep(1000);
                 continue;
             }

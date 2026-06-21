@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-21 (O-B fixed — non-encrypted image USB path now uses successfulFileIds with correct file.file_id values and awaits markUSBSourceFilesAsTransferred; early-break batches no longer mark uncopied files)
+Last updated: 2026-06-21 (O-C fixed — USB disconnect now sets job to paused via pauseActiveJobs in the !IS_DRIVE_CONNECTED gate; reconnect auto-resumes via existing getOrCreateActiveJob logic)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
