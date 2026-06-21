@@ -137,8 +137,8 @@ class ImageTransferManager {
                 WHERE id = $1
             `, [file.id]);
             
-            // Update original files table
-            await TransferUtils.markSourceFilesAsTransferred(this.pool, [file.file_id], 'auto');
+            // Update original files table (files.is_auto_transferred — the column getFilesToTransfer checks)
+            await TransferUtils.markImageFilesAsTransferred(this.pool, [file.file_id], 'auto');
             
             logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processImageFile: Successfully transferred image file ID: ${file.id}`);
             
@@ -320,8 +320,8 @@ class ImageTransferManager {
                     WHERE id = $1
                 `, [file.id]);
                 
-                // Update original files table
-                await TransferUtils.markSourceFilesAsTransferred(this.pool, [file.file_id], 'auto');
+                // Update original files table (files.is_auto_transferred — the column getFilesToTransfer checks)
+                await TransferUtils.markImageFilesAsTransferred(this.pool, [file.file_id], 'auto');
                 
                 logger.info(`[IMAGE_TRANSFER] ImageTransferManager.processEncryptedImageBatch: Successfully transferred image file ID: ${file.id}`);
             }

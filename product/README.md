@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-21 (O-C fixed — USB disconnect now sets job to paused via pauseActiveJobs in the !IS_DRIVE_CONNECTED gate; reconnect auto-resumes via existing getOrCreateActiveJob logic)
+Last updated: 2026-06-21 (O-D fixed — processImageFile and processEncryptedImageBatch now call markImageFilesAsTransferred to correctly update files.is_auto_transferred; encrypted-path files no longer re-queued indefinitely)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
