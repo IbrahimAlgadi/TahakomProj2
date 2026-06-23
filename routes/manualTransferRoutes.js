@@ -14,7 +14,20 @@ function createManualTransferRouter({ logger, pool, redis, readConfig, writeConf
 
 
     router.post('/manual-transfer/create', async (req, res) => {
-        const { startDateTime, endDateTime, usbPath, encryption } = req.body;
+        const { startDateTime, endDateTime, usbPath, encryption, dataType = 'images' } = req.body;
+
+        // Video files from iss_media_files are .issvd format and require an ffmpeg
+        // conversion pipeline before they can be copied to USB.  The transfer_job_log
+        // table also requires a file_id FK to the files table (NOT NULL), so video
+        // tracking needs a schema change.  Block until MV-B / MV-C are implemented.
+        if (dataType === 'videos' || dataType === 'both') {
+            return res.status(400).json({
+                success: false,
+                error: `Video transfer (${dataType}) is not yet supported in the manual transfer module. ` +
+                       'ISS video files (.issvd) require conversion before USB transfer. ' +
+                       'Use the auto USB video transfer service instead.'
+            });
+        }
     
         try {
             await pool.query('BEGIN');
@@ -93,21 +106,50 @@ function createManualTransferRouter({ logger, pool, redis, readConfig, writeConf
     router.post('/manual-transfer/summary', async (req, res) => {
         try {
             console.log('summary', req.body);
-            const { startDateTime, endDateTime } = req.body;
+            const { startDateTime, endDateTime, dataType = 'images' } = req.body;
             const startDate = new Date(startDateTime);
             const endDate = new Date(endDateTime);
             const startTS = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')} ${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}:00.000`;
             const endTS = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')} ${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}:59.999`;
-            
-            // Use the (date + time::interval) expression that matches idx_files_date_time
-            // so PostgreSQL uses the index instead of a full table scan.
-            const result = await pool.query(`
-                SELECT COUNT(*) as total_files, SUM(file_size) as total_size FROM files
+
+            // Images query — uses idx_files_date_time (date + time::interval expression).
+            const imageQuery = `
+                SELECT COUNT(*)::int as total_files, COALESCE(SUM(file_size), 0)::bigint as total_size
+                FROM files
                 WHERE (date + time::interval) >= $1::timestamp
                   AND (date + time::interval) <= $2::timestamp
-                  AND deleted = false AND file_path IS NOT NULL AND file_size IS NOT NULL
-            `, [startTS, endTS]);
-            res.json({ success: true, summary: result.rows[0] });
+                  AND deleted = false AND file_path IS NOT NULL AND file_size IS NOT NULL`;
+
+            // Video query — iss_media_files uses recording_date + recording_time::interval.
+            const videoQuery = `
+                SELECT COUNT(*)::int as total_files, COALESCE(SUM(file_size), 0)::bigint as total_size
+                FROM iss_media_files
+                WHERE (recording_date + recording_time::interval) >= $1::timestamp
+                  AND (recording_date + recording_time::interval) <= $2::timestamp
+                  AND deleted = false AND file_path IS NOT NULL AND file_size IS NOT NULL`;
+
+            let total_files = 0;
+            let total_size = 0;
+
+            if (dataType === 'images') {
+                const r = await pool.query(imageQuery, [startTS, endTS]);
+                total_files = parseInt(r.rows[0].total_files);
+                total_size  = parseInt(r.rows[0].total_size);
+            } else if (dataType === 'videos') {
+                const r = await pool.query(videoQuery, [startTS, endTS]);
+                total_files = parseInt(r.rows[0].total_files);
+                total_size  = parseInt(r.rows[0].total_size);
+            } else {
+                // 'both' — run both queries in parallel.
+                const [imgR, vidR] = await Promise.all([
+                    pool.query(imageQuery, [startTS, endTS]),
+                    pool.query(videoQuery, [startTS, endTS])
+                ]);
+                total_files = parseInt(imgR.rows[0].total_files) + parseInt(vidR.rows[0].total_files);
+                total_size  = parseInt(imgR.rows[0].total_size)  + parseInt(vidR.rows[0].total_size);
+            }
+
+            res.json({ success: true, summary: { total_files, total_size } });
         } catch (error) {
             logger.error('Error getting transfer summary:', error);
             res.status(500).json({ success: false, error: 'Failed to get transfer summary' });

@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-23 (MI-P: summary/create queries rewritten to use idx_files_date_time index via (date+time::interval) expression; loading spinners added to Show Summary and Create Job buttons)
+Last updated: 2026-06-23 (MV-A partial: summary now queries correct table per dataType; create blocks video/both with 400; UI warning notice + Create disabled for video/both; default changed from both→images)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

@@ -47,22 +47,5 @@
     "publicKeyFilename": "public_key.pem",
     "privateKeyFilename": "private_key.pem"
   },
-  "manualTransfer": {
-    "jobId": 5,
-    "drive": "G:",
-    "startDateTime": "2026-06-23T13:00",
-    "endDateTime": "2026-06-23T13:05",
-    "encryption": {
-      "enabled": false
-    },
-    "createdAt": "2026-06-23T12:40:40.927Z",
-    "status": {
-      "isPaused": false,
-      "totalSize": 134937946,
-      "transferredFiles": 0,
-      "totalFiles": 531,
-      "isFinished": false,
-      "isCancelled": false
-    }
-  }
+  "manualTransfer": null
 }

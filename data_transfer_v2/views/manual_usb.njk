@@ -50,6 +50,7 @@
                                         name="dataType" 
                                         id="imagesOnly"
                                         value="images"
+                                        checked
                                     >
                                     <label class="form-check-label" for="imagesOnly">
                                         <i class="fas fa-image me-2 text-primary"></i><strong>Images Only</strong> - Transfer image files (.jpg, .jpeg)
@@ -76,11 +77,15 @@
                                         name="dataType"
                                         id="bothTypes"
                                         value="both"
-                                        checked
                                     >
                                     <label class="form-check-label" for="bothTypes">
                                         <i class="fas fa-file-alt me-2 text-info"></i><strong>Both Images & Videos</strong> - Transfer all media files
                                     </label>
+                                </div>
+
+                                <div id="videoNotSupported" class="alert alert-warning py-2 small mb-0" style="display:none;">
+                                    <i class="fas fa-exclamation-triangle me-1"></i>
+                                    <strong>Video transfer not yet available.</strong> ISS video files (.issvd) require a conversion pipeline before USB transfer. The summary shows how many files are in range, but job creation is disabled for video selections. Use the Auto USB Video Transfer service instead.
                                 </div>
                             </div>
 
@@ -705,6 +710,25 @@
             document
                 .getElementById('createTransferBtn')
                 .disabled = true;
+
+            // Show/hide video-not-supported notice and gate Create button based on dataType.
+            function updateDataTypeUI() {
+                const selected = document.querySelector('input[name="dataType"]:checked').value;
+                const videoNotice = document.getElementById('videoNotSupported');
+                const createBtn   = document.getElementById('createTransferBtn');
+                if (selected === 'videos' || selected === 'both') {
+                    videoNotice.style.display = 'block';
+                    createBtn.disabled = true;
+                } else {
+                    videoNotice.style.display = 'none';
+                    // Leave create button state to the summary handler — it enables it after a
+                    // successful summary fetch.  Only force-disable when switching away from images.
+                }
+            }
+            document.querySelectorAll('input[name="dataType"]').forEach(function(radio) {
+                radio.addEventListener('change', updateDataTypeUI);
+            });
+            updateDataTypeUI(); // run once on page load to reflect default selection
 
             // Create transfer job
             document
