@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-23 (V-C fixed — isTransferringToStorageRunning flag-leak patched; flag now reset on drive-not-ready and no-file early returns in _startTransferToStorageAsync)
+Last updated: 2026-06-23 (V-D fixed — duplicate checkJobVideoTransferCompletion removed from JobManager; correct transfer-status-based definition now sole surviving implementation)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

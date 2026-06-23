@@ -609,64 +609,6 @@ class JobManager {
     }
 
     /**
-     * Check if job is complete based on video_transfer_queue status
-     */
-    async checkJobVideoTransferCompletion(jobId) {
-        try {
-            // Check if all expected cameras have videos in the transfer queue
-            const result = await this.pool.query(`
-                SELECT 
-                    vtqj.expected_cameras,
-                    ARRAY_AGG(DISTINCT vtq.camera_id::text) as cameras_with_videos,
-                    COUNT(vtq.id) as total_videos,
-                    COUNT(CASE WHEN vtq.status = 'transferred' THEN 1 END) as transferred_videos
-                FROM video_transfer_queue_job vtqj
-                LEFT JOIN video_transfer_queue vtq ON vtqj.id = vtq.job_id
-                WHERE vtqj.id = $1
-                GROUP BY vtqj.id, vtqj.expected_cameras
-            `, [jobId]);
-
-            if (result.rows.length === 0) {
-                return false;
-            }
-
-            const row = result.rows[0];
-            const expectedCameras = row.expected_cameras || [];
-            const camerasWithGroupedVideos = row.cameras_with_videos || [];
-            const totalVideos = parseInt(row.total_videos) || 0;
-            const transferredVideos = parseInt(row.transferred_videos) || 0;
-
-            // Loop through each camera and get count of files in video_converted_buffer
-            const cameraBufferCounts = {};
-            let allCamerasHaveVideos = false;
-            for (const cameraId of expectedCameras) {
-                const bufferResult = await this.pool.query(`
-                    SELECT COUNT(*) as file_count
-                    FROM video_converted_buffer
-                    WHERE camera_id = $1 AND job_id = $2
-                `, [parseInt(cameraId), jobId]);
-                
-                cameraBufferCounts[cameraId] = parseInt(bufferResult.rows[0].file_count) || 0;
-                if (cameraBufferCounts[cameraId] >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
-                    allCamerasHaveVideos = true;
-                }
-            }
-
-            logger.info(`[JOB] JobManager.checkJobVideoTransferCompletion: Job ${jobId} completion check:`);
-            logger.info(`      JobManager.checkJobVideoTransferCompletion:  Expected cameras: ${expectedCameras.join(', ')}`);
-            logger.info(`      JobManager.checkJobVideoTransferCompletion:  Cameras with grouped videos: ${camerasWithGroupedVideos.join(', ')}`);
-            logger.info(`      JobManager.checkJobVideoTransferCompletion:  All cameras have videos: ${allCamerasHaveVideos}`);
-            logger.info(`      JobManager.checkJobVideoTransferCompletion:  Videos: ${transferredVideos}/${totalVideos} transferred`);
-            logger.info(`      JobManager.checkJobVideoTransferCompletion:  Buffer file counts per camera:`, cameraBufferCounts);
-
-            return allCamerasHaveVideos && totalVideos > 0;
-        } catch (error) {
-            logger.error(`[JOB_ERROR] JobManager.checkJobVideoTransferCompletion: Error checking job video transfer completion for job ${jobId}:`, error);
-            throw error;
-        }
-    }
-
-    /**
      * Create new job with UUID batch ID and 'created' status
      */
     async createNewJobWithUUID(expectedCameras = null) {

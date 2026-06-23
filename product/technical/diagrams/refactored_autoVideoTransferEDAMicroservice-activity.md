@@ -574,16 +574,18 @@ if (!fileToTransfer) {
 
 The flag is now correctly released on every exit path of the method.
 
-### V-D — Duplicate `checkJobVideoTransferCompletion` definition (second overwrites first)
+### V-D — Duplicate `checkJobVideoTransferCompletion` definition — **Fixed (2026-06-23)**
 
-`JobManager` defines `checkJobVideoTransferCompletion` **twice**:
+**Root cause**: `JobManager` defined `checkJobVideoTransferCompletion` twice. In a JavaScript class body the second definition silently wins:
 
-- **Lines ~166–186** (first): counts `transferred + failed` rows in `video_transfer_queue`, returns `true` when `totalProcessedCount >= ISS_MEDIA_CAMERAS.length`.
-- **Lines ~566–618** (second): loops through expected cameras, checks `video_converted_buffer` file counts, returns `true` when ANY camera has `>= ISS_VIDEO_TRANSFER_CONVERSION_COUNT` buffer files AND `totalVideos > 0`.
+- **First definition (lines 166–186) — correct semantics**: counted `transferred + failed` rows in `video_transfer_queue`, returning `true` when `totalProcessedCount >= ISS_MEDIA_CAMERAS.length`. Genuine transfer-completion check.
+- **Second definition (lines 614–667) — wrong semantics**: queried `video_converted_buffer` file counts, returning `true` when *any* camera had `>= ISS_VIDEO_TRANSFER_CONVERSION_COUNT` buffer files. This is a buffer-readiness check, not a transfer-completion check, and was incorrectly named.
 
-In JavaScript class bodies, the second definition silently replaces the first. The surviving implementation (lines 566–618) uses buffer file counts (still-converting files) rather than `video_transfer_queue.status = 'transferred'` to decide if the job is done. This can cause premature `pending` status transitions before videos are actually transferred.
+The surviving (second) definition could cause premature `pending` status transitions — a job flagged complete while videos were still converting, not yet transferred.
 
-The method is called from `_handlePendingProcessingJobStatus` (which is not part of the active code path) and `getOrCreateActiveJob` (legacy path, also not active — the current path uses `getExistingUncompletedJobs`).
+Both call sites (`getOrCreateActiveJob` line 43 and `_handlePendingProcessingJobStatus` in the main service) are dead code: the active loop uses `getExistingUncompletedJobs` → `_handleJobProcessing` → `_processSingleCameraJob` and never reaches either caller.
+
+**Fix** (`services/video-transfer/state/JobManager.js`): Deleted the entire second definition (lines 611–667, including its JSDoc comment). The correct first definition is now the sole surviving implementation. No call-site changes were needed.
 
 ### V-E — `processFilesToBuffer` references undefined variables (incomplete refactor)
 
