@@ -587,19 +587,22 @@ Both call sites (`getOrCreateActiveJob` line 43 and `_handlePendingProcessingJob
 
 **Fix** (`services/video-transfer/state/JobManager.js`): Deleted the entire second definition (lines 611–667, including its JSDoc comment). The correct first definition is now the sole surviving implementation. No call-site changes were needed.
 
-### V-E — `processFilesToBuffer` references undefined variables (incomplete refactor)
+### V-E — `processFilesToBuffer` references undefined variables — **Fixed (2026-06-23)**
 
-`CompleteBufferManager.processFilesToBuffer(group, jobId)` references `camera_id`, `date`, `group_key`, `interval_start`, `interval_end` as bare variables, but `group` is never destructured:
+**Root cause**: `CompleteBufferManager.processFilesToBuffer(group, jobId)` used `camera_id`, `date`, `group_key`, `interval_start`, `interval_end` as bare variables without destructuring `group`. The method would throw `ReferenceError: camera_id is not defined` on its first line if called. The method was dead code (the `filesReady` event is never emitted from the active path), but the event listener is registered and `_handleFilesReady` calls `bufferManager.processFilesToBuffer(group, job.id)` at line 352 of the main service.
+
+**Fix** (`services/video-transfer/processors/CompleteBufferManager.js`): Added one destructuring line immediately inside `try {`:
 
 ```js
 async processFilesToBuffer(group, jobId) {
     try {
-        const isReady = await this.checkCameraGroupReady(camera_id, date, group_key); // ReferenceError
+        const { camera_id, date, group_key, interval_start, interval_end } = group;
+        const isReady = await this.checkCameraGroupReady(camera_id, date, group_key);
         // ...
         const videoData = await this.createVideoFromBuffer(jobId, camera_id, date, group_key, interval_start, interval_end);
 ```
 
-This would throw a `ReferenceError` on the first line if called. The method is currently unreachable: the `'filesReady'` event that would trigger `_handleFilesReady` → `processFilesToBuffer` is never emitted from the active code path. It indicates an incomplete migration from the old event-driven pattern to the current direct-call pattern in `_processSingleCameraJob`.
+Downstream call signatures are correct: `checkCameraGroupReady(cameraId, date, groupKey)` matches the call exactly; `createVideoFromBuffer(jobId, cameraId)` only uses the first two arguments — the remaining four are silently ignored. Note: V-F (`videoCreated` → `updateJobStats` crash) remains open on this path.
 
 ### V-F — `_handleVideoCreated` calls `updateJobStats` which does not exist on `JobManager`
 

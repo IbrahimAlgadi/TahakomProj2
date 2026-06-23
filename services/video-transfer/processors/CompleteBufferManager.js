@@ -271,6 +271,7 @@ class CompleteBufferManager {
      */
     async processFilesToBuffer(group, jobId) {
         try {
+            const { camera_id, date, group_key, interval_start, interval_end } = group;
             // After all files are processed, check if group is ready for concatenation
             const isReady = await this.checkCameraGroupReady(camera_id, date, group_key);
             if (isReady) {
