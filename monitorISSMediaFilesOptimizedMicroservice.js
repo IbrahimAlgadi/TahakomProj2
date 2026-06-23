@@ -8,7 +8,7 @@ const { sleep } = require('./utils.js');
 const { MEDIA_INDEX_STATUS, MEDIA_INDEX_UPDATE, CONFIG_STATE_KEY } = require('./redisKeyStore.js');
 const { createLogger, runWithTrace, newTraceId } = require('./utils/logger');
 
-const logger = createLogger({ service: 'monitorISSMediaFilesOptimized', logFile: 'monitor' });
+const logger = createLogger({ service: 'monitorISSMediaFilesOptimized', logFile: 'monitor-iss-media' });
 
 // Configuration
 const config = require('./utils/envConfig');
