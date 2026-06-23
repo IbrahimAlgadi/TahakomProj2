@@ -2,18 +2,19 @@ const express = require('express');
 const fs = require('fs-extra');
 const path = require('path');
 const fileTransferQueue = require('../utils/FileTransferQueueService');
+const { getDriveInfo } = require('../utils/driveUtils');
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function createManualTransferRouter({ logger, pool, redis, readConfig, writeConfig, ROOT_DIR, EXPORT_DIR }) {
+function createManualTransferRouter({ logger, pool, redis, readConfig, writeConfig, ROOT_DIR, EXPORT_DIR, emitEventToClients }) {
     const router = express.Router();
 
 
 
     router.post('/manual-transfer/create', async (req, res) => {
-        const { startDateTime, endDateTime, usbPath } = req.body;
+        const { startDateTime, endDateTime, usbPath, encryption } = req.body;
     
         try {
             await pool.query('BEGIN');
@@ -24,22 +25,25 @@ function createManualTransferRouter({ logger, pool, redis, readConfig, writeConf
             const startTS = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')} ${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}:00.000`;
             const endTS = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')} ${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}:59.999`;
             
+            // Same indexed expression as the summary query — avoids full table scan.
             const filesResult = await pool.query(`
-                SELECT id, file_path, file_size FROM files
-                WHERE TO_TIMESTAMP(date::text || ' ' || time::text, 'YYYY-MM-DD HH24:MI:SS') >= TO_TIMESTAMP($1, 'YYYY-MM-DD HH24:MI:SS.MS')
-                  AND TO_TIMESTAMP(date::text || ' ' || time::text, 'YYYY-MM-DD HH24:MI:SS') <= TO_TIMESTAMP($2, 'YYYY-MM-DD HH24:MI:SS.MS')
-                  AND deleted = false AND file_path notnull AND file_size notnull 
+                SELECT id, file_path, file_size, file_name FROM files
+                WHERE (date + time::interval) >= $1::timestamp
+                  AND (date + time::interval) <= $2::timestamp
+                  AND deleted = false AND file_path IS NOT NULL AND file_size IS NOT NULL
             `, [startTS, endTS]);
     
             const currentDate = new Date();
+            const padN = n => String(n).padStart(2, '0');
+            const localDate = d => `${d.getFullYear()}-${padN(d.getMonth() + 1)}-${padN(d.getDate())}`;
             const jobResult = await pool.query(`
                 INSERT INTO transfer_job (start_date, start_time, end_date, end_time, usb_path, status, date, time) 
                 VALUES ($1::date, $2::time, $3::date, $4::time, $5, $6, $7::date, $8::time) RETURNING id
             `, [
-                startDate.toISOString().split('T')[0], startDate.toTimeString().split(' ')[0],
-                endDate.toISOString().split('T')[0], endDate.toTimeString().split(' ')[0],
+                localDate(startDate), startDate.toTimeString().split(' ')[0],
+                localDate(endDate),   endDate.toTimeString().split(' ')[0],
                 usbPath, 'in_progress',
-                currentDate.toISOString().split('T')[0], currentDate.toTimeString().split(' ')[0]
+                localDate(currentDate), currentDate.toTimeString().split(' ')[0]
             ]);
     
             const transferJobId = jobResult.rows[0].id;
@@ -54,13 +58,29 @@ function createManualTransferRouter({ logger, pool, redis, readConfig, writeConf
             const totalFiles = filesResult.rows.length;
             const totalSize = filesResult.rows.reduce((sum, file) => sum + parseInt(file.file_size || 0), 0);
     
+            const encryptionConfig = encryption || { enabled: false };
+            if (encryptionConfig.enabled) {
+                logger.warn(`Manual transfer job ${transferJobId}: encryption requested but not implemented in queue path — files will be copied unencrypted`);
+            }
+
             let config = readConfig();
             config.manualTransfer = {
                 jobId: transferJobId, drive: usbPath, startDateTime, endDateTime,
+                encryption: encryptionConfig,
                 createdAt: new Date().toISOString(),
                 status: { isPaused: false, totalSize, transferredFiles: 0, totalFiles, isFinished: false, isCancelled: false }
             };
             writeConfig(config);
+
+            // Immediately notify connected clients so the active job card appears
+            // without waiting for the next 5-second loop iteration.
+            if (emitEventToClients) {
+                emitEventToClients('manualTransferConfig', {
+                    driveResponse: { success: false, connected: false },
+                    config: config.manualTransfer,
+                    transferStatus: { totalFiles, transferredFiles: 0, failedFiles: 0, pendingFiles: totalFiles, processingFiles: 0, isCompleted: false }
+                });
+            }
     
             res.json({ success: true, message: 'Manual transfer job created successfully', jobId: transferJobId, summary: { total_files: totalFiles, total_size: totalSize } });
         } catch (error) {
@@ -79,11 +99,13 @@ function createManualTransferRouter({ logger, pool, redis, readConfig, writeConf
             const startTS = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}-${String(startDate.getDate()).padStart(2, '0')} ${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}:00.000`;
             const endTS = `${endDate.getFullYear()}-${String(endDate.getMonth() + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')} ${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}:59.999`;
             
+            // Use the (date + time::interval) expression that matches idx_files_date_time
+            // so PostgreSQL uses the index instead of a full table scan.
             const result = await pool.query(`
                 SELECT COUNT(*) as total_files, SUM(file_size) as total_size FROM files
-                WHERE TO_TIMESTAMP(date::text || ' ' || time::text, 'YYYY-MM-DD HH24:MI:SS') >= TO_TIMESTAMP($1, 'YYYY-MM-DD HH24:MI:SS.MS')
-                  AND TO_TIMESTAMP(date::text || ' ' || time::text, 'YYYY-MM-DD HH24:MI:SS') <= TO_TIMESTAMP($2, 'YYYY-MM-DD HH24:MI:SS.MS')
-                  AND deleted = false
+                WHERE (date + time::interval) >= $1::timestamp
+                  AND (date + time::interval) <= $2::timestamp
+                  AND deleted = false AND file_path IS NOT NULL AND file_size IS NOT NULL
             `, [startTS, endTS]);
             res.json({ success: true, summary: result.rows[0] });
         } catch (error) {
@@ -121,6 +143,10 @@ function createManualTransferRouter({ logger, pool, redis, readConfig, writeConf
                 }
                 await pool.query('UPDATE transfer_job SET status = $1 WHERE id = $2', [newStatus, jobId]);
                 writeConfig(config);
+                if (action === 'cancel') {
+                    config.manualTransfer = null;
+                    writeConfig(config);
+                }
                 res.json({ success: true, message: `Job ${action}ed successfully`, newStatus });
             } else {
                 res.status(404).json({ success: false, error: 'Job not found in config' });
@@ -254,11 +280,20 @@ async function startManualFileTransferProcess({ logger, pool, emitEventToClients
                         file_name: row.file_name
                     }));
 
+                    // Build a dated subfolder that matches what the UI summary displays.
+                    const _padDest = n => String(n).padStart(2, '0');
+                    const _now = new Date();
+                    const _localDateStr = `${_now.getFullYear()}-${_padDest(_now.getMonth() + 1)}-${_padDest(_now.getDate())}`;
+                    const _driveBase = /^[A-Za-z]:$/.test(result.rows[0].usb_path)
+                        ? result.rows[0].usb_path + path.sep
+                        : result.rows[0].usb_path;
+                    const destinationPath = path.join(_driveBase, 'transfer', _localDateStr);
+
                     await fileTransferQueue.addFilesToQueue(
                         filesToQueue,
                         'manual',
-                        3, // High priority for manual transfers
-                        result.rows[0].usb_path,
+                        3,
+                        destinationPath,
                         jobId
                     );
 
@@ -266,17 +301,86 @@ async function startManualFileTransferProcess({ logger, pool, emitEventToClients
                 }
             }
 
-            // Check if transfer is complete
-            const updatedStatus = await fileTransferQueue.getServiceTransferStatus('manual', jobId);
-            if (updatedStatus.isCompleted) {
-                const config = readConfig();
-                config.manualTransfer.status.isFinished = true;
-                writeConfig(config);
-                await pool.query('UPDATE transfer_job SET status = $1 WHERE id = $2', ['completed', jobId]);
-                logger.info(`Manual transfer job ${jobId} completed`);
+            // Process pending files from the queue (MI-A: consumer that was missing).
+            // Batch capped at 10 files so each iteration stays short (fast USB ≈ 1 s, slow ≈ 5 s).
+            const pendingBatch = await fileTransferQueue.getNextFilesToTransfer(10);
+            const jobPendingFiles = pendingBatch.filter(
+                f => f.service_type === 'manual' && String(f.transfer_job_id) === String(jobId)
+            );
+
+            if (jobPendingFiles.length > 0) {
+                const batchIds = jobPendingFiles.map(f => f.id);
+                await fileTransferQueue.markFilesAsProcessing(batchIds);
+
+                // Cache successfully ensured directories so we don't hit the OS on every file.
+                const ensuredDirs = new Set();
+
+                for (const file of jobPendingFiles) {
+                    // Honour pause / cancel without waiting for the next loop iteration.
+                    const liveConfig = readConfig();
+                    if (
+                        !liveConfig.manualTransfer ||
+                        liveConfig.manualTransfer.status.isPaused ||
+                        liveConfig.manualTransfer.status.isCancelled
+                    ) break;
+
+                    try {
+                        // Normalize bare Windows drive letters ('G:' → 'G:\') so path.join
+                        // produces an absolute root path, not a relative drive-cwd path.
+                        const destRoot = /^[A-Za-z]:$/.test(file.destination_path)
+                            ? file.destination_path + path.sep
+                            : file.destination_path;
+                        const dest = path.join(destRoot, file.file_name);
+                        const destDir = path.dirname(dest);
+                        // fs.ensureDir on a Windows drive root ('G:\') throws EPERM because
+                        // drive roots always exist and cannot be mkdir'd.  Skip it for roots.
+                        if (!ensuredDirs.has(destDir) && !/^[A-Za-z]:[/\\]$/.test(destDir)) {
+                            await fs.ensureDir(destDir);
+                            ensuredDirs.add(destDir);
+                        }
+                        await fs.copy(file.file_path, dest);
+                        await fileTransferQueue.markFilesAsTransferred([file.id]);
+                        logger.info(`Copied ${file.file_name} -> ${dest}`);
+                    } catch (copyErr) {
+                        await fileTransferQueue.markFilesAsFailed([file.id], copyErr.message);
+                        logger.error(`Failed to copy ${file.file_name}: ${copyErr.message}`);
+                    }
+                }
+
+                // Emit updated progress immediately after the batch so the UI reflects the
+                // copies without waiting for the next iteration's sendFileTransferStatus().
+                const batchStatus = await fileTransferQueue.getServiceTransferStatus('manual', jobId);
+                const liveConfig = readConfig();
+                if (liveConfig.manualTransfer) {
+                    liveConfig.manualTransfer.status.transferredFiles = batchStatus.transferredFiles;
+                    liveConfig.manualTransfer.status.totalFiles = batchStatus.totalFiles;
+                    emitEventToClients('manualTransferConfig', {
+                        driveResponse: { success: true, connected: true, message: 'Drive is connected' },
+                        config: liveConfig.manualTransfer,
+                        transferStatus: batchStatus
+                    });
+                }
             }
 
-            await sleep(5000);
+            // Check if transfer is complete (guard: totalFiles > 0 prevents false-positive when queue is empty)
+            const updatedStatus = await fileTransferQueue.getServiceTransferStatus('manual', jobId);
+            if (updatedStatus.isCompleted && updatedStatus.totalFiles > 0) {
+                // If no files were actually transferred, the job failed (e.g. all copies errored).
+                // Mark accordingly so history shows the real outcome, not a misleading 'completed'.
+                const finalStatus = updatedStatus.transferredFiles > 0 ? 'completed' : 'failed';
+                const cfg = readConfig();
+                cfg.manualTransfer.status.isFinished = true;
+                writeConfig(cfg);
+                await pool.query('UPDATE transfer_job SET status = $1 WHERE id = $2', [finalStatus, jobId]);
+                logger.info(`Manual transfer job ${jobId} ${finalStatus}: ${updatedStatus.transferredFiles}/${updatedStatus.totalFiles} transferred, ${updatedStatus.failedFiles} failed`);
+                // Clear active job from config so the loop returns to idle and the UI active card disappears.
+                cfg.manualTransfer = null;
+                writeConfig(cfg);
+                // Notify clients immediately — they will clear the active card and reload history.
+                emitEventToClients('manualTransferConfig', { driveResponse: null, config: null, finalStatus });
+            }
+
+            await sleep(1000);
         }
     } catch (error) {
         logger.error('Error in manual file transfer process:', error);

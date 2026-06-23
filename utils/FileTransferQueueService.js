@@ -40,35 +40,53 @@ class FileTransferQueueService {
         
         try {
             await client.query('BEGIN');
-            
+
+            // Build parallel arrays for a single unnest bulk INSERT instead of N individual
+            // round-trips. For 977 files this reduces ~5 s of sequential awaits to <100 ms.
+            const fileIds    = [];
+            const filePaths  = [];
+            const fileSizes  = [];
+            const fileNames  = [];
+            const metadatas  = [];
+
             for (const file of files) {
-                const metadata = {
-                    plate_num: file.plate_num || null,
-                    site_id: file.site_id || null,
+                fileIds.push(file.id);
+                filePaths.push(file.file_path);
+                fileSizes.push(file.file_size || 0);
+                fileNames.push(file.file_name || path.basename(file.file_path));
+                metadatas.push(JSON.stringify({
+                    plate_num:   file.plate_num   || null,
+                    site_id:     file.site_id     || null,
                     date_folder: file.date_folder || null,
                     time_folder: file.time_folder || null,
-                    cam_id: file.cam_id || null
-                };
-
-                await client.query(`
-                    INSERT INTO file_transfer_queue 
-                    (service_type, file_id, file_path, file_size, file_name, destination_path, 
-                     priority, batch_id, transfer_job_id, metadata) 
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                `, [
-                    serviceType,
-                    file.id,
-                    file.file_path,
-                    file.file_size || 0,
-                    file.file_name || path.basename(file.file_path),
-                    destinationPath,
-                    priority,
-                    batchId,
-                    transferJobId,
-                    JSON.stringify(metadata)
-                ]);
+                    cam_id:      file.cam_id      || null
+                }));
             }
-            
+
+            await client.query(`
+                INSERT INTO file_transfer_queue
+                    (service_type, file_id, file_path, file_size, file_name,
+                     destination_path, priority, batch_id, transfer_job_id, metadata)
+                SELECT $1,
+                       unnest($2::int[]),
+                       unnest($3::text[]),
+                       unnest($4::int[]),
+                       unnest($5::text[]),
+                       $6, $7, $8, $9,
+                       unnest($10::jsonb[])
+            `, [
+                serviceType,
+                fileIds,
+                filePaths,
+                fileSizes,
+                fileNames,
+                destinationPath,
+                priority,
+                batchId,
+                transferJobId,
+                metadatas
+            ]);
+
             await client.query('COMMIT');
             console.log(`Added ${files.length} files to transfer queue with batch ID: ${batchId}`);
             return batchId;
@@ -123,9 +141,9 @@ class FileTransferQueueService {
             WHERE id = ANY($1)
         `, [fileIds]);
 
-        // Also update the original files table for auto transfers
+        // Also update source tables based on service type
         const fileDetails = await pool.query(`
-            SELECT file_id, service_type FROM file_transfer_queue WHERE id = ANY($1)
+            SELECT file_id, service_type, transfer_job_id FROM file_transfer_queue WHERE id = ANY($1)
         `, [fileIds]);
 
         for (const file of fileDetails.rows) {
@@ -133,6 +151,13 @@ class FileTransferQueueService {
                 await pool.query(`
                     UPDATE files SET is_auto_transferred = true WHERE id = $1
                 `, [file.file_id]);
+            }
+            if (file.service_type === 'manual' && file.transfer_job_id) {
+                await pool.query(
+                    `UPDATE transfer_job_log SET transferred = true
+                     WHERE file_id = $1 AND transfer_job_id = $2`,
+                    [file.file_id, file.transfer_job_id]
+                );
             }
         }
     }

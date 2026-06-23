@@ -182,11 +182,26 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | DB reads | All tables (via route handlers); dashboard chart queries use `mv_files_daily/monthly/yearly[_agg]` materialized views; hourly view queries `files` directly via covering indexes |
 | Redis keys (write) | `dashboard:data:<hash>` — chart aggregate cache (TTL 60 s); busted on `POST /dashboard/refresh` |
 | Template engine | Nunjucks (views in `data_transfer_v2/views/`) |
-| WebSocket | `ws://localhost:8454` — events: handleAutoTransfer, devices, deviceHistory, handleAutoVideoTransfer, processes, startStorageTransfer |
+| WebSocket | `ws://localhost:8454` — events: handleAutoTransfer, devices, deviceHistory, handleAutoVideoTransfer, processes, startStorageTransfer, manualTransferConfig |
 | Key endpoints | `GET /dashboard/data` (chart aggregates, Redis-cached), `GET /dashboard/table` (paginated detail rows, uncached), `POST /dashboard/refresh` (cache bust + concurrent MV refresh) |
-| Background task | Refreshes all 6 dashboard MVs concurrently on startup and on a timer (`DASHBOARD_MV_REFRESH_INTERVAL_MS`, default 5 min) |
+| Background task | Refreshes all 6 dashboard MVs concurrently on startup and on a timer (`DASHBOARD_MV_REFRESH_INTERVAL_MS`, default 5 min); also runs `startManualFileTransferProcess` (5 s poll loop for manual transfer job management) |
 | Logging | `utils/logger.js` `createLogger({ service: 'DashboardReportingBackend' })`; `traceMiddleware` registered before routes — every HTTP request carries a `traceId` in `X-Trace-Id` header and all related log lines |
 | Purpose | Main web UI — Express server serving the operator dashboard; provides REST API + WebSocket for real-time monitoring, config management, and manual transfer control |
+
+#### Manual Transfer sub-system (inline, hosted inside DashboardReportingBackend)
+
+| Attribute | Value |
+|---|---|
+| Route module | `routes/manualTransferRoutes.js` (current); `routes/mainControlRoutes.js` (legacy `/transfer` page) |
+| UI views | `data_transfer_v2/views/manual_usb.njk` (current), `data_transfer_v2/views/transfer.njk` (legacy) |
+| Source table | `files` (ALPR image captures) — always; `iss_media_files` (ISS video) is **not queried** |
+| Queue table | `file_transfer_queue` (current, via `utils/FileTransferQueueService.js`) — **no active consumer** |
+| Copy mechanism | Legacy only: `fs.copy` per file in `startStorageTransfer()` triggered by WebSocket |
+| Job tables | `transfer_job`, `transfer_job_log` |
+| Config state | `dataTransferConfig.json` key `manualTransfer` (not Redis) |
+| Activity diagram | `product/technical/diagrams/manualUSBImageTransferService-activity.md` |
+| Gap analysis | `product/technical/diagrams/manualUSBVideoTransferService-activity.md` |
+| Known issues | MI-A (no consumer), MI-B (missing import crash), MI-C (API mismatch), MI-D (log not updated), MI-E (false completion), MV-A–MV-D (video not implemented) |
 
 ---
 

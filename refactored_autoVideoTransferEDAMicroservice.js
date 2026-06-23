@@ -574,6 +574,8 @@ class UnifiedVideoTransferService extends EventEmitter {
             progressPercentage: Math.round((convertedGroupeCount / this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) * 100)
         });
 
+        let noMoreFilesAvailable = false;
+
         if (convertedGroupeCount < this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
             addTraceField('phase', 'buffer-fill');
             logger.info(`[PROCESSING] Camera ${cameraId}: requesting additional files`, { phase: 'buffer-fill' });
@@ -612,7 +614,8 @@ class UnifiedVideoTransferService extends EventEmitter {
                     }
 
                 } else {
-                    logger.info(`[PROCESSING] Camera ${cameraId}: no additional files available`, { phase: 'buffer-fill' });
+                    logger.info(`[PROCESSING] Camera ${cameraId}: no additional files available — proceeding with partial batch (${convertedGroupeCount}/${this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT})`, { phase: 'buffer-fill', available: convertedGroupeCount, target: this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT });
+                    noMoreFilesAvailable = true;
                 }
 
             }
@@ -627,15 +630,20 @@ class UnifiedVideoTransferService extends EventEmitter {
             logger.info(`[PROCESSING] Camera ${cameraId}: processing pending conversions`, { phase: 'buffer-fill' });
         }
         
-        if (cameraConvertedCount >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
+        const shouldGroupPartialBatch = noMoreFilesAvailable && cameraPendingCount === 0 && cameraConvertedCount > 0;
+        if (cameraConvertedCount >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT || shouldGroupPartialBatch) {
             addTraceField('phase', 'group');
+            if (shouldGroupPartialBatch) {
+                logger.info(`[PROCESSING] Camera ${cameraId}: grouping partial batch of ${cameraConvertedCount} files (no more source files available)`, { phase: 'group' });
+            }
             const groupName = await this.processingStateManager.groupFilesByCamera(cameraId, job.id);
             if (groupName) {
                 logger.info(`[PROCESSING] Camera ${cameraId}: grouped files`, { phase: 'group', groupName });
             }
         }
 
-        if (cameraGroupedCount >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) {
+        const shouldTransferPartialBatch = noMoreFilesAvailable && cameraPendingCount === 0 && cameraGroupedCount > 0;
+        if (cameraGroupedCount >= this.ISS_VIDEO_TRANSFER_CONVERSION_COUNT || shouldTransferPartialBatch) {
             let videoInTransferQueue = false;
 
             videoInTransferQueue = await this.jobManager.getVideoInTransferQueue(job.id, cameraId);

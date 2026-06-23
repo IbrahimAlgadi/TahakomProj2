@@ -196,7 +196,7 @@ app.use('/', createDashboardRouter({ logger, pool, broadcastUpdate, redis }));
 app.use('/', createProcessMonitorRouter({ logger, redis, sendProcessUpdates }));
 app.use('/', createMainConfigRouter({ logger, redis, writeConfig, emitEventToClients, readConfig }));
 app.use('/', createMainControlRouter({ logger, pool, readConfig, writeConfig, EXPORT_DIR }));
-app.use('/', createManualTransferRouter({ logger, pool, redis, readConfig, writeConfig, ROOT_DIR, EXPORT_DIR }));
+app.use('/', createManualTransferRouter({ logger, pool, redis, readConfig, writeConfig, ROOT_DIR, EXPORT_DIR, emitEventToClients }));
 app.use('/', createConnectedDevicesRouter({ logger, pool, sendDeviceUpdates }));
 app.use('/', createDriveRouter({ logger, redis }));
 app.use('/', createAutoTransferRouter({ logger, redis, writeConfig, emitEventToClients, readConfig }));

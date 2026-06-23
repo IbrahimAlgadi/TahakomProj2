@@ -327,13 +327,20 @@
                         createTransferJobElement(config, activeJobsContainer);
                         // Update drive status with the latest driveInfo
                         updateDriveStatus(config.jobId, driveResponse);
-                        
-                        // Update create transfer button state
-                        // document.getElementById('createTransferBtn').disabled = true;
+                        // Reload history the first time we see a new job (shows it as in_progress)
+                        if (config.jobId !== currentJobId) {
+                            currentJobId = config.jobId;
+                            loadTransferHistory();
+                        }
                     } else {
                         activeJobsContainer.html('<div class="alert alert-info">No active transfer jobs available.</div>');
                         // Enable create transfer button if no active job
                         document.getElementById('createTransferBtn').disabled = false;
+                        // Reload history when a job just finished (currentJobId was set, now cleared)
+                        if (currentJobId !== null) {
+                            currentJobId = null;
+                            loadTransferHistory();
+                        }
                     }
                 } else if (data.event === "manualTransferError") {
                     showToast(data.data.error, 'error');
@@ -371,20 +378,18 @@
         }
 
         function setTodayDateRange() {
-            const today = new Date();
-            const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-            const endOfDay = new Date(today.setHours(23, 59, 59, 999));
+            const now = new Date();
+            const pad = n => String(n).padStart(2, '0');
 
-            document
-                .getElementById('startDateTime')
-                .value = startOfDay
-                .toISOString()
-                .slice(0, 16);
-            document
-                .getElementById('endDateTime')
-                .value = endOfDay
-                .toISOString()
-                .slice(0, 16);
+            function toLocalDateTimeString(date) {
+                return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+            }
+
+            const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+            const endOfDay   = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 0);
+
+            document.getElementById('startDateTime').value = toLocalDateTimeString(startOfDay);
+            document.getElementById('endDateTime').value   = toLocalDateTimeString(endOfDay);
         }
 
         function updateTransferSummary() {
@@ -405,6 +410,10 @@
                 return;
             }
 
+            const summaryBtn = document.getElementById('showSummaryBtn');
+            const origSummaryHtml = summaryBtn.innerHTML;
+            summaryBtn.disabled = true;
+            summaryBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Loading...';
 
             let body = {
                 usbPath: drive,
@@ -433,11 +442,12 @@
                         document
                             .getElementById('totalSize')
                             .textContent = formatFileSize(data.summary.total_size);
+                        const _today = new Date();
+                        const _pad = n => String(n).padStart(2, '0');
+                        const _localDate = `${_today.getFullYear()}-${_pad(_today.getMonth() + 1)}-${_pad(_today.getDate())}`;
                         document
                             .getElementById('destinationPath')
-                            .textContent = drive + '\\transfer\\' + new Date()
-                            .toISOString()
-                            .split('T')[0];
+                            .textContent = drive + '\\transfer\\' + _localDate;
                         document
                             .getElementById('createTransferBtn')
                             .disabled = false;
@@ -448,6 +458,10 @@
                 .catch(error => {
                     console.error('Error:', error);
                     showToast('Failed to get transfer summary', 'error');
+                })
+                .finally(() => {
+                    summaryBtn.disabled = false;
+                    summaryBtn.innerHTML = origSummaryHtml;
                 });
         }
 
@@ -591,10 +605,10 @@
         async function pauseJob(jobId) {
             try {
                 const response = await $.ajax({
-                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/pause`,
+                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/control`,
                     method: 'POST',
                     contentType: 'application/json',
-                    data: JSON.stringify({jobId})
+                    data: JSON.stringify({ jobId, action: 'pause' })
                 });
 
                 if (response.success) {
@@ -611,10 +625,10 @@
         async function resumeJob(jobId) {
             try {
                 const response = await $.ajax({
-                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/resume`,
+                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/control`,
                     method: 'POST',
                     contentType: 'application/json',
-                    data: JSON.stringify({jobId})
+                    data: JSON.stringify({ jobId, action: 'resume' })
                 });
 
                 if (response.success) {
@@ -635,10 +649,10 @@
 
             try {
                 const response = await $.ajax({
-                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/cancel`,
+                    url: `${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/control`,
                     method: 'POST',
                     contentType: 'application/json',
-                    data: JSON.stringify({jobId})
+                    data: JSON.stringify({ jobId, action: 'cancel' })
                 });
 
                 if (response.success) {
@@ -716,6 +730,11 @@
                         return;
                     }
 
+                    const createBtn = document.getElementById('createTransferBtn');
+                    const origCreateHtml = createBtn.innerHTML;
+                    createBtn.disabled = true;
+                    createBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status"></span>Creating...';
+
                     try {
                         const response = await fetch(`${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/create`, {
                             method: 'POST',
@@ -738,14 +757,17 @@
                         if (data.success) {
                             currentJobId = data.jobId;
                             showToast('Transfer job created successfully', 'success');
-                            document
-                                .getElementById('createTransferBtn')
-                                .disabled = true;
-                            showToast('Waiting for transfer to start...', 'info');
+                            // Keep disabled while the job is active — button stays locked until
+                            // the WebSocket clears the active job (job finalization).
+                            createBtn.innerHTML = origCreateHtml;
                         } else {
+                            createBtn.disabled = false;
+                            createBtn.innerHTML = origCreateHtml;
                             showToast(data.error || 'Failed to create transfer job', 'error');
                         }
                     } catch (error) {
+                        createBtn.disabled = false;
+                        createBtn.innerHTML = origCreateHtml;
                         console.error('Error:', error);
                         showToast('Failed to create transfer job', 'error');
                     }

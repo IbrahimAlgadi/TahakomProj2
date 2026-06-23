@@ -27,7 +27,7 @@
     "encryption": {
       "enabled": false
     },
-    "isActive": true,
+    "isActive": false,
     "transferMode": "specific",
     "dataType": "both",
     "schedule": {
@@ -48,18 +48,21 @@
     "privateKeyFilename": "private_key.pem"
   },
   "manualTransfer": {
-    "jobId": 3,
-    "drive": "F:",
-    "startDateTime": "2026-05-20T23:45",
-    "endDateTime": "2026-05-20T23:50",
-    "createdAt": "2026-05-20T20:56:28.339Z",
+    "jobId": 5,
+    "drive": "G:",
+    "startDateTime": "2026-06-23T13:00",
+    "endDateTime": "2026-06-23T13:05",
+    "encryption": {
+      "enabled": false
+    },
+    "createdAt": "2026-06-23T12:40:40.927Z",
     "status": {
       "isPaused": false,
-      "totalSize": 448920997,
+      "totalSize": 134937946,
       "transferredFiles": 0,
-      "totalFiles": 1680,
+      "totalFiles": 531,
       "isFinished": false,
-      "isCancelled": true
+      "isCancelled": false
     }
   }
 }
