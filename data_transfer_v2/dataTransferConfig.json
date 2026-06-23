@@ -23,13 +23,13 @@
     }
   },
   "autoTransfer": {
-    "drive": "J",
+    "drive": "G",
     "encryption": {
-      "enabled": true
+      "enabled": false
     },
-    "isActive": false,
+    "isActive": true,
     "transferMode": "specific",
-    "dataType": "videos",
+    "dataType": "both",
     "schedule": {
       "type": "continuous"
     }
