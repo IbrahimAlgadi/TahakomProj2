@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-23 (V-B fixed — drive disconnect now pauses active video jobs in DB; reconnect resumes them; pauseActiveJobs/resumeActiveJobs added to JobManager)
+Last updated: 2026-06-23 (V-C fixed — isTransferringToStorageRunning flag-leak patched; flag now reset on drive-not-ready and no-file early returns in _startTransferToStorageAsync)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

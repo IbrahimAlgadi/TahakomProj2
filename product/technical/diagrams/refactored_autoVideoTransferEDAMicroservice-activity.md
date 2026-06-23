@@ -209,7 +209,7 @@ flowchart TD
     SetFlag["isTransferringToStorageRunning = true"]
 
     DriveReady{"spaceValidator.isDriveReady()?"}
-    DriveNotReady["log Paused\nreturn WITHOUT resetting flag\n(see V-C §11)"]
+    DriveNotReady["log Paused\nisTransferringToStorageRunning = false\nreturn"]
 
     GetFile["fileTransferManager.getPendingTransferFileForJob()\nUPDATE job status pending→transferring\nSELECT FROM video_transfer_queue\nWHERE job_id AND camera_id AND status='pending'"]
 
@@ -545,32 +545,34 @@ WHERE batch_origin = 'auto_video'
 ORDER BY updated_at DESC;
 ```
 
-### V-C — `isTransferringToStorageRunning` flag leaks `true` on drive-not-ready early return
+### V-C — `isTransferringToStorageRunning` flag leaks `true` on early returns — **Fixed (2026-06-23)**
 
-In `_startTransferToStorageAsync`:
+**Root cause**: `isTransferringToStorageRunning = true` was set at the top of `_startTransferToStorageAsync` before two early-return guards that never reset it:
+
+1. **Drive-not-ready path**: if the drive became unavailable between the `AlreadyRunning` check (flag still `false`) and the `isDriveReady()` call (e.g. rapid disconnect), the flag was left `true` permanently.
+2. **No-file path**: if `getPendingTransferFileForJob` returned `null`, the flag was also left `true`.
+
+All subsequent `startTransferToStorage` events short-circuited at the `AlreadyRunning` guard, blocking the entire transfer path until service restart. The three correct reset points (catch block, after `runWithTrace`) were never reached via either early-return path.
+
+**Fix** (`refactored_autoVideoTransferEDAMicroservice.js`): Added `this.isTransferringToStorageRunning = false;` before both early returns:
 
 ```js
-this.isTransferringToStorageRunning = true;    // (1) flag set
-
 if (!this.spaceValidator.isDriveReady()) {
     const driveStatus = this.spaceValidator.getDriveStatus();
     logger.warn(`[TRANSFER TO STORAGE] Paused: ${driveStatus.reason}`);
-    return;   // (2) ← returns WITHOUT resetting flag
+    this.isTransferringToStorageRunning = false;   // reset before return
+    return;
 }
-```
 
-If the drive becomes not-ready between the `AlreadyRunning` check (where flag is still `false`) and this point (e.g., rapid disconnect), the flag is left `true`. All subsequent `startTransferToStorage` events short-circuit at:
+const fileToTransfer = await this.fileTransferManager.getPendingTransferFileForJob(jobId, cameraId);
 
-```js
-if (this.isTransferringToStorageRunning) {
-    logger.info('[TRANSFER TO STORAGE] Transfer is already running');
+if (!fileToTransfer) {
+    this.isTransferringToStorageRunning = false;   // reset before return
     return;
 }
 ```
 
-The transfer path is permanently blocked until service restart. The three correct reset points (`isTransferringToStorageRunning = false` at end of `runWithTrace`, in the catch block, and after `runWithTrace`) are never reached via this path.
-
-**Fix pattern**: add `this.isTransferringToStorageRunning = false;` before the early `return` on the drive-not-ready path.
+The flag is now correctly released on every exit path of the method.
 
 ### V-D — Duplicate `checkJobVideoTransferCompletion` definition (second overwrites first)
 

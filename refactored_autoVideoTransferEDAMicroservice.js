@@ -798,12 +798,14 @@ class UnifiedVideoTransferService extends EventEmitter {
         if (!this.spaceValidator.isDriveReady()) {
             const driveStatus = this.spaceValidator.getDriveStatus();
             logger.warn(`[TRANSFER TO STORAGE] Paused: ${driveStatus.reason}`);
+            this.isTransferringToStorageRunning = false;
             return;
         }
         
         const fileToTransfer = await this.fileTransferManager.getPendingTransferFileForJob(jobId, cameraId);
         
         if (!fileToTransfer) {
+            this.isTransferringToStorageRunning = false;
             return;
         }
 
