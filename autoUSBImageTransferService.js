@@ -1,3 +1,4 @@
+const path = require('path');
 const Redis = require('ioredis');
 const { Pool } = require("pg");
 const { CONFIG_STATE_KEY, CONNECTED_DRIVE_STATE, CONNECTED_DRIVE_LIST } = require('./redisKeyStore');
@@ -475,7 +476,7 @@ async function consumer() {
                                     processedCount: processedCount,
                                     totalFiles: filesToProcess.length,
                                     failedCount: failedCount,
-                                    currentFile: dirFiles[0].file_name,
+                                    currentFile: path.basename(dirFiles[0].file_path),
                                     progressPercentage: Math.round((processedCount / filesToProcess.length) * 100),
                                     throughput: processedCount / ((process.hrtime(startTime)[0] + process.hrtime(startTime)[1] / 1e9))
                                 });
@@ -541,7 +542,7 @@ async function consumer() {
                                     processedCount: processedCount,
                                     totalFiles: filesToProcess.length,
                                     failedCount: failedCount,
-                                    currentFile: file.file_name,
+                                    currentFile: path.basename(file.file_path),
                                     progressPercentage: Math.round((processedCount / filesToProcess.length) * 100),
                                     throughput: processedCount / ((process.hrtime(startTime)[0] + process.hrtime(startTime)[1] / 1e9))
                                 });
@@ -555,7 +556,7 @@ async function consumer() {
                                 processedCount: processedCount,
                                 totalFiles: filesToProcess.length,
                                 failedCount: failedCount,
-                                currentFile: file.file_name,
+                                currentFile: path.basename(file.file_path),
                                 progressPercentage: Math.round(((processedCount + failedCount) / filesToProcess.length) * 100),
                                 lastError: error.message,
                                 hasError: true
