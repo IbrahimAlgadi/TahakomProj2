@@ -602,22 +602,19 @@ async processFilesToBuffer(group, jobId) {
         const videoData = await this.createVideoFromBuffer(jobId, camera_id, date, group_key, interval_start, interval_end);
 ```
 
-Downstream call signatures are correct: `checkCameraGroupReady(cameraId, date, groupKey)` matches the call exactly; `createVideoFromBuffer(jobId, cameraId)` only uses the first two arguments — the remaining four are silently ignored. Note: V-F (`videoCreated` → `updateJobStats` crash) remains open on this path.
+Downstream call signatures are correct: `checkCameraGroupReady(cameraId, date, groupKey)` matches the call exactly; `createVideoFromBuffer(jobId, cameraId)` only uses the first two arguments — the remaining four are silently ignored. V-F (`videoCreated` → `updateJobStats` crash) is also fixed — see §14 V-F.
 
-### V-F — `_handleVideoCreated` calls `updateJobStats` which does not exist on `JobManager`
+### V-F — `_handleVideoCreated` calls `updateJobStats` which does not exist — **Fixed (2026-06-23)**
 
-```js
-// _handleVideoCreated (line ~376)
-await this.jobManager.updateJobStats(jobId);   // ← method does not exist
-```
+**Root cause**: `_handleVideoCreated` called `this.jobManager.updateJobStats(jobId)`. `JobManager` has no such method — only `updateJobStatsToTransfered` (which refreshes `transferred_videos`/`transferred_size` counts). Calling the non-existent method would throw `TypeError: this.jobManager.updateJobStats is not a function`.
 
-`JobManager` only defines `updateJobStatsToTransfered` (with a typo). Calling `updateJobStats` would throw `TypeError: this.jobManager.updateJobStats is not a function`.
+Renaming to `updateJobStatsToTransfered` was the wrong fix: at the point `_handleVideoCreated` fires, the video has just been queued (`status = 'pending'`) — not yet transferred — so a transferred-stats update would be meaningless and incorrect. The parallel `JobManager.videoGrouppingCompleted` method (lines 297–319) performs the identical sequence and has this stats call explicitly commented out, confirming it should not run at this stage.
 
-The `'videoCreated'` event that triggers this handler is emitted only from:
-1. `CompleteBufferManager.processFilesToBuffer` → dead code (V-E)
-2. `CompleteBufferManager.checkReadyGroupsInBuffer` → **the V-A fix changed this path to emit `startTransferToStorage` instead of `videoCreated`**, so this route is now closed
+The `videoCreated` event path remains unreachable via normal operation:
+1. `CompleteBufferManager.processFilesToBuffer` — dead code (V-E fixed the `ReferenceError` but the `filesReady` event is still never emitted)
+2. `CompleteBufferManager.checkReadyGroupsInBuffer` — V-A changed this to emit `startTransferToStorage` instead, closing this route
 
-This path is **still unreachable** via normal operation. If `processFilesToBuffer` (V-E) is ever repaired and called, V-F would produce a runtime crash.
+**Fix** (`refactored_autoVideoTransferEDAMicroservice.js`): Removed the three lines (`// Update job stats` comment, `updateJobStats(jobId)` call, and trailing blank line) from `_handleVideoCreated`. The handler now correctly queues the video and marks the camera as processed without attempting a premature stats update.
 
 ---
 

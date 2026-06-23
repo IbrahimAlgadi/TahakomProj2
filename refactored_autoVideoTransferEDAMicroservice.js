@@ -372,9 +372,6 @@ class UnifiedVideoTransferService extends EventEmitter {
             // // Mark camera as processed
             await this.jobManager.addCameraToProcessed(jobId, videoData.camera_id);
             
-            // // Update job stats
-            await this.jobManager.updateJobStats(jobId);
-            
             // Remove processing markers for source files
             const sourceFiles = videoData.sourceFileIds.map(id => ({ id }));
             await this.processingStateManager.removeProcessingMarkers(sourceFiles);
