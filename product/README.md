@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-23 (V-F fixed — non-existent updateJobStats call removed from _handleVideoCreated; all V-A through V-F issues resolved)
+Last updated: 2026-06-23 (Image Export Errors.js deadlock crash fixed — restored SELECT filter, added outer try/catch, removed concurrent-overlap sleep; T-9 resolved)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

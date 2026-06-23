@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-21 (SecurOS export crash fixes — OptimizedImageCapture.js load balancer OVER-fallback, null guard, outer try/catch, await startup; Export Fixer unawaited pool.query deadlock crash fixed)
+Last updated: 2026-06-23 (Image Export Errors.js deadlock crash fixed — restored SELECT filter, added outer try/catch, removed concurrent-overlap sleep)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -39,7 +39,8 @@ Executed by the **ISS SecurOS Script Integration Engine**. They share the same S
 | Trigger | `IMAGE_EXPORT` object → `EXPORT_FAILED` event |
 | File | `securos-scripts/Image Export Errors.js` |
 | DB writes | UPDATE `files`: increments `export_retry_count`, appends to `export_retry_log_object` (JSONB); on max retries or "Image obtain error" sets `deleted=true` |
-| Key logic | Re-issues `IMAGE_EXPORT` via `core.doReact` for retry; distinguishes recoverable vs unrecoverable failures |
+| Key logic | SELECT uses `WHERE tid = $1 AND file_size = 0 AND export_retry_count < 4` — ensures exactly one row is returned for the specific failed export (unexported, still within retry budget). If `rowCount === 1`: retries by calling `core.doReact(IMAGE_EXPORT, EXPORT)` up to 4 times; distinguishes "Image obtain error" (instant soft-delete) from transient failures (retry). On max retries sets `deleted=true`. Entire handler body is wrapped in a top-level `try/catch` — any DB error (including PostgreSQL 40P01 deadlock) is caught and logged, never propagates as an unhandled rejection. |
+| Error handling | Outer `try/catch` on the event handler body prevents unhandled Promise rejections and fatal process exits. No `sleep` delay — concurrent handlers on different `tid` values operate on independent rows. |
 
 ### Export Fixer Microservice.js
 
