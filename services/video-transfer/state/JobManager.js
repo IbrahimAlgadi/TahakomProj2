@@ -202,6 +202,55 @@ class JobManager {
     }
 
     /**
+     * Pause all active jobs (created / pending / transferring) for monitoring accuracy.
+     * Called every processing-loop iteration while the drive is not ready, so it is idempotent
+     * — SQL returns 0 rows when all jobs are already paused.
+     */
+    async pauseActiveJobs(reason = 'USB drive disconnected') {
+        try {
+            const result = await this.pool.query(`
+                UPDATE video_transfer_queue_job
+                SET status = 'paused', error_message = $1, updated_at = CURRENT_TIMESTAMP
+                WHERE status IN ('created', 'pending', 'transferring')
+                AND batch_origin = 'auto_video'
+                RETURNING id, batch_id
+            `, [reason]);
+
+            if (result.rows.length > 0) {
+                logger.info(`[JOB] JobManager.pauseActiveJobs: Paused ${result.rows.length} video job(s): ${result.rows.map(j => j.batch_id).join(', ')} — reason: ${reason}`);
+            }
+        } catch (error) {
+            logger.error('[JOB_ERROR] JobManager.pauseActiveJobs: Error pausing active jobs:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Resume all paused jobs back to 'created' so the processing loop re-evaluates their phase.
+     * Called when the drive reconnects.
+     */
+    async resumeActiveJobs() {
+        try {
+            const result = await this.pool.query(`
+                UPDATE video_transfer_queue_job
+                SET status = 'created', error_message = NULL, updated_at = CURRENT_TIMESTAMP
+                WHERE status = 'paused'
+                AND batch_origin = 'auto_video'
+                RETURNING id, batch_id
+            `);
+
+            if (result.rows.length > 0) {
+                logger.info(`[JOB] JobManager.resumeActiveJobs: Resumed ${result.rows.length} video job(s): ${result.rows.map(j => j.batch_id).join(', ')}`);
+            } else {
+                logger.info('[JOB] JobManager.resumeActiveJobs: No paused video jobs to resume');
+            }
+        } catch (error) {
+            logger.error('[JOB_ERROR] JobManager.resumeActiveJobs: Error resuming jobs:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Add camera to processed list
      */
     async addCameraToProcessed(jobId, cameraId) {

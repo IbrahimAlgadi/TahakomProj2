@@ -472,6 +472,7 @@ class UnifiedVideoTransferService extends EventEmitter {
             if (!this.spaceValidator.isDriveReady()) {
                 const driveStatus = this.spaceValidator.getDriveStatus();
                 logger.warn(`[PROCESSING_CHECK_DRIVE] Processing paused: ${driveStatus.reason}`);
+                await this.jobManager.pauseActiveJobs('USB drive disconnected');
                 return;
             }
 
@@ -1023,6 +1024,11 @@ class UnifiedVideoTransferService extends EventEmitter {
                 // Update FileTransferManager with new drive info
                 if (this.fileTransferManager) {
                     this.fileTransferManager.setDriveInfo(this.driveInfo);
+                }
+
+                // Resume any jobs that were paused while the drive was absent
+                if (this.jobManager) {
+                    await this.jobManager.resumeActiveJobs();
                 }
             } else {
                 this.isDriveConnected = false;

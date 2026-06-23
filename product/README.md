@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-22 (V-A fixed — cleanup and buffer-monitoring loops enabled; CleanupService made job-aware with active-job exclusion and pending-transfer guard; checkReadyGroupsInBuffer undefined-jobId crash fixed; reschedule bug in buffer-monitoring loop corrected)
+Last updated: 2026-06-23 (V-B fixed — drive disconnect now pauses active video jobs in DB; reconnect resumes them; pauseActiveJobs/resumeActiveJobs added to JobManager)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

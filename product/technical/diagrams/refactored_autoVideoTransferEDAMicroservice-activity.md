@@ -94,7 +94,7 @@ flowchart TD
     G5Yes["_updateScheduleStatus()\nreturn"]
 
     G6{"!spaceValidator.isDriveReady()?\n(driveInfo null OR shouldStopProcessing)"}
-    G6Yes["log drive status\nreturn"]
+    G6Yes["pauseActiveJobs('USB drive disconnected')\nlog drive status\nreturn"]
 
     GetJobs["getExistingUncompletedJobs()\nSELECT FROM video_transfer_queue_job\nWHERE status NOT IN ('failed','completed')\nORDER BY created_at DESC"]
 
@@ -302,11 +302,16 @@ _updateDriveInfo() →
   shouldStopProcessing = true
   spaceValidator.updateDriveInfo(null, true)   → isDriveReady() = false
   fileTransferManager.setDriveInfo(null)        → next transferFile() throws "Drive information not available"
+
+_runProcessingLoop (every 5 s) →
+  gate G6: !isDriveReady() →
+    jobManager.pauseActiveJobs('USB drive disconnected')
+      → UPDATE video_transfer_queue_job SET status='paused'
+        WHERE status IN ('created','pending','transferring')
+    return
 ```
 
-The processing loop then returns at gate G6 on every 5-second iteration.
-
-> **The active `video_transfer_queue_job` row is NOT updated to any paused/stopped state.** It stays in `created` or `transferring`. See observation V-B §11.
+The active job in `video_transfer_queue_job` is updated to `status = 'paused'` on the next loop iteration (within 5 s).
 
 ### Effect on the video service (reconnect)
 
@@ -316,9 +321,12 @@ _updateDriveInfo() →
   shouldStopProcessing = false (if free space > 500 MB)
   spaceValidator.updateDriveInfo(driveInfo, false)  → isDriveReady() = true
   fileTransferManager.setDriveInfo(driveInfo)
+  jobManager.resumeActiveJobs()
+    → UPDATE video_transfer_queue_job SET status='created'
+      WHERE status='paused' AND batch_origin='auto_video'
 ```
 
-The next 5-second loop iteration passes gate G6 and calls `getExistingUncompletedJobs()`, finding the still-`created`/`transferring` job and resuming automatically.
+The next 5-second loop iteration passes gate G6 and calls `getExistingUncompletedJobs()`, finding the job now in `created` status and resuming normally.
 
 ---
 
@@ -330,8 +338,9 @@ Resume is **job-level**: uncompleted jobs persist in `video_transfer_queue_job` 
 
 | State at disconnect | What happens on resume |
 |---|---|
-| Job `created`, buffer partially filled | `getExistingUncompletedJobs` finds it; `_processSingleCameraJob` picks up where each camera left off (`pending`/`converted`/`grouped` buffer rows intact) |
-| Job `transferring`, video in `video_transfer_queue` with `pending` | `getVideoInTransferQueue` finds it → `emit('startTransferToStorage')` re-triggers the file copy |
+| Job `created`/`pending`/`transferring` (during disconnect) | `_updateDriveInfo` → `resumeActiveJobs()` sets status back to `created`; next loop iteration picks it up via `getExistingUncompletedJobs` and resumes the pipeline |
+| Job `paused`, buffer partially filled | `_processSingleCameraJob` picks up where each camera left off (`pending`/`converted`/`grouped` buffer rows intact) |
+| Job `paused`, video in `video_transfer_queue` with `pending` | `getVideoInTransferQueue` finds it → `emit('startTransferToStorage')` re-triggers the file copy |
 | Job `completed` | Excluded by `getExistingUncompletedJobs` (status NOT IN ('failed','completed')); a new job is created if files are available |
 | Toggle off → toggle on | `pauseVideoTransferFromConfig` flips false; next 5-second loop passes gate G2 and resumes normally |
 
@@ -512,25 +521,29 @@ stateDiagram-v2
 - Undefined `jobId` variable: fixed by querying the active job (`status IN ('created','transferring','paused')`) before the `for` loop; the method returns early if no active job exists.
 - Post-creation code: replaced call to non-existent `jobManager.getOrCreateActiveJob()` with the already-fetched `activeJob`; fixed `addVideoToTransferQueue(videoData, job)` (wrong object) to `addVideoToTransferQueue(videoData, activeJob.id)`; replaced `emit('videoCreated', …)` (which would hit the V-F crash) with `emit('startTransferToStorage', activeJob.id, videoData.camera_id, activeJob.batch_id)`, matching the pattern used by `_processSingleCameraJob`.
 
-### V-B — Drive disconnect does not update job status (no `pauseActiveJobs` equivalent)
+### V-B — Drive disconnect job status fixed (2026-06-23)
 
-When the USB drive disconnects, the processing loop returns early at gate G6 (`!isDriveReady()`). The job in `video_transfer_queue_job` stays in its current status (`created`, `pending`, or `transferring`). There is no call to pause or reflect this in the DB.
+**Original state:** Gate G6 in `_runProcessingLoop` returned early without touching the DB. The active job stayed in `created`/`pending`/`transferring` while no processing was happening, causing monitoring confusion.
 
-**Contrast with the image service**: the image service (after fix O-C) calls `pauseActiveJobs('USB drive disconnected')` every iteration while the drive is absent, flipping `status='paused'`.
+**What was fixed (2 files changed):**
 
-Operational impact: monitoring queries that look for active jobs (`status IN ('created','transferring')`) will see a live job even though no processing is happening.
+**`services/video-transfer/state/JobManager.js`** — two new batch methods added after `updateJobStatus`:
+- `pauseActiveJobs(reason)` — sets `status = 'paused'` for all jobs with `status IN ('created','pending','transferring') AND batch_origin = 'auto_video'`; stores `reason` in `error_message`. Idempotent (SQL returns 0 rows when already paused).
+- `resumeActiveJobs()` — restores `status = 'created'` for all `paused` jobs with `batch_origin = 'auto_video'`; clears `error_message`. Idempotent (SQL returns 0 rows when no paused jobs).
 
-**Diagnostic query:**
+**`refactored_autoVideoTransferEDAMicroservice.js`** — two call sites wired:
+- Gate G6 (`!isDriveReady()`): `await this.jobManager.pauseActiveJobs('USB drive disconnected')` added before the early `return`. Called every 5 s — idempotent.
+- `_updateDriveInfo` reconnect branch (`if (targetDrive)`): `await this.jobManager.resumeActiveJobs()` added after `fileTransferManager.setDriveInfo`. Called with `jobManager` null-guard (`if (this.jobManager)`).
+
+**Verification query** (status should show `paused` while drive is absent, `created` after reconnect):
 
 ```sql
-SELECT id, batch_id, status, updated_at
+SELECT id, batch_id, status, error_message, updated_at
 FROM video_transfer_queue_job
 WHERE batch_origin = 'auto_video'
   AND status NOT IN ('completed', 'failed')
 ORDER BY updated_at DESC;
 ```
-
-If `updated_at` is old and you know the drive is disconnected, the job status is stale.
 
 ### V-C — `isTransferringToStorageRunning` flag leaks `true` on drive-not-ready early return
 
@@ -646,4 +659,4 @@ This path is **still unreachable** via normal operation. If `processFilesToBuffe
 
 ---
 
-_Sources: `refactored_autoVideoTransferEDAMicroservice.js`, `services/video-transfer/state/JobManager.js`, `services/video-transfer/transfer/FileTransferManager.js`, `services/video-transfer/validators/SpaceValidator.js`, `services/video-transfer/processors/CompleteBufferManager.js`, `services/video-transfer/processors/VideoProcessor.js`, `services/video-transfer/state/ProcessingStateManager.js`, `services/shared/CleanupService.js`, `monitorConnectedExternalDrivesMicroservice.js`, `ConfigStateServiceRedis.js`, `redisKeyStore.js`, `routes/mainConfigRoutes.js`, `data_transfer_v2/views/auto_transfer.njk`. Last updated: 2026-06-22 (V-A fixed — cleanup and buffer-monitoring loops enabled; CleanupService made job-aware; checkReadyGroupsInBuffer crash fixed)._
+_Sources: `refactored_autoVideoTransferEDAMicroservice.js`, `services/video-transfer/state/JobManager.js`, `services/video-transfer/transfer/FileTransferManager.js`, `services/video-transfer/validators/SpaceValidator.js`, `services/video-transfer/processors/CompleteBufferManager.js`, `services/video-transfer/processors/VideoProcessor.js`, `services/video-transfer/state/ProcessingStateManager.js`, `services/shared/CleanupService.js`, `monitorConnectedExternalDrivesMicroservice.js`, `ConfigStateServiceRedis.js`, `redisKeyStore.js`, `routes/mainConfigRoutes.js`, `data_transfer_v2/views/auto_transfer.njk`. Last updated: 2026-06-23 (V-B fixed — drive disconnect now sets job status to paused; reconnect resumes to created via new pauseActiveJobs/resumeActiveJobs methods in JobManager)._
