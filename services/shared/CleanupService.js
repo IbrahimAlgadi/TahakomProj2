@@ -113,17 +113,28 @@ class CleanupService {
     }
 
     /**
-     * Clean up stale buffer entries
+     * Clean up stale buffer entries.
+     * Excludes entries belonging to any job that is still active (created / transferring / paused)
+     * so that in-flight conversions are never removed mid-pipeline.
      */
     async cleanupStaleBufferEntries() {
         try {
-            // Clean up old converted files from disk first
+            // Exclude entries whose job is still active so mid-pipeline files are untouched
+            const activeJobGuard = `
+                (job_id IS NULL OR job_id NOT IN (
+                    SELECT id FROM video_transfer_queue_job
+                    WHERE status IN ('created', 'transferring', 'paused')
+                ))
+            `;
+
+            // Delete disk files first so DB stays consistent even if fs call fails
             const oldConvertedFiles = await this.pool.query(`
                 SELECT id, converted_file_path, status
                 FROM video_converted_buffer 
                 WHERE status IN ('converted', 'grouped', 'failed')
                 AND created_at < NOW() - INTERVAL '2 hours'
                 AND converted_file_path != ''
+                AND ${activeJobGuard}
             `);
             
             for (const file of oldConvertedFiles.rows) {
@@ -137,16 +148,17 @@ class CleanupService {
                 }
             }
             
-            // Now clean up database entries
+            // Now clean up database entries (same guard applied)
             const result = await this.pool.query(`
                 DELETE FROM video_converted_buffer 
                 WHERE status IN ('converted', 'grouped', 'failed')
                 AND created_at < NOW() - INTERVAL '2 hours'
+                AND ${activeJobGuard}
                 RETURNING id, status, source_file_id
             `);
             
             if (result.rows.length > 0) {
-                logger.info(`[CLEANUP] Removed ${result.rows.length} stale buffer entries`);
+                logger.info(`[CLEANUP] Removed ${result.rows.length} stale buffer entries (active-job rows protected)`);
             }
         } catch (error) {
             logger.error('[CLEANUP] Failed to cleanup stale buffer entries:', error);
@@ -155,7 +167,10 @@ class CleanupService {
     }
 
     /**
-     * Clean up stale processing markers
+     * Clean up stale processing markers.
+     * Skips markers whose source file is still present in video_converted_buffer
+     * with status 'pending' or 'converted' to avoid allowing duplicate pickup of
+     * slow-converting files.
      */
     async cleanupStaleProcessingMarkers() {
         try {
@@ -173,12 +188,28 @@ class CleanupService {
                         
                         // Remove markers older than 2 hours
                         if (hoursSinceStart > 2) {
+                            // Skip if the file is still actively in the conversion buffer
+                            const fileId = key.split(':').pop();
+                            if (fileId) {
+                                const bufferCheck = await this.pool.query(`
+                                    SELECT id FROM video_converted_buffer
+                                    WHERE source_file_id = $1
+                                    AND status IN ('pending', 'converted')
+                                    LIMIT 1
+                                `, [parseInt(fileId, 10)]);
+                                
+                                if (bufferCheck.rows.length > 0) {
+                                    logger.info(`[CLEANUP] Skipping stale marker for file ${fileId} — still active in buffer`);
+                                    continue;
+                                }
+                            }
+                            
                             await this.redis.del(key);
                             cleanedCount++;
                         }
                     }
                 } catch (parseError) {
-                    // Remove invalid markers
+                    // Remove markers with invalid JSON (no fileId to check)
                     await this.redis.del(key);
                     cleanedCount++;
                 }
@@ -194,7 +225,10 @@ class CleanupService {
     }
 
     /**
-     * Clean up temporary video files and directories
+     * Clean up temporary video files and directories.
+     * Skips any path (or directory containing a path) that is currently referenced
+     * by a pending video_transfer_queue row so a queued-but-not-yet-transferred
+     * video is never deleted beneath an active transfer.
      */
     async cleanupTempVideoFiles() {
         try {
@@ -202,12 +236,30 @@ class CleanupService {
                 return;
             }
 
+            // Build a protected-path index from the transfer queue
+            const pendingResult = await this.pool.query(`
+                SELECT video_file_path
+                FROM video_transfer_queue
+                WHERE status = 'pending'
+                AND video_file_path IS NOT NULL
+                AND video_file_path != ''
+            `);
+            const pendingPaths = new Set(pendingResult.rows.map(r => r.video_file_path));
+            const pendingDirs  = new Set(pendingResult.rows.map(r => path.dirname(r.video_file_path)));
+
             const entries = await fs.readdir(this.VIDEO_TEMP_DIR, { withFileTypes: true });
             let cleanedCount = 0;
 
             for (const entry of entries) {
                 if (entry.isDirectory()) {
                     const dirPath = path.join(this.VIDEO_TEMP_DIR, entry.name);
+
+                    // Skip if a pending transfer lives inside this directory
+                    if (pendingDirs.has(dirPath)) {
+                        logger.info(`[CLEANUP] Skipping temp directory with pending transfer: ${entry.name}`);
+                        continue;
+                    }
+
                     try {
                         const dirStats = await fs.stat(dirPath);
                         const hoursSinceModified = (Date.now() - dirStats.mtime.getTime()) / (1000 * 60 * 60);
@@ -223,6 +275,13 @@ class CleanupService {
                     }
                 } else if (entry.isFile()) {
                     const filePath = path.join(this.VIDEO_TEMP_DIR, entry.name);
+
+                    // Skip if this exact file is pending transfer
+                    if (pendingPaths.has(filePath)) {
+                        logger.info(`[CLEANUP] Skipping temp file with pending transfer: ${entry.name}`);
+                        continue;
+                    }
+
                     try {
                         const fileStats = await fs.stat(filePath);
                         const hoursSinceModified = (Date.now() - fileStats.mtime.getTime()) / (1000 * 60 * 60);

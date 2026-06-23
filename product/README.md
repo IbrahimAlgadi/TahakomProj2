@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-21 (SecurOS export crash fixes — OptimizedImageCapture.js OVER-fallback + null guard + try/catch (T-7); Export Fixer unawaited pool.query deadlock crash fixed (T-8))
+Last updated: 2026-06-22 (V-A fixed — cleanup and buffer-monitoring loops enabled; CleanupService made job-aware with active-job exclusion and pending-transfer guard; checkReadyGroupsInBuffer undefined-jobId crash fixed; reschedule bug in buffer-monitoring loop corrected)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

@@ -511,10 +511,28 @@ class CompleteBufferManager {
     }
 
     /**
-     * Check for ready groups and emit videoCreated event
+     * Check for ready groups and trigger video creation + transfer.
+     * Called by _runBufferMonitoringLoop every 30 s as a catch-up pass for
+     * converted files that the main processing loop has not yet grouped/concat'd.
      */
     async checkReadyGroupsInBuffer() {
         try {
+            // Resolve the current active job once, before iterating groups
+            const activeJobResult = await this.pool.query(`
+                SELECT id, batch_id, processed_cameras, expected_cameras, status
+                FROM video_transfer_queue_job
+                WHERE batch_origin = 'auto_video'
+                AND status IN ('created', 'transferring', 'paused')
+                ORDER BY created_at DESC
+                LIMIT 1
+            `);
+
+            if (activeJobResult.rows.length === 0) {
+                return; // No active job — nothing to do
+            }
+
+            const activeJob = activeJobResult.rows[0];
+
             // Get distinct groups that have enough converted files
             const readyGroups = await this.pool.query(`
                 SELECT 
@@ -544,31 +562,25 @@ class CompleteBufferManager {
                     // Check if this camera has already contributed to the current job
                     const hasAlreadyContributed = await this.checkCameraAlreadyProcessedInCurrentJob(group.camera_id);
                     if (hasAlreadyContributed) {
-                        logger.info(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: ⚠️ Skipping ready group for camera ${group.camera_id} - already contributed to current job (maintaining 1 video per camera per job)`);
+                        logger.info(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Skipping ready group for camera ${group.camera_id} - already contributed to current job`);
                         continue;
                     }
                     
                     const videoData = await this.createVideoFromBuffer(
-                        jobId,
-                        group.camera_id, 
-                        group.recording_date, 
-                        group.group_key, 
-                        group.group_interval_start, 
-                        group.group_interval_end
+                        activeJob.id,
+                        group.camera_id
                     );
                     
                     if (videoData && this.eventEmitter) {
-                        // Get current active job and emit event
-                        const job = await this.jobManager.getOrCreateActiveJob();
-                        if (job) {
-                            // Store the concatenated video in transfer queue
-                            await this.jobManager.addVideoToTransferQueue(videoData, job);
-                            this.eventEmitter.emit('videoCreated', videoData, job);
-                        }
+                        await this.jobManager.addVideoToTransferQueue(videoData, activeJob.id);
+                        await this.jobManager.addCameraToProcessed(activeJob.id, videoData.camera_id);
+                        await this.jobManager.updateJobStatsToTransfered(activeJob.id);
+                        logger.info(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Video queued for transfer: ${videoData.videoName}`);
+                        this.eventEmitter.emit('startTransferToStorage', activeJob.id, videoData.camera_id, activeJob.batch_id);
                     }
                     
                 } catch (error) {
-                    logger.error(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Error processing ready group:`, error);
+                    logger.error(`[BUFFER_MONITOR] CompleteBufferManager.checkReadyGroupsInBuffer: Error processing ready group for camera ${group.camera_id}:`, error);
                 }
             }
             

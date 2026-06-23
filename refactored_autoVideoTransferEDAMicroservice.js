@@ -887,12 +887,6 @@ class UnifiedVideoTransferService extends EventEmitter {
             return;
         }
 
-        if (true) {
-            logger.info('[CLEANUP] _runCleanupLoop: Stop termperory running cleanup tasks');
-            setTimeout(() => this._runCleanupLoop(), 300000);
-            return;
-        }
-        
         try {
             this.emit('cleanup');
         } catch (error) {
@@ -908,11 +902,6 @@ class UnifiedVideoTransferService extends EventEmitter {
      */
     async _runBufferMonitoringLoop() {
         if (this.shouldStop) return;
-        if (true) {
-            logger.info('[BUFFER_MONITOR] _runBufferMonitoringLoop: Stop termperory running buffer monitoring tasks');
-            setTimeout(() => this._runCleanupLoop(), 300000);
-            return;
-        }
         if (this.pauseVideoTransferFromConfig) {
             logger.info('[BUFFER_MONITOR] _runBufferMonitoringLoop: Video transfer is disabled in config');
             setTimeout(() => this._runBufferMonitoringLoop(), 30000);
