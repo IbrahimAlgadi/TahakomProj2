@@ -37,7 +37,7 @@
                             <div>
                                 <h5 class="card-title mb-0">Total Storage</h5>
                                 <h2 class="mb-0" id="totalStorage">Loading...</h2>
-                                <small class="opacity-75">Total archive size</small>
+                                <small class="opacity-75">Active files on disk</small>
                             </div>
                             <div class="ms-auto">
                                 <i class="fas fa-hdd fa-2x opacity-75"></i>
@@ -284,7 +284,7 @@
                         
                         // Update overview cards
                         $('#totalFiles').text(parseInt(data.overall.active_files).toLocaleString());
-                        $('#totalStorage').text(formatBytes(parseInt(data.overall.total_size)));
+                        $('#totalStorage').text(formatBytes(parseInt(data.overall.active_size)));
                         $('#activeCameras').text(data.overall.total_cameras);
                         $('#retentionDays').text(data.retention.retentionDays + ' Days');
 

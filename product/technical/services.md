@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-23 (Image Export Errors.js deadlock crash fixed — restored SELECT filter, added outer try/catch, removed concurrent-overlap sleep)
+Last updated: 2026-06-23 (ISS_MEDIA indexer: added reconcilePurgedFolders() run at startup + hourly; added today's-folder catch-up scan; dashboard stats now return active_size; retentionDays reads from ISS_MEDIA_RETENTION)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -119,10 +119,12 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 |---|---|
 | PM2 name | `monitorISSMediaFilesOptimizedMicroservice` |
 | Dependencies | ConfigStateServiceRedis, monitorConnectedExternalDrivesMicroservice |
-| DB writes | `iss_media_files` (INSERT new files, UPDATE sizes, soft-delete removed files) |
+| DB writes | `iss_media_files` — INSERT new files; `reconcilePurgedFolders()` batch-marks `deleted=true` for records whose parent hourly folder no longer exists on disk |
 | Key lib | chokidar (file watcher) |
-| Logging | `utils/logger.js` `createLogger({ service: 'monitorISSMediaFilesOptimized' })`; per-camera historical scans wrapped in `runWithTrace({ traceId, camera })` |
-| Purpose | Watches ISS NVR media directories; indexes MP4 segments into `iss_media_files` table so video transfer services can discover them |
+| Logging | `utils/logger.js` `createLogger({ service: 'monitorISSMediaFilesOptimized' })`; per-camera historical scans wrapped in `runWithTrace({ traceId, camera })`; reconciliation logged under `[RECONCILE]` prefix; catch-up scan under `[CATCHUP]` |
+| Purpose | Watches ISS NVR media directories; indexes `.issvd` segments into `iss_media_files` table so video transfer services can discover them |
+| Reconciliation | `reconcilePurgedFolders()` runs at startup (fire-and-forget after historical scan) and every **1 hour** (`RECONCILE_INTERVAL`). It groups all `deleted=false` records by `path.dirname(file_path)`, checks each unique hourly folder with `fs.access`, then batch-updates `deleted=true` for all records in purged folders using `id = ANY($1)`. This keeps DB state in sync when SecuROS removes hourly folders early. |
+| Today catch-up | At the end of `setupRealtimeMonitoring()`, a `setImmediate` fire-and-forget scan processes all `.issvd` files already present in today's hourly folders (missed by the historical scan's today-skip and the chokidar `ignoreInitial:true` setting). |
 
 ### refactored_autoVideoTransferEDAMicroservice.js
 

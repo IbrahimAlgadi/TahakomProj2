@@ -100,6 +100,42 @@ class FileTransferQueueService {
     }
 
     /**
+     * Add a single converted video file to the transfer queue.
+     * Used after a manual_video_group_queue group has been fully converted.
+     * file_id is NULL because the source is iss_media_files, not files.
+     *
+     * @param {Object} video        - { file_path, file_size, file_name, video_group_id, camera_id }
+     * @param {string} serviceType  - 'manual'
+     * @param {number} priority
+     * @param {string} destinationPath
+     * @param {number} transferJobId
+     */
+    async addVideoToQueue(video, serviceType, priority, destinationPath, transferJobId = null) {
+        const batchId = uuidv4();
+        const metadata = JSON.stringify({
+            video_group_id: video.video_group_id || null,
+            camera_id:      video.camera_id      || null,
+        });
+        await pool.query(`
+            INSERT INTO file_transfer_queue
+                (service_type, file_id, file_path, file_size, file_name,
+                 destination_path, priority, batch_id, transfer_job_id, metadata)
+            VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9)
+        `, [
+            serviceType,
+            video.file_path,
+            video.file_size || 0,
+            video.file_name,
+            destinationPath,
+            priority,
+            batchId,
+            transferJobId,
+            metadata
+        ]);
+        return batchId;
+    }
+
+    /**
      * Get next batch of files to transfer (by priority)
      * @param {number} limit - Number of files to get
      * @returns {Promise<Array>} - Array of files to transfer
@@ -152,7 +188,10 @@ class FileTransferQueueService {
                     UPDATE files SET is_auto_transferred = true WHERE id = $1
                 `, [file.file_id]);
             }
-            if (file.service_type === 'manual' && file.transfer_job_id) {
+            // Only update transfer_job_log for image entries (file_id is NOT NULL for images).
+            // Video entries have file_id = NULL; their log row (manual_video_group_queue) is
+            // updated by the consumer loop directly after the fs.copy succeeds.
+            if (file.service_type === 'manual' && file.transfer_job_id && file.file_id !== null) {
                 await pool.query(
                     `UPDATE transfer_job_log SET transferred = true
                      WHERE file_id = $1 AND transfer_job_id = $2`,

@@ -2,7 +2,6 @@ const Redis = require('ioredis');
 const { Pool } = require('pg');
 const fs = require('fs-extra');
 const path = require('path');
-const chokidar = require('chokidar');
 const pLimit = require('p-limit');
 const { sleep } = require('./utils.js');
 const { MEDIA_INDEX_STATUS, MEDIA_INDEX_UPDATE, CONFIG_STATE_KEY } = require('./redisKeyStore.js');
@@ -49,9 +48,8 @@ const pool = new Pool({
 
 // State variables
 let isHistoricalScanComplete = false;
-let isRealTimeMonitoring = false;
+let isPollingActive = false;
 let currentSiteId = '';
-let fileWatchers = new Map(); // Store chokidar watchers
 
 // Performance tracking
 let performanceStats = {
@@ -85,17 +83,15 @@ let performanceStats = {
     }
 };
 
-// Real-time file processing queue and batching
-const realtimeFileQueue = [];
+// In-memory folder state cache: Map<folderPath, Set<fileName>>
+const folderCache = new Map();
 
-// Real-time batching configuration
-const REALTIME_CONFIG = {
-    BATCH_SIZE: 50,           // Process 50 files at once
-    BATCH_TIMEOUT: 3000,      // Process batch every 3 seconds max
-    MAX_QUEUE_SIZE: 500       // Prevent memory overflow
+// Tiered polling intervals
+const POLL_INTERVALS = {
+    FAST_MS:   1 * 60 * 1000,   // current hour only — new files appear here first
+    NORMAL_MS: 5 * 60 * 1000,   // all of today's existing folders
+    SLOW_MS:   30 * 60 * 1000,  // full retention window — catch previous-day deletions
 };
-
-let lastBatchProcessTime = Date.now();
 
 /**
  * Parse date-time directory format: 2025-07-14T09+0300
@@ -427,6 +423,77 @@ async function removeDuplicateRecords() {
 }
 
 /**
+ * Reconcile purged hourly folders: find all active iss_media_files records
+ * whose parent directory no longer exists on disk (deleted by SecuROS) and
+ * mark them deleted=true so dashboard counts and transfer services stay accurate.
+ *
+ * Uses exact id-based UPDATE (no LIKE) to avoid issues with Windows path
+ * characters such as underscores acting as LIKE wildcards.
+ */
+async function reconcilePurgedFolders() {
+    try {
+        logger.info('[RECONCILE] Starting purged-folder reconciliation...');
+
+        // Fetch id + file_path for every active record in one query
+        const { rows } = await pool.query(
+            `SELECT id, file_path FROM iss_media_files WHERE deleted = false`
+        );
+
+        if (rows.length === 0) {
+            logger.info('[RECONCILE] No active records to reconcile');
+            return 0;
+        }
+
+        // Group record IDs by their parent hourly folder (JS-side, no SQL path ops)
+        const folderToIds = new Map();
+        for (const row of rows) {
+            const folder = path.dirname(row.file_path);
+            if (!folderToIds.has(folder)) folderToIds.set(folder, []);
+            folderToIds.get(folder).push(row.id);
+        }
+
+        // Concurrently check each unique hourly folder for disk presence
+        const missingIds = [];
+        let staleFolderCount = 0;
+        await Promise.all(
+            [...folderToIds.entries()].map(async ([folder, ids]) => {
+                try {
+                    await fs.access(folder, fs.constants.F_OK);
+                } catch {
+                    staleFolderCount++;
+                    missingIds.push(...ids);
+                }
+            })
+        );
+
+        if (missingIds.length === 0) {
+            logger.info('[RECONCILE] All hourly folders present on disk — no stale records', {
+                totalFolders: folderToIds.size
+            });
+            return 0;
+        }
+
+        // Batch-mark all records in missing folders as deleted using exact IDs
+        const { rowCount } = await pool.query(
+            `UPDATE iss_media_files
+             SET deleted = true, updated_at = NOW()
+             WHERE id = ANY($1)`,
+            [missingIds]
+        );
+
+        logger.info(`[RECONCILE] Marked ${rowCount} stale records deleted`, {
+            totalFolders: folderToIds.size,
+            staleFolders: staleFolderCount,
+            markedDeleted: rowCount
+        });
+        return rowCount;
+    } catch (error) {
+        logger.error('[RECONCILE] Reconciliation failed:', { error: error.message });
+        return 0;
+    }
+}
+
+/**
  * Update database connection pool statistics
  */
 function updatePoolStats() {
@@ -616,90 +683,86 @@ async function performHistoricalScan() {
 }
 
 /**
- * Add file to real-time processing queue
+ * Mark specific .issvd files deleted in DB (SecuROS deleted individual files
+ * inside a folder that still exists on disk).
  */
-function addToRealtimeQueue(filePath, cameraId) {
+async function markIndividualFilesDeleted(folderPath, fileNames) {
+    if (fileNames.length === 0) return;
+    const filePaths = fileNames.map(n => path.join(folderPath, n));
     try {
-        const fileName = path.basename(filePath);
-        const dirName = path.basename(path.dirname(filePath));
-        
-        const dirInfo = parseDateTimeDirectory(dirName);
-        const parsedFile = parseISSVDFilename(fileName);
-        
-        if (!dirInfo || !parsedFile) {
-            logger.warn(`[REALTIME] Invalid file format: ${filePath}`);
-            return;
-        }
-
-        const preciseTime = calculatePreciseTime(
-            dirInfo.time,
-            parsedFile.offsetMinutes,
-            parsedFile.offsetSeconds,
-            parsedFile.offsetMs
+        const { rowCount } = await pool.query(
+            `UPDATE iss_media_files SET deleted = true, updated_at = NOW()
+             WHERE file_path = ANY($1) AND deleted = false`,
+            [filePaths]
         );
-
-        const fileData = {
-            filePath,
-            fileName,
-            fileSize: ISS_MEDIA_FILE_SIZE * 1024,
-            cameraId: parsedFile.cameraId,
-            siteId: currentSiteId,
-            date: dirInfo.date,
-            time: dirInfo.time,
-            timezoneOffset: dirInfo.timezoneOffset,
-            preciseTime: preciseTime,
-            detectedAt: new Date()
-        };
-
-        // Add to queue
-        realtimeFileQueue.push(fileData);
-        
-        // Prevent memory overflow
-        if (realtimeFileQueue.length > REALTIME_CONFIG.MAX_QUEUE_SIZE) {
-            logger.warn(`[REALTIME] Queue size exceeded ${REALTIME_CONFIG.MAX_QUEUE_SIZE}, forcing batch process`);
-            setImmediate(processRealtimeBatch);
-        }
-        
-        logger.info(`[REALTIME] File queued: ${fileName} (Camera: ${cameraId}) - Queue size: ${realtimeFileQueue.length}`, { file: fileName, camera: cameraId, queueSize: realtimeFileQueue.length });
-
+        if (rowCount > 0)
+            logger.info(`[POLL] Marked ${rowCount} individually-purged files deleted`, { folder: path.basename(folderPath), count: rowCount });
     } catch (error) {
-        logger.error(`[ERROR] Failed to add file to realtime queue ${filePath}:`, { error: error.message, filePath });
-        performanceStats.realTimeMonitoring.errors++;
+        logger.error('[POLL] markIndividualFilesDeleted failed:', { error: error.message, folder: path.basename(folderPath) });
     }
 }
 
 /**
- * Process batched real-time files
+ * Scan one hourly folder, diff its file set against the in-memory cache,
+ * bulk-insert newly-appeared files, mark removed files deleted, then refresh
+ * the cache entry.  Handles the case where the folder itself has been purged.
  */
-async function processRealtimeBatch() {
-    if (realtimeFileQueue.length === 0) return;
-    
-    const startTime = Date.now();
-    const batchSize = Math.min(realtimeFileQueue.length, REALTIME_CONFIG.BATCH_SIZE);
-    const filesToProcess = realtimeFileQueue.splice(0, batchSize);
-    
+async function scanFolderDiff(folderPath) {
+    const folderName = path.basename(folderPath);
+    const dirInfo = parseDateTimeDirectory(folderName);
+    if (!dirInfo || !isWithinRetention(dirInfo.date)) return;
+
+    let currentFileNames;
     try {
-        logger.info(`[REALTIME BATCH] Processing ${filesToProcess.length} files...`);
-        
-        const result = await bulkInsertFiles(filesToProcess);
-        
-        if (result.inserted > 0) {
-            performanceStats.realTimeMonitoring.filesProcessedToday += result.inserted;
-            logger.info(`[REALTIME BATCH] Successfully inserted ${result.inserted} files, skipped ${result.duplicates} duplicates`, { inserted: result.inserted, duplicates: result.duplicates });
+        const items = await fs.readdir(folderPath);
+        currentFileNames = new Set(items.filter(f => f.endsWith('.issvd')));
+    } catch {
+        // Folder was purged between the camera readdir and this call
+        if (folderCache.has(folderPath)) {
+            await markIndividualFilesDeleted(folderPath, [...folderCache.get(folderPath)]);
+            folderCache.delete(folderPath);
         }
-
-        const processingTime = Date.now() - startTime;
-        performanceStats.realTimeMonitoring.averageProcessingTime = 
-            (performanceStats.realTimeMonitoring.averageProcessingTime + processingTime) / 2;
-        performanceStats.realTimeMonitoring.lastFileTime = new Date();
-        
-        lastBatchProcessTime = Date.now();
-
-    } catch (error) {
-        logger.error(`[ERROR] Failed to process realtime batch:`, { error: error.message });
-        performanceStats.realTimeMonitoring.errors++;
-        realtimeFileQueue.unshift(...filesToProcess);
+        return;
     }
+
+    const cached = folderCache.get(folderPath) ?? new Set();
+
+    // Insert newly appeared files
+    const addedNames = [...currentFileNames].filter(f => !cached.has(f));
+    if (addedNames.length > 0) {
+        const files = addedNames.map(fileName => {
+            const parsed = parseISSVDFilename(fileName);
+            if (!parsed) return null;
+            return {
+                filePath: path.join(folderPath, fileName),
+                fileName,
+                fileSize: ISS_MEDIA_FILE_SIZE * 1024,
+                cameraId: parsed.cameraId,
+                siteId: currentSiteId,
+                date: dirInfo.date,
+                time: dirInfo.time,
+                timezoneOffset: dirInfo.timezoneOffset,
+                preciseTime: calculatePreciseTime(dirInfo.time, parsed.offsetMinutes, parsed.offsetSeconds, parsed.offsetMs),
+            };
+        }).filter(Boolean);
+
+        if (files.length > 0) {
+            const { inserted } = await bulkInsertFiles(files);
+            if (inserted > 0) {
+                performanceStats.realTimeMonitoring.filesProcessedToday += inserted;
+                performanceStats.realTimeMonitoring.lastFileTime = new Date();
+                logger.info(`[POLL] Inserted ${inserted} new files from ${folderName}`, { folder: folderName, inserted });
+            }
+        }
+    }
+
+    // Mark individually deleted files
+    const removedNames = [...cached].filter(f => !currentFileNames.has(f));
+    if (removedNames.length > 0) {
+        await markIndividualFilesDeleted(folderPath, removedNames);
+    }
+
+    folderCache.set(folderPath, currentFileNames);
 }
 
 /**
@@ -768,57 +831,42 @@ async function validateDirectoryStructure() {
 }
 
 /**
- * Setup chokidar file watching for today's files only
+ * Seed the folder cache for every hourly directory currently on disk, then
+ * activate the tiered polling loop.  Replaces the old chokidar-based
+ * setupRealtimeMonitoring().  No DB writes happen here — the historical scan
+ * already covered past days and the first normal-tier poll will insert any
+ * today-files that arrived since startup.
  */
-async function setupRealtimeMonitoring() {
-    logger.info('[REALTIME] Setting up file watchers for today\'s directories...');
-    
-    // Validate directory structure first
+async function startTieredPolling() {
     await validateDirectoryStructure();
-    
-    const todayPattern = getTodayPatterns();
     performanceStats.realTimeMonitoring.startTime = new Date();
+
+    logger.info('[POLL] Seeding folder cache with all currently-on-disk folders...');
+    const hourDirRegex = /^\d{4}-\d{2}-\d{2}T\d{2}\+0300$/;
+    let seededFolders = 0;
 
     for (const cameraId of ISS_MEDIA_CAMERAS) {
         const cameraPath = path.join(ISS_MEDIA_DIR, cameraId);
-        
         if (!await fs.pathExists(cameraPath)) {
             logger.warn(`[WARN] Camera directory not found: ${cameraPath}`, { camera: cameraId });
             continue;
         }
-
-        const watchPatterns = todayPattern.hourlyPatterns.map(hourPattern => 
-            path.join(cameraPath, hourPattern, '*.issvd')
-        );
-        
-        logger.info(`[REALTIME] Setting up watchers for ${cameraId} - ${watchPatterns.length} hourly directories`, { camera: cameraId, patternCount: watchPatterns.length });
-        
-        const watcher = chokidar.watch(watchPatterns, {
-            persistent: true,
-            ignoreInitial: true, // Don't process existing files
-            awaitWriteFinish: {
-                stabilityThreshold: 2000, // Wait for file to be stable
-                pollInterval: 100
-            },
-            depth: 1 // Watch exactly 1 level deep (hourly directories)
-        });
-
-        watcher.on('add', (filePath) => {
-            // Add to real-time processing queue
-            addToRealtimeQueue(filePath, cameraId);
-        });
-
-        watcher.on('error', (error) => {
-            logger.error(`[ERROR] File watcher error for ${cameraId}:`, { error: error.message, camera: cameraId });
-            performanceStats.realTimeMonitoring.errors++;
-        });
-
-        fileWatchers.set(cameraId, watcher);
-        logger.info(`[REALTIME] File watcher active for camera: ${cameraId}`, { camera: cameraId });
+        const items = await fs.readdir(cameraPath);
+        for (const name of items) {
+            if (!hourDirRegex.test(name)) continue;
+            const dirInfo = parseDateTimeDirectory(name);
+            if (!dirInfo || !isWithinRetention(dirInfo.date)) continue;
+            const folderPath = path.join(cameraPath, name);
+            try {
+                const files = await fs.readdir(folderPath);
+                folderCache.set(folderPath, new Set(files.filter(f => f.endsWith('.issvd'))));
+                seededFolders++;
+            } catch { /* folder vanished between readdir and this call */ }
+        }
     }
 
-    isRealTimeMonitoring = true;
-    logger.info('[REALTIME] All file watchers are active');
+    isPollingActive = true;
+    logger.info(`[POLL] Tiered polling active — cache seeded for ${seededFolders} folders`);
 }
 
 /**
@@ -826,67 +874,140 @@ async function setupRealtimeMonitoring() {
  */
 async function runOptimizedMonitoring() {
     logger.info('Starting Optimized ISS Media Files Microservice...', { pid: process.pid });
-    
+
     try {
         await performHistoricalScan();
-        
-        logger.info('[REALTIME] Historical scan complete, starting real-time monitoring setup...');
-        await setupRealtimeMonitoring();
-        logger.info('[REALTIME] Real-time monitoring is now active!');
-        
-        let lastStatsReport = Date.now();
-        let lastCleanupTime = new Date();
+
+        logger.info('[POLL] Historical scan complete, starting tiered polling...');
+        await startTieredPolling();
+        logger.info('[POLL] Tiered polling is now active!');
+
+        // Fire-and-forget startup reconciliation: mark stale DB records for
+        // hourly folders already purged by SecuROS before this service started.
+        reconcilePurgedFolders().then(count => {
+            if (count > 0) {
+                logger.info(`[RECONCILE] Startup reconciliation complete — ${count} stale records marked deleted`);
+            } else {
+                logger.info('[RECONCILE] Startup reconciliation complete — no stale records found');
+            }
+        }).catch(err => logger.error('[RECONCILE] Startup reconciliation error:', { error: err.message }));
+
         const STATS_REPORT_INTERVAL = 60000;
-        const CLEANUP_INTERVAL = 24 * 60 * 60 * 1000;
+        const CLEANUP_INTERVAL     = 24 * 60 * 60 * 1000;
+        const RECONCILE_INTERVAL   = 60 * 60 * 1000; // 1 hour
+
+        let lastStatsReport  = Date.now();
+        let lastCleanupTime  = Date.now();
+        let lastReconcile    = Date.now();
+        // Set to 0 so the first loop iteration triggers every tier immediately
+        let lastFastPoll     = 0;
+        let lastNormalPoll   = 0;
+        let lastSlowPoll     = 0;
+
+        const hourDirRegex = /^\d{4}-\d{2}-\d{2}T\d{2}\+0300$/;
 
         while (true) {
             const now = Date.now();
-            
-            const timeSinceLastBatch = now - lastBatchProcessTime;
-            if (realtimeFileQueue.length > 0 && 
-                (realtimeFileQueue.length >= REALTIME_CONFIG.BATCH_SIZE || 
-                 timeSinceLastBatch >= REALTIME_CONFIG.BATCH_TIMEOUT)) {
-                await processRealtimeBatch();
+
+            // ── FAST tier (every 1 min): current hour only ────────────────────
+            if (now - lastFastPoll >= POLL_INTERVALS.FAST_MS) {
+                const currentHour = new Date().getHours();
+                const hourStr     = String(currentHour).padStart(2, '0');
+                const today       = getTodayPatterns().fullDate;
+                const folderName  = `${today}T${hourStr}+0300`;
+                for (const cameraId of ISS_MEDIA_CAMERAS) {
+                    await scanFolderDiff(path.join(ISS_MEDIA_DIR, cameraId, folderName));
+                }
+                lastFastPoll = now;
             }
-            
+
+            // ── NORMAL tier (every 5 min): all of today's existing folders ────
+            if (now - lastNormalPoll >= POLL_INTERVALS.NORMAL_MS) {
+                const todayRegex = getTodayPatterns().todayRegex;
+                for (const cameraId of ISS_MEDIA_CAMERAS) {
+                    const cameraPath = path.join(ISS_MEDIA_DIR, cameraId);
+                    if (!await fs.pathExists(cameraPath)) continue;
+                    const items = await fs.readdir(cameraPath);
+                    for (const name of items) {
+                        if (todayRegex.test(name))
+                            await scanFolderDiff(path.join(cameraPath, name));
+                    }
+                }
+                lastNormalPoll = now;
+            }
+
+            // ── SLOW tier (every 30 min): full retention window ───────────────
+            if (now - lastSlowPoll >= POLL_INTERVALS.SLOW_MS) {
+                for (const cameraId of ISS_MEDIA_CAMERAS) {
+                    const cameraPath = path.join(ISS_MEDIA_DIR, cameraId);
+                    if (!await fs.pathExists(cameraPath)) continue;
+                    const items = await fs.readdir(cameraPath);
+                    const onDiskFolders = new Set(
+                        items
+                            .filter(n => hourDirRegex.test(n))
+                            .map(n => path.join(cameraPath, n))
+                    );
+                    for (const folderPath of onDiskFolders)
+                        await scanFolderDiff(folderPath);
+
+                    // Evict cache entries for folders SecuROS has since deleted
+                    for (const [cachedPath] of folderCache) {
+                        if (cachedPath.startsWith(cameraPath + path.sep) && !onDiskFolders.has(cachedPath)) {
+                            folderCache.delete(cachedPath);
+                            logger.info(`[POLL] Evicted purged folder from cache: ${path.basename(cachedPath)}`);
+                        }
+                    }
+                }
+                lastSlowPoll = now;
+            }
+
+            // ── Periodic stats / Redis publish ────────────────────────────────
             if (now - lastStatsReport >= STATS_REPORT_INTERVAL) {
                 updatePoolStats();
-                
-                logger.info('[STATUS] Real-time monitoring stats', {
-                    filesToday: performanceStats.realTimeMonitoring.filesProcessedToday,
-                    queueSize: realtimeFileQueue.length,
-                    avgBatchMs: Math.round(performanceStats.realTimeMonitoring.averageProcessingTime),
-                    lastFile: performanceStats.realTimeMonitoring.lastFileTime || 'None',
-                    dbPoolActive: performanceStats.database.connectionPoolStats.totalConnections - performanceStats.database.connectionPoolStats.idleConnections,
+
+                logger.info('[STATUS] Polling stats', {
+                    filesToday:  performanceStats.realTimeMonitoring.filesProcessedToday,
+                    cachedFolders: folderCache.size,
+                    lastFile:    performanceStats.realTimeMonitoring.lastFileTime || 'None',
+                    dbPoolActive: performanceStats.database.connectionPoolStats.totalConnections -
+                                  performanceStats.database.connectionPoolStats.idleConnections,
                     dbPoolTotal: performanceStats.database.connectionPoolStats.totalConnections
                 });
-                
-                const statusWithQueue = {
+
+                const statusPayload = {
                     ...performanceStats,
-                    realTimeQueue: {
-                        size: realtimeFileQueue.length,
-                        lastBatchTime: lastBatchProcessTime,
-                        batchConfig: REALTIME_CONFIG
-                    }
+                    pollingCache: { folders: folderCache.size },
                 };
-                await redis.set(MEDIA_INDEX_STATUS, JSON.stringify(statusWithQueue));
-                await redis.publish(MEDIA_INDEX_UPDATE, JSON.stringify(statusWithQueue));
-                
+                await redis.set(MEDIA_INDEX_STATUS, JSON.stringify(statusPayload));
+                await redis.publish(MEDIA_INDEX_UPDATE, JSON.stringify(statusPayload));
+
                 lastStatsReport = now;
             }
-            
+
+            // ── Site ID change detection ───────────────────────────────────────
             const newSiteId = await getCurrentSiteId();
             if (newSiteId !== currentSiteId) {
                 logger.info(`[UPDATE] Site ID changed from '${currentSiteId}' to '${newSiteId}'`, { oldSiteId: currentSiteId, newSiteId });
                 currentSiteId = newSiteId;
             }
-            
-            const timeSinceLastCleanup = now - lastCleanupTime.getTime();
-            if (timeSinceLastCleanup >= CLEANUP_INTERVAL) {
+
+            // ── Daily duplicate cleanup ────────────────────────────────────────
+            if (now - lastCleanupTime >= CLEANUP_INTERVAL) {
                 logger.info('[CLEANUP] Running daily duplicate cleanup...');
-                lastCleanupTime = new Date();
+                removeDuplicateRecords().catch(err =>
+                    logger.error('[CLEANUP] Daily cleanup error:', { error: err.message })
+                );
+                lastCleanupTime = now;
             }
-            
+
+            // ── Hourly DB reconciliation (safety net) ─────────────────────────
+            if (now - lastReconcile >= RECONCILE_INTERVAL) {
+                lastReconcile = now;
+                reconcilePurgedFolders().catch(err =>
+                    logger.error('[RECONCILE] Hourly reconciliation error:', { error: err.message })
+                );
+            }
+
             await sleep(2000);
         }
 
@@ -898,27 +1019,17 @@ async function runOptimizedMonitoring() {
 
 process.on('SIGINT', async () => {
     logger.info('[SHUTDOWN] Shutting down optimized media indexing microservice...');
-    
-    for (const [cameraId, watcher] of fileWatchers) {
-        await watcher.close();
-        logger.info(`[SHUTDOWN] Closed watcher for ${cameraId}`, { camera: cameraId });
-    }
-    
-    if (realtimeFileQueue.length > 0) {
-        logger.info(`[SHUTDOWN] Processing final ${realtimeFileQueue.length} files in queue...`);
-        await processRealtimeBatch();
-    }
-    
+
     await redis.quit();
     await pool.end();
-    
+
     logger.info('[SHUTDOWN] Final Statistics', {
-        historicalScanned: performanceStats.historicalScan.totalFilesScanned,
+        historicalScanned:  performanceStats.historicalScan.totalFilesScanned,
         historicalInserted: performanceStats.historicalScan.totalFilesInserted,
-        todayProcessed: performanceStats.realTimeMonitoring.filesProcessedToday,
-        finalQueueSize: realtimeFileQueue.length,
-        totalDirsScanned: performanceStats.historicalScan.totalDirectoriesScanned,
-        duplicatesSkipped: performanceStats.database.duplicatesSkipped
+        todayProcessed:     performanceStats.realTimeMonitoring.filesProcessedToday,
+        cachedFolders:      folderCache.size,
+        totalDirsScanned:   performanceStats.historicalScan.totalDirectoriesScanned,
+        duplicatesSkipped:  performanceStats.database.duplicatesSkipped
     });
     process.exit(0);
 });

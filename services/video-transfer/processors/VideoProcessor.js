@@ -53,8 +53,15 @@ class VideoProcessor {
                         reject(error);
                     }
                 } else {
+                    // Extract the last meaningful line from stderr for the error message
+                    const stderrSummary = stderr
+                        .split('\n')
+                        .map(l => l.trim())
+                        .filter(l => l && !l.startsWith('ffmpeg version') && !l.startsWith('built with') && !l.startsWith('configuration') && !l.startsWith('lib') && !l.startsWith('  '))
+                        .join(' | ')
+                        .slice(0, 300);
                     logger.error(`[VIDEO_CONVERT_ERROR] VideoProcessor.convertToMp4: Error converting ${inputFile}: ${stderr}`, { phase: 'ffmpeg-convert', durationMs: Date.now() - t0 });
-                    reject(new Error(`FFmpeg process exited with code ${code}`));
+                    reject(new Error(`FFmpeg exited ${code}: ${stderrSummary || 'no stderr'}`));
                 }
             });
 

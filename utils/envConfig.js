@@ -16,6 +16,9 @@ const config = {
   ISS_MEDIA_RETENTION: parseInt(process.env.ISS_MEDIA_RETENTION) || 7, // days
   ISS_VIDEO_TRANSFER_SIZE: parseInt(process.env.ISS_VIDEO_TRANSFER_SIZE) || 5, // minutes
   ISS_VIDEO_TRANSFER_CONVERSION_COUNT: parseInt(process.env.ISS_VIDEO_TRANSFER_CONVERSION_COUNT) || 38, // minutes
+  // Separate temp dirs — auto-transfer cleanup services must not touch manual transfer's working files
+  ISS_MEDIA_CNVERSION_BUFFER_DIR: process.env.ISS_MEDIA_CNVERSION_BUFFER_DIR || path.join(__dirname, '..', 'temp_video_processing'),
+  ISS_MEDIA_MANUAL_BUFFER_DIR:    process.env.ISS_MEDIA_MANUAL_BUFFER_DIR    || path.join(__dirname, '..', 'temp_video_manual_transfer'),
   
   // Database
   database: {

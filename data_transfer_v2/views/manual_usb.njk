@@ -83,9 +83,9 @@
                                     </label>
                                 </div>
 
-                                <div id="videoNotSupported" class="alert alert-warning py-2 small mb-0" style="display:none;">
-                                    <i class="fas fa-exclamation-triangle me-1"></i>
-                                    <strong>Video transfer not yet available.</strong> ISS video files (.issvd) require a conversion pipeline before USB transfer. The summary shows how many files are in range, but job creation is disabled for video selections. Use the Auto USB Video Transfer service instead.
+                                <div id="videoConversionNotice" class="alert alert-info py-2 small mb-0" style="display:none;">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    <strong>Video conversion included.</strong> ISS video segments (.issvd) are converted to .mp4 on-device before being copied to USB. Conversion runs during the transfer job — allow extra time per camera group.
                                 </div>
                             </div>
 
@@ -136,8 +136,18 @@
                             <div class="summary-box mb-4">
                                 <h6 class="mb-3">Transfer Summary</h6>
                                 <div class="d-flex justify-content-between mb-2">
-                                    <span class="summary-item">Files to Transfer:</span>
+                                    <span class="summary-item" id="filesToTransferLabel">Files to Transfer:</span>
                                     <span class="summary-value" id="filesToTransfer">-</span>
+                                </div>
+                                <!-- Video segment breakdown — shown only when dataType = videos/both -->
+                                <div class="d-flex justify-content-between mb-2" id="segmentBreakdownRow" style="display:none !important;">
+                                    <span class="summary-item text-muted small">Raw segments:</span>
+                                    <span class="summary-value text-muted small" id="segmentBreakdown">-</span>
+                                </div>
+                                <!-- Stale-file warning — shown when SecuROS has purged source folders -->
+                                <div class="alert alert-warning py-1 px-2 mb-2 small" id="staleSegmentsWarning" style="display:none !important;">
+                                    <i class="fas fa-exclamation-triangle me-1"></i>
+                                    <span id="staleSegmentsMsg"></span>
                                 </div>
                                 <div class="d-flex justify-content-between mb-2">
                                     <span class="summary-item">Total Size:</span>
@@ -324,12 +334,63 @@
                     const { driveResponse, config } = data.data;
                     console.log('manualTransferConfig:', { driveResponse, config });
                     
-                    // Update the active transfers container
                     const activeJobsContainer = $('#activeTransfers');
-                    activeJobsContainer.empty();
 
                     if (config && config.jobId) {
-                        createTransferJobElement(config, activeJobsContainer);
+                        const existingCard = $(`#job-${config.jobId}`);
+                        if (existingCard.length) {
+                            // ── IN-PLACE UPDATE ─────────────────────────────────────────────
+                            // Update only the dynamic progress fields to prevent DOM flicker.
+                            const status   = config.status || {};
+                            const dt       = config.dataType || 'images';
+                            let num = 0, den = 1, label = '';
+
+                            if (dt === 'videos') {
+                                const vt  = status.videoGroupsTotal       || 0;
+                                const vtr = status.videoGroupsTransferred || 0;
+                                num   = vtr; den = vt || 1;
+                                label = `${vtr}/${vt} video${vt !== 1 ? 's' : ''}`;
+                            } else if (dt === 'both') {
+                                const vt  = status.videoGroupsTotal       || 0;
+                                const vtr = status.videoGroupsTransferred || 0;
+                                const it  = status.imageTotalFiles        || 0;
+                                const itr = status.imageTransferredFiles  || 0;
+                                num   = vtr + itr; den = (vt + it) || 1;
+                                label = `${vtr + itr}/${vt + it} files (${itr}/${it} imgs, ${vtr}/${vt} vids)`;
+                            } else {
+                                const t  = status.imageTotalFiles       || status.totalFiles       || 0;
+                                const tr = status.imageTransferredFiles || status.transferredFiles || 0;
+                                num   = tr; den = t || 1;
+                                label = `${tr}/${t} files`;
+                            }
+                            const pct = Math.floor((num / den) * 100);
+
+                            $(`#progress-label-${config.jobId}`).text(`${pct}% (${label})`);
+                            $(`#progress-bar-${config.jobId}`).css('width', `${pct}%`).attr('aria-valuenow', pct);
+
+                            const convEl = $(`#conv-status-${config.jobId}`);
+                            if (status.videoGroupsConverting > 0 || status.videoGroupsConverted > 0) {
+                                const convHtml = status.videoGroupsConverting > 0
+                                    ? `<i class="fas fa-film me-1"></i><span class="text-warning fw-semibold">Converting video group ${status.videoGroupsConverted + 1} of ${status.videoGroupsTotal}…</span>`
+                                    : `<i class="fas fa-film me-1"></i><span class="text-success">Video conversion complete (${status.videoGroupsConverted}/${status.videoGroupsTotal} groups)</span>`;
+                                convEl.html(convHtml);
+                            } else {
+                                convEl.html('');
+                            }
+
+                            // Also update the status badge so "in_progress" never shows "completed" prematurely
+                            const newStatusText = status.isFinished ? 'completed'
+                                                : status.isCancelled ? 'cancelled'
+                                                : status.isPaused ? 'paused'
+                                                : 'in_progress';
+                            const badgeEl = existingCard.find('.status-badge');
+                            badgeEl.text(newStatusText.replace('_', ' '));
+                            badgeEl.attr('class', `badge status-badge ${getStatusBadgeClass(newStatusText)}`);
+                        } else {
+                            // New job — full rebuild
+                            activeJobsContainer.empty();
+                            createTransferJobElement(config, activeJobsContainer);
+                        }
                         // Update drive status with the latest driveInfo
                         updateDriveStatus(config.jobId, driveResponse);
                         // Reload history the first time we see a new job (shows it as in_progress)
@@ -441,21 +502,80 @@
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        document
-                            .getElementById('filesToTransfer')
-                            .textContent = data.summary.total_files + ' files';
-                        document
-                            .getElementById('totalSize')
-                            .textContent = formatFileSize(data.summary.total_size);
-                        const _today = new Date();
-                        const _pad = n => String(n).padStart(2, '0');
-                        const _localDate = `${_today.getFullYear()}-${_pad(_today.getMonth() + 1)}-${_pad(_today.getDate())}`;
-                        document
-                            .getElementById('destinationPath')
-                            .textContent = drive + '\\transfer\\' + _localDate;
-                        document
-                            .getElementById('createTransferBtn')
-                            .disabled = false;
+                        const s = data.summary;
+                        const isVideo = (dataType === 'videos' || dataType === 'both');
+
+                        // Label + count: "videos" for video/both, "files" for images
+                        document.getElementById('filesToTransferLabel').textContent =
+                            dataType === 'videos' ? 'Videos to Transfer:' :
+                            dataType === 'both'   ? 'Total Items to Transfer:' :
+                                                    'Files to Transfer:';
+
+                        // Build a clear label: e.g. "7 video files — 1 per camera (all partial)"
+                        const camCount = s.cameras_count || 0;
+                        const vidCount = (dataType === 'videos') ? s.total_files : (s.video_files || 0);
+                        let videoLabel = '';
+                        if (dataType === 'videos' || dataType === 'both') {
+                            const groupsPerCam = camCount > 0 ? (vidCount / camCount) : vidCount;
+                            const allPartial   = s.partial_segments === vidCount && vidCount > 0;
+                            const camStr       = camCount > 0 ? ' across ' + camCount + ' cam' + (camCount > 1 ? 's' : '') : '';
+                            const partialStr   = allPartial ? ' (all partial)' : (s.partial_segments > 0 ? ' (' + s.partial_segments + ' partial)' : '');
+                            const perCamStr    = camCount > 0 && Number.isInteger(groupsPerCam) && groupsPerCam <= 10
+                                ? ' — ' + groupsPerCam + '/cam'
+                                : '';
+                            videoLabel = vidCount + ' video' + (vidCount !== 1 ? 's' : '') + camStr + perCamStr + partialStr;
+                        }
+
+                        document.getElementById('filesToTransfer').textContent =
+                            dataType === 'videos' ? videoLabel :
+                            dataType === 'both'   ? s.total_files + ' items (' + s.image_files + ' imgs + ' + videoLabel + ')' :
+                                                    s.total_files + ' files';
+
+                        // Segment breakdown row — visible only for video/both
+                        const breakdownRow = document.getElementById('segmentBreakdownRow');
+                        const staleWarn    = document.getElementById('staleSegmentsWarning');
+                        const staleMsg     = document.getElementById('staleSegmentsMsg');
+
+                        if (isVideo && s.segment_count != null) {
+                            breakdownRow.style.removeProperty('display');
+                            const perVid  = s.segments_per_video || 38;
+                            const partial = s.partial_segments || 0;
+                            const availSegs = s.available_segments != null ? s.available_segments : s.segment_count;
+                            const segsPerCam = camCount > 0 ? Math.round(availSegs / camCount) : null;
+                            const segsPerCamStr = segsPerCam != null ? ' (~' + segsPerCam + '/cam)' : '';
+                            document.getElementById('segmentBreakdown').textContent =
+                                availSegs.toLocaleString() + ' segs on disk' + segsPerCamStr +
+                                ' ÷ ' + perVid + '/video' +
+                                (partial > 0 ? ' (' + partial + ' partial)' : '');
+                        } else {
+                            breakdownRow.style.setProperty('display', 'none', 'important');
+                        }
+
+                        // Stale-segments warning
+                        if (isVideo && s.stale_segments > 0) {
+                            staleWarn.style.removeProperty('display');
+                            const total = s.segment_count || 0;
+                            const pct   = total > 0 ? Math.round(s.stale_segments / total * 100) : 0;
+                            staleMsg.textContent =
+                                s.stale_segments.toLocaleString() + ' of ' + total.toLocaleString() +
+                                ' segments (' + pct + '%) were purged by SecuROS and cannot be converted.' +
+                                (s.available_segments === 0 ? ' No videos available for this period.' : '');
+                        } else {
+                            staleWarn.style.setProperty('display', 'none', 'important');
+                        }
+
+                        document.getElementById('totalSize').textContent = formatFileSize(s.total_size);
+
+                        // Destination preview — actual jobId is assigned on creation,
+                        // so show the pattern here.
+                        const _destSuffix = dataType === 'videos' ? '\\videos'
+                            : dataType === 'both'   ? '\\images  +  \\videos'
+                            :                         '\\images';
+                        document.getElementById('destinationPath').textContent =
+                            drive + '\\transfer\\{job_id}\\' + _destSuffix;
+
+                        // Disable Create button if there are zero transferable items after stale filtering
+                        document.getElementById('createTransferBtn').disabled = (s.total_files === 0);
                     } else {
                         showToast(data.error || 'Failed to get transfer summary', 'error');
                     }
@@ -478,9 +598,40 @@
                     : status.isPaused ? 'paused' 
                     : 'in_progress';
 
-            const progress = status.totalFiles > 0
-                ? Math.round((status.transferredFiles / status.totalFiles) * 100)
-                : 0;
+            // ── Progress calculation ──────────────────────────────────────────────
+            // For video / both jobs we use manual_video_group_queue counts
+            // (videoGroupsTransferred / videoGroupsTotal) as the authoritative
+            // source, because videos are added to file_transfer_queue one at a time
+            // and the queue count is always a lagging indicator.
+            const dt = job.dataType || 'images';
+            let progressNumerator   = 0;
+            let progressDenominator = 1;
+            let progressLabel       = '';
+
+            if (dt === 'videos') {
+                const vt  = status.videoGroupsTotal       || 0;
+                const vtr = status.videoGroupsTransferred || 0;
+                progressNumerator   = vtr;
+                progressDenominator = vt || 1;
+                progressLabel       = `${vtr}/${vt} video${vt !== 1 ? 's' : ''}`;
+            } else if (dt === 'both') {
+                const vt   = status.videoGroupsTotal       || 0;
+                const vtr  = status.videoGroupsTransferred || 0;
+                const it   = status.imageTotalFiles        || 0;
+                const itr  = status.imageTransferredFiles  || 0;
+                progressNumerator   = vtr + itr;
+                progressDenominator = (vt + it) || 1;
+                progressLabel       = `${vtr + itr}/${vt + it} files (${itr}/${it} imgs, ${vtr}/${vt} vids)`;
+            } else {
+                // images only — prefer transfer_job_log counts (authoritative),
+                // fall back to queue totals for backward compat with older status events
+                const t  = status.imageTotalFiles       || status.totalFiles       || 0;
+                const tr = status.imageTransferredFiles || status.transferredFiles || 0;
+                progressNumerator   = tr;
+                progressDenominator = t || 1;
+                progressLabel       = `${tr}/${t} files`;
+            }
+            const progress = Math.floor((progressNumerator / progressDenominator) * 100);
 
             const jobElement = $(
                 `
@@ -500,12 +651,21 @@
                             <span>Drive: <strong>${job.drive}</strong>
                                 <span id="drive-status-${job.jobId}" class="ms-2"></span>
                             </span>
-                            <span>Progress: <strong>${progress}% (${status.transferredFiles}/${status.totalFiles} files)</strong></span>
+                            <span>Progress: <strong id="progress-label-${job.jobId}">${progress}% (${progressLabel})</strong></span>
                         </div>
                         <div class="progress">
-                            <div class="progress-bar ${getProgressBarClass(statusText)}" style="width: ${progress}%;" 
+                            <div id="progress-bar-${job.jobId}" class="progress-bar ${getProgressBarClass(statusText)}" style="width: ${progress}%;" 
                                  aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100">
                             </div>
+                        </div>
+                        <div id="conv-status-${job.jobId}" class="mt-2 small text-muted">
+                        ${(status.videoGroupsConverting > 0 || status.videoGroupsConverted > 0)
+                            ? `<i class="fas fa-film me-1"></i>
+                                ${status.videoGroupsConverting > 0
+                                    ? `<span class="text-warning fw-semibold">Converting video group ${status.videoGroupsConverted + 1} of ${status.videoGroupsTotal}…</span>`
+                                    : `<span class="text-success">Video conversion complete (${status.videoGroupsConverted}/${status.videoGroupsTotal} groups)</span>`
+                                }`
+                            : ''}
                         </div>
                     </div>
 
@@ -711,19 +871,23 @@
                 .getElementById('createTransferBtn')
                 .disabled = true;
 
-            // Show/hide video-not-supported notice and gate Create button based on dataType.
+            // Show/hide video conversion notice based on dataType selection.
+            // Create button is always managed by the summary handler (enabled after fetch).
             function updateDataTypeUI() {
                 const selected = document.querySelector('input[name="dataType"]:checked').value;
-                const videoNotice = document.getElementById('videoNotSupported');
-                const createBtn   = document.getElementById('createTransferBtn');
+                const videoNotice = document.getElementById('videoConversionNotice');
                 if (selected === 'videos' || selected === 'both') {
                     videoNotice.style.display = 'block';
-                    createBtn.disabled = true;
                 } else {
                     videoNotice.style.display = 'none';
-                    // Leave create button state to the summary handler — it enables it after a
-                    // successful summary fetch.  Only force-disable when switching away from images.
                 }
+                // Reset summary and disable Create when dataType changes —
+                // operator must re-fetch summary for the new selection.
+                document.getElementById('filesToTransfer').textContent = '-';
+                document.getElementById('totalSize').textContent = '-';
+                document.getElementById('destinationPath').textContent = '-';
+                document.getElementById('segmentBreakdownRow').style.setProperty('display', 'none', 'important');
+                document.getElementById('createTransferBtn').disabled = true;
             }
             document.querySelectorAll('input[name="dataType"]').forEach(function(radio) {
                 radio.addEventListener('change', updateDataTypeUI);

@@ -843,6 +843,36 @@ GROUP BY TO_CHAR(date, 'YYYY');
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_files_yearly_agg_pk ON mv_files_yearly_agg (period);
 
 
+-- MV-B: Manual USB video transfer schema additions
+
+-- Make transfer_job_log.file_id nullable (videos log to iss_media_files, not files)
+ALTER TABLE transfer_job_log ALTER COLUMN file_id DROP NOT NULL;
+ALTER TABLE transfer_job_log
+    ADD COLUMN IF NOT EXISTS media_file_id INT REFERENCES iss_media_files(id);
+
+-- Track data type for each manual transfer job
+ALTER TABLE transfer_job
+    ADD COLUMN IF NOT EXISTS data_type VARCHAR(10) DEFAULT 'images';
+
+-- Per-camera video group queue: one row per camera batch (N segments → one .mp4)
+CREATE TABLE IF NOT EXISTS manual_video_group_queue (
+    id                   SERIAL       PRIMARY KEY,
+    transfer_job_id      INT          NOT NULL REFERENCES transfer_job(id),
+    camera_id            INT          NOT NULL,
+    group_key            TEXT         NOT NULL,
+    source_file_ids      INT[]        NOT NULL,
+    segment_count        INT          NOT NULL,
+    status               VARCHAR(20)  NOT NULL DEFAULT 'pending',
+    converted_video_path TEXT,
+    converted_video_name TEXT,
+    error_message        TEXT,
+    created_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at           TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_mvgq_job_status
+    ON manual_video_group_queue(transfer_job_id, status);
+
+
     `);
       console.log('   ✅ All tables, indexes, and functions created successfully');
 
@@ -910,6 +940,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_files_yearly_agg_pk ON mv_files_yearly_
         DROP TABLE IF EXISTS ftp_video_transfer_queue CASCADE;
         DROP TABLE IF EXISTS ftp_video_converted_buffer CASCADE;
         DROP TABLE IF EXISTS ftp_image_transfer_queue CASCADE;
+        DROP TABLE IF EXISTS manual_video_group_queue CASCADE;
         DROP TABLE IF EXISTS transfer_job_log CASCADE;
         DROP TABLE IF EXISTS auto_transfer_job CASCADE;
         

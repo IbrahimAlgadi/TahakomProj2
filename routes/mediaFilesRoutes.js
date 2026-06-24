@@ -16,6 +16,7 @@ function createMediaFilesRouter({ logger, pool }) {
                 SELECT 
                     COUNT(*) as total_files,
                     COALESCE(SUM(file_size), 0) as total_size,
+                    COALESCE(SUM(CASE WHEN deleted = false THEN file_size ELSE 0 END), 0) as active_size,
                     COUNT(DISTINCT camera_id) as total_cameras,
                     MIN(recording_date) as oldest_file_date,
                     MAX(recording_date) as newest_file_date,
@@ -97,7 +98,8 @@ function createMediaFilesRouter({ logger, pool }) {
             const storageGrowth = await pool.query(storageGrowthQuery);
 
             // Calculate retention period and estimated cleanup
-            const retentionDays = 7; // From your ISS_MEDIA_RETENTION config
+            const { ISS_MEDIA_RETENTION } = require('../utils/envConfig');
+            const retentionDays = ISS_MEDIA_RETENTION;
             const cutoffDate = new Date();
             cutoffDate.setDate(cutoffDate.getDate() - retentionDays);
 

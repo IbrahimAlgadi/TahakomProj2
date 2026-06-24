@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-23 (MV-A partial: summary now queries correct table per dataType; create blocks video/both with 400; UI warning notice + Create disabled for video/both; default changed from both→images)
+Last updated: 2026-06-23 (ISS_MEDIA collection service fixes: reconcilePurgedFolders() marks stale DB records hourly when SecuROS purges folders; today's-folder catch-up scan on restart; dashboard storage stat uses active_size only; retentionDays reads from env)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
