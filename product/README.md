@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-23 (ISS_MEDIA collection service fixes: reconcilePurgedFolders() marks stale DB records hourly when SecuROS purges folders; today's-folder catch-up scan on restart; dashboard storage stat uses active_size only; retentionDays reads from env)
+Last updated: 2026-06-24 (ISS_MEDIA monitor: replaced chokidar with 3-tier polling loop (1/5/30 min); manual USB transfer: concurrent image+video pipeline, background FFmpeg conversion, USB folder structure transfer/{job_id}/videos|images, in-place UI progress, recovery phase — all MI-A–MI-P and MV-A–MV-C resolved)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

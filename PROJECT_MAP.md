@@ -28,7 +28,7 @@ _Update this file whenever a service is added, a table changes, or a decision is
 | Encryption | Node.js `crypto` (built-in) | — | AES-256-CBC file encryption; RSA key management via `certs/` |
 | **Test runner** | **Jest** | **latest (devDependency)** | **Unit test suite — `npm test`; config: `jest.config.js`; suites: `tests/`** |
 | FTP client | basic-ftp | ^5.0.5 | FTP/FTPS image and video upload |
-| File watching | chokidar | ^3.6.0 | ISS media directory monitoring |
+| File watching | ~~chokidar~~ → tiered polling | ^3.6.0 (dep retained) | **Replaced 2026-06-24** — `monitorISSMediaFilesOptimizedMicroservice` dropped chokidar; uses a 3-tier in-memory polling loop (1 min / 5 min / 30 min) with `Map<folderPath, Set<fileName>>` cache. Fixes Windows reliability and SecuROS per-file purge detection. |
 | HTTP client | axios | ^1.9.0 | Internal service calls |
 | Embedded DB (config) | NeDB | ^1.8.0 | Lightweight local config store (secondary to Redis) |
 | PDF generation | pdfkit | ^0.12.3 | Dashboard export reports |
@@ -117,7 +117,11 @@ autoFTPImageTransferService.js
 ```
 ISS Media NVR Directories  (disk paths from config)
   ▼
-monitorISSMediaFilesOptimizedMicroservice.js  (chokidar watcher)
+monitorISSMediaFilesOptimizedMicroservice.js  (tiered polling indexer — chokidar removed 2026-06-24)
+  3-tier polling loop with in-memory Map<folderPath, Set<fileName>> cache:
+    Fast tier  (1 min)  — current hour's folder per camera
+    Normal tier (5 min)  — all today's hourly folders per camera
+    Slow tier  (30 min) — previous days (deletion reconciliation)
   INSERT / UPDATE iss_media_files
     (file_path UNIQUE, file_name, site_id, camera_id,
      file_size, recording_date, recording_time, precise_time,
@@ -424,7 +428,7 @@ These archived files contain detail that should eventually be verified and lifte
 | ~~T-1~~ | ~~`files` table indexes commented out~~ | ~~`DatabaseMigration.js`~~ | **Resolved** (Jun 2026) — two covering partial indexes `idx_files_dashboard_date` + `idx_files_dashboard_cam_date` are active; six dashboard materialized views (`mv_files_daily/monthly/yearly[_agg]`) added for pre-aggregated chart queries |
 | T-2 | `pending_deletion` + `updated_at` added at runtime | `ExportDirectoryControlV3.js` L587–628 | Low — schema alterations should be in migration, not in a script loop |
 | T-3 | Inline JSONB retry log on `files` | `files.export_retry_log_object` | Low — bloat risk at high plate-volume; consider extracting to a dedicated `export_retry_log` table |
-| T-4 | `transfer_job` / `transfer_job_log` (legacy manual flow) | `routes/mainControlRoutes.js`, `manualTransferRoutes.js` | Low — assess whether this flow is still used or fully superseded by `transfer_queue_job` |
+| ~~T-4~~ | ~~`transfer_job` / `transfer_job_log` (legacy manual flow)~~ | ~~`routes/mainControlRoutes.js`, `manualTransferRoutes.js`~~ | **Resolved 2026-06-24** — `transfer_job` + `transfer_job_log` are actively used by `manualTransferRoutes.js` as the authoritative source for image completion tracking (NOT superseded by `transfer_queue_job`). `transfer_queue_job` is the auto-USB-image path; `transfer_job` is the manual USB path. |
 | ~~MI-A~~ | ~~**No queue consumer** — `FileTransferQueueService.getNextFilesToTransfer()` never called; `/manual_usb` queues files into `file_transfer_queue` but nothing copies them~~ | ~~`utils/FileTransferQueueService.js`~~ | **Fixed 2026-06-23** — inline consumer loop added to `startManualFileTransferProcess`; `markFilesAsTransferred` also now updates `transfer_job_log.transferred` (MI-D) |
 | ~~MI-B~~ | ~~**Missing `getDriveInfo` import** — `manualTransferRoutes.js` calls `getDriveInfo()` without importing it; throws `ReferenceError` every 5 s while a job is active, crashing the loop~~ | ~~`routes/manualTransferRoutes.js:201`~~ | **Fixed 2026-06-23** — `const { getDriveInfo } = require('../utils/driveUtils')` added |
 | ~~MI-C~~ | ~~**API endpoint mismatch** — UI `pauseJob`/`resumeJob`/`cancelJob` called `/manual-transfer/pause|resume|cancel`; none existed~~ | ~~`data_transfer_v2/views/manual_usb.njk`~~ | **Fixed 2026-06-23** — all three functions now call `/manual-transfer/control` with `action` param |
@@ -442,8 +446,8 @@ These archived files contain detail that should eventually be verified and lifte
 | ~~MI-O~~ | ~~**Consumer loop too slow** — 5 s sleep + 50-file batch + no mid-batch pause check; UI update only at next iteration start; overall cycle 12–16 s; pause took up to 14 s to respond~~ | ~~`routes/manualTransferRoutes.js:startManualFileTransferProcess`~~ | **Fixed 2026-06-23** — sleep reduced to 1 s; batch capped at 10 files; pause/cancel flag checked before each file; progress emitted immediately after each batch; `ensureDir` results cached per-iteration |
 | ~~MI-P~~ | ~~**Summary/create queries did full table scan** — `TO_TIMESTAMP(date::text \|\| ' ' \|\| time::text, ...)` does not match `idx_files_date_time` index (`(date + "time"::interval)`); every query scanned the whole `files` table; no loading feedback on buttons~~ | ~~`routes/manualTransferRoutes.js`, `data_transfer_v2/views/manual_usb.njk`~~ | **Fixed 2026-06-23** — queries rewritten to use `(date + time::interval) >= $1::timestamp`; spinner added to both Show Summary and Create Job buttons |
 | ~~MV-A~~ | ~~**`dataType` silently ignored (summary)** — summary always queried `files` regardless of selection~~ / ~~**Raw segment count shown as video count** — reported 6,105 segments instead of 157 complete videos~~ / ~~**Create blocked for videos/both** — `transfer_job_log.file_id` was NOT NULL FK to `files`; video files from `iss_media_files` needed a schema migration + ffmpeg conversion pipeline~~ | ~~`routes/manualTransferRoutes.js`, `data_transfer_v2/views/manual_usb.njk`~~ | **Fixed 2026-06-23** — MV-B schema (file_id nullable, media_file_id col, data_type col, manual_video_group_queue table); MV-C /create route handles videos/both (buildCameraGroups, queue rows); MV-D consumer loop video phase (VideoProcessor convert→concat→copy); MV-E progress counters + temp cleanup; MV-F UI conversion notice + status line |
-| MV-B | **No `iss_media_files` query path** — ISS video source files are completely unreachable via manual transfer routes | `routes/manualTransferRoutes.js` | **Critical** — required for manual video to work |
-| MV-C | **No conversion pipeline** — ISS `.issvd` files need ffmpeg processing (5-phase like auto video); manual transfer has none | Manual transfer stack | **Critical** — required for manual video to work |
+| ~~MV-B~~ | ~~**No `iss_media_files` query path**~~ | ~~`routes/manualTransferRoutes.js`~~ | **Fixed 2026-06-24** — `manualTransferRoutes.js` queries `iss_media_files`; `manual_video_group_queue` groups segments per camera for FFmpeg conversion |
+| ~~MV-C~~ | ~~**No conversion pipeline**~~ | ~~Manual transfer stack~~ | **Fixed 2026-06-24** — FFmpeg pipeline via `VideoProcessor`; background non-blocking promise (concurrent with image copying); dedicated temp dir `ISS_MEDIA_MANUAL_BUFFER_DIR`; USB output to `transfer/{job_id}/videos` |
 | ~~T-5a~~ | ~~No unit tests for Node transfer services~~ | ~~`services/`~~ | **Resolved** (Jun 2026) — 139 Jest unit tests added. See `TEST_MAP.md`. |
 | T-5b | No unit tests for SecurOS scripts | `securos-scripts/` | Low — not possible without the SecurOS runtime injection; consider a mock harness |
 | T-5c | No tests for FTP transfer managers, JobManager, CompleteBufferManager, dashboard routes | `services/*/Ftp*.js`, `state/`, `routes/` | Medium — integration test suite planned; see `TEST_MAP.md` §Gaps |

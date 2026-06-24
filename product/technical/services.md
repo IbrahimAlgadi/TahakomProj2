@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-23 (ISS_MEDIA indexer: added reconcilePurgedFolders() run at startup + hourly; added today's-folder catch-up scan; dashboard stats now return active_size; retentionDays reads from ISS_MEDIA_RETENTION)
+Last updated: 2026-06-24 (ISS_MEDIA indexer: replaced chokidar with 3-tier polling loop; manual USB transfer: full video+image concurrent pipeline, USB folder structure transfer/{job_id}/videos|images, in-place UI progress, recovery phase)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -119,12 +119,13 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 |---|---|
 | PM2 name | `monitorISSMediaFilesOptimizedMicroservice` |
 | Dependencies | ConfigStateServiceRedis, monitorConnectedExternalDrivesMicroservice |
-| DB writes | `iss_media_files` — INSERT new files; `reconcilePurgedFolders()` batch-marks `deleted=true` for records whose parent hourly folder no longer exists on disk |
-| Key lib | chokidar (file watcher) |
-| Logging | `utils/logger.js` `createLogger({ service: 'monitorISSMediaFilesOptimized' })`; per-camera historical scans wrapped in `runWithTrace({ traceId, camera })`; reconciliation logged under `[RECONCILE]` prefix; catch-up scan under `[CATCHUP]` |
-| Purpose | Watches ISS NVR media directories; indexes `.issvd` segments into `iss_media_files` table so video transfer services can discover them |
-| Reconciliation | `reconcilePurgedFolders()` runs at startup (fire-and-forget after historical scan) and every **1 hour** (`RECONCILE_INTERVAL`). It groups all `deleted=false` records by `path.dirname(file_path)`, checks each unique hourly folder with `fs.access`, then batch-updates `deleted=true` for all records in purged folders using `id = ANY($1)`. This keeps DB state in sync when SecuROS removes hourly folders early. |
-| Today catch-up | At the end of `setupRealtimeMonitoring()`, a `setImmediate` fire-and-forget scan processes all `.issvd` files already present in today's hourly folders (missed by the historical scan's today-skip and the chokidar `ignoreInitial:true` setting). |
+| DB writes | `iss_media_files` — INSERT new files; slow-tier diff marks `deleted=true` for records whose path is no longer on disk |
+| Key lib | **Tiered polling loop** (chokidar removed 2026-06-24) — `Map<folderPath, Set<fileName>>` in-memory cache; diff per folder on each tick |
+| Logging | `utils/logger.js` `createLogger({ service: 'monitorISSMediaFilesOptimized' })`; per-camera scans wrapped in `runWithTrace({ traceId, camera })`; tier ticks logged under `[FAST]`, `[NORMAL]`, `[SLOW]` prefixes |
+| Purpose | Indexes ISS NVR media directories into `iss_media_files` so video transfer services can discover `.issvd` segments |
+| Polling tiers | **Fast** (every 1 min): scans only the current hour's folder per camera — catches new files near-real-time. **Normal** (every 5 min): scans all of today's hourly folders — catches files written to earlier hours. **Slow** (every 30 min): scans previous days — reconciles deletions (SecuROS per-file purge) by diffing DB vs. disk and batch-marking `deleted=true` for missing paths. |
+| In-memory cache | `Map<folderPath, Set<fileName>>` — last known file set per folder. Each tier diffs current disk listing against the cache: new files → INSERT; removed files (slow tier only) → `deleted=true`. O(n) per folder where n = files in that folder. |
+| Windows reliability | Replaces chokidar which had blind spots for new hourly folder creation and missed SecuROS individual-file purges on Windows. Polling is deterministic and folder-scoped. |
 
 ### refactored_autoVideoTransferEDAMicroservice.js
 
@@ -194,16 +195,22 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 
 | Attribute | Value |
 |---|---|
-| Route module | `routes/manualTransferRoutes.js` (current); `routes/mainControlRoutes.js` (legacy `/transfer` page) |
-| UI views | `data_transfer_v2/views/manual_usb.njk` (current), `data_transfer_v2/views/transfer.njk` (legacy) |
-| Source table | `files` (ALPR image captures) — always; `iss_media_files` (ISS video) is **not queried** |
-| Queue table | `file_transfer_queue` (current, via `utils/FileTransferQueueService.js`) — **no active consumer** |
-| Copy mechanism | Legacy only: `fs.copy` per file in `startStorageTransfer()` triggered by WebSocket |
-| Job tables | `transfer_job`, `transfer_job_log` |
+| Route module | `routes/manualTransferRoutes.js` |
+| UI view | `data_transfer_v2/views/manual_usb.njk` |
+| Source tables | `files` (ALPR images, dataType=images/both); `iss_media_files` (ISS video segments, dataType=videos/both) |
+| Queue table | `file_transfer_queue` (via `utils/FileTransferQueueService.js`) — **active consumer** in `startManualFileTransferProcess` |
+| Video queue table | `manual_video_group_queue` — one row per camera/group of `.issvd` segments; tracks conversion status (`pending` → `converting` → `converted` → `transferred`) |
+| Job tables | `transfer_job`, `transfer_job_log` — `transfer_job_log` is the **authoritative source** for image completion; `manual_video_group_queue` is authoritative for video completion |
+| Copy mechanism | Inline consumer loop: 10 files per tick, 1 s sleep, pause/cancel checked per file; `fs.copy` to USB |
+| Video conversion | `VideoProcessor` (FFmpeg) converts per-camera groups of `.issvd` → `.mp4`; runs as a **non-blocking background promise** (`activeConversionPromise`) so images copy concurrently during conversion |
+| USB folder structure | `transfer/{job_id}/images/` and `transfer/{job_id}/videos/` |
+| Temp directory | `ISS_MEDIA_MANUAL_BUFFER_DIR` env var (default: `temp_video_manual_transfer/`) — isolated from auto-transfer temp dir |
+| Recovery phase | Runs **once per job** on server start (guarded by `lastRecoveryJobId`): (1) resets `converting` groups stuck mid-crash to `pending`; (2) re-queues `converted` groups whose `file_transfer_queue` entry was lost |
+| Progress tracking | `refreshImageCounters()` and `refreshVideoGroupCounters()` query DB before every WebSocket emit; `sendFileTransferStatus()` emits on a 3 s timer; copy phase emits immediately after each batch |
+| Completion check | Fires only when `!activeConversionPromise`; checks `manual_video_group_queue` (videos) AND `transfer_job_log` (images) — both must be complete |
 | Config state | `dataTransferConfig.json` key `manualTransfer` (not Redis) |
-| Activity diagram | `product/technical/diagrams/manualUSBImageTransferService-activity.md` |
-| Gap analysis | `product/technical/diagrams/manualUSBVideoTransferService-activity.md` |
-| Known issues | MI-A (no consumer), MI-B (missing import crash), MI-C (API mismatch), MI-D (log not updated), MI-E (false completion), MV-A–MV-D (video not implemented) |
+| UI update strategy | In-place DOM updates for active job cards (no full container rebuild on each WebSocket message — eliminates progress flicker) |
+| Known issues | All MI-A through MI-P and MV-A through MV-C resolved as of 2026-06-24 |
 
 ---
 
@@ -224,6 +231,12 @@ AES-256-CBC file encryption/decryption + RSA key management functions:
 
 ### utils/envConfig.js
 Environment variable defaults — DB name defaults to `tahakom_transfer`, pg connection params.
+
+| Key env vars | Purpose |
+|---|---|
+| `ISS_MEDIA_MANUAL_BUFFER_DIR` | Temp directory for manual USB video conversion output (default: `temp_video_manual_transfer/`). Isolated from the auto-transfer temp dir so auto-transfer cleanup cannot delete in-flight manual conversions. |
+| `ISS_MEDIA_CAMERAS` | Comma-separated camera IDs monitored by `monitorISSMediaFilesOptimizedMicroservice` |
+| `ISS_MEDIA_RETENTION` | Retention days for `ExportDirectoryControlV3` |
 
 ### utils/logger.js
 Shared Winston logger factory + AsyncLocalStorage trace helpers. Every service uses `createLogger({ service })` for per-service daily-rotated log files. Trace IDs propagate automatically through async call chains via `runWithTrace` / `AsyncLocalStorage`. See `product/technical/architecture.md` → Logging Architecture for the full API reference.
