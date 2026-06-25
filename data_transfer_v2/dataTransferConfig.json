@@ -32,7 +32,10 @@
     "dataType": "both",
     "schedule": {
       "type": "continuous"
-    }
+    },
+    "lastImageTransferredAt": "2026-06-25T03:30:00.000Z",
+    "lastVideoTransferredAt": "2026-06-25T06:11:10.496Z",
+    "lastConnectedAt": "2026-06-25T08:43:45.861Z"
   },
   "ftpTransfer": {
     "protocol": "ftp",

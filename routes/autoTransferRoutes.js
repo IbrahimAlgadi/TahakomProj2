@@ -167,7 +167,11 @@ function setupAutoTransferListeners({ wss, logger, redisPubSub, emitEventToClien
                 state.shouldStopTransfer = stopPercentage <= (parsedMessage.usedPercentage || 0);
             }
             else if (channel === CONFIG_STATE_KEY + '_update') {
-                state.isAutoTransferActive = parsedMessage.autoTransfer.isActive;
+                state.isAutoTransferActive = parsedMessage.autoTransfer && parsedMessage.autoTransfer.isActive;
+                // Propagate config changes (incl. cursor updates) to connected browser clients
+                if (parsedMessage.autoTransfer) {
+                    emitEventToClients('autoTransferConfigChanged', parsedMessage.autoTransfer);
+                }
             }
             else if (channel === 'usb_image_transfer_metrics') {
                 // Relay image transfer metrics to WebSocket clients

@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-24 (ISS_MEDIA indexer: replaced chokidar with 3-tier polling loop; manual USB transfer: full video+image concurrent pipeline, USB folder structure transfer/{job_id}/videos|images, in-place UI progress, recovery phase)
+Last updated: 2026-06-25 (manual USB transfer: AES-256-CBC encryption implemented for images and videos; POST /manual-transfer/decrypt route added; decryptUSBFiles.js rewritten for current metadata format)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -127,17 +127,29 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | In-memory cache | `Map<folderPath, Set<fileName>>` — last known file set per folder. Each tier diffs current disk listing against the cache: new files → INSERT; removed files (slow tier only) → `deleted=true`. O(n) per folder where n = files in that folder. |
 | Windows reliability | Replaces chokidar which had blind spots for new hourly folder creation and missed SecuROS individual-file purges on Windows. Polling is deterministic and folder-scoped. |
 
-### refactored_autoVideoTransferEDAMicroservice.js
+### autoUSBTransferService.js  _(new — unified time-cursor USB transfer)_
 
 | Attribute | Value |
 |---|---|
-| PM2 name | `autoVideoTransferEDAMicroservice` |
-| Dependencies | ConfigStateServiceRedis, monitorISSMediaFilesOptimizedMicroservice |
-| DB reads | `iss_media_files` |
-| DB writes | `video_transfer_queue_job`, `video_transfer_queue`, `video_converted_buffer`; UPDATE `iss_media_files.is_auto_transferred` |
-| Key services | `services/video-transfer/state/JobManager.js`, `transfer/FileTransferManager.js`, `processors/CompleteBufferManager.js` |
-| Logging | `utils/logger.js` `createLogger({ service: 'autoVideoTransferEDAMicroservice' })`; each job cycle and file transfer wrapped in `runWithTrace({ traceId, jobId, camera })` so all logs for a batch share one `traceId` |
-| Purpose | Transfers ISS video MP4 segments to a configured USB drive in batches; manages per-camera buffering to ensure complete segment groups before transfer |
+| PM2 name | `autoUSBTransferService` |
+| Dependencies | ConfigStateServiceRedis, monitorISSMediaFilesOptimizedMicroservice, monitorConnectedExternalDrivesMicroservice |
+| DB reads | `files` (images), `iss_media_files` (video segments) |
+| DB writes | UPDATE `files.is_auto_transferred = true` (images); UPDATE `iss_media_files.is_auto_transferred = true` (videos) |
+| Config state | `dataTransferConfig.json` → `autoTransfer.lastTransferredAt`, `autoTransfer.lastConnectedAt` |
+| Key services | `services/image-transfer/state/ImageJobManager.js` (`getImagesInWindow`, `markImagesTransferred`); `services/video-transfer/state/JobManager.js` (`getVideoSegmentsInWindow`, `markVideoSegmentsTransferred`); `services/video-transfer/processors/VideoProcessor.js` (FFmpeg) |
+| Logging | `utils/logger.js` `createLogger({ service: 'autoUSBTransferService' })`; logFile `auto-usb-transfer` |
+| Purpose | Single service that transfers both ALPR images and ISS video segments to a connected USB drive using a persistent 5-minute time-cursor. Resumes across restarts and USB reconnects. Images copied first per window, then `.issvd` segments converted (FFmpeg) and concatenated per camera and transferred. |
+| Cursor logic | On start: reads `autoTransfer.lastTransferredAt` from config. If set and age ≤ 7 days → resume from that timestamp; else → fresh start at now − 1 hour. On each completed window → writes `lastTransferredAt = windowEnd` back to config file. |
+| USB folder structure | images: `{drive}:\images\{relative-export-path}\{filename}`; videos: `{drive}:\videos\{camera_id}\cam_{id}_{date}_{wStart}--{wEnd}.mp4` |
+| Error handling | ENOSPC → halts loop (cursor not advanced); missing segments on disk → marked `deleted=true`, skipped; FFmpeg failure per camera → skipped, retried next window; image copy failure → skipped (file remains `is_auto_transferred=false`, retried next window) |
+| Idle behaviour | When cursor ≥ now: sleeps 5 minutes then rechecks for new data |
+
+### refactored_autoVideoTransferEDAMicroservice.js  _(retired from PM2 — 2026-06-24)_
+
+| Attribute | Value |
+|---|---|
+| PM2 name | ~~`autoVideoTransferEDAMicroservice`~~ (removed from ecosystem.config.js) |
+| Status | **Retired 2026-06-24** — replaced by `autoUSBTransferService.js` for USB auto transfer. File is retained on disk because `services/video-transfer/` helper classes are reused by `autoFtpVideoTransferService.js`. |
 
 ### autoFtpVideoTransferService.js
 
@@ -151,17 +163,12 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | Logging | `utils/logger.js` `createLogger({ service: 'autoFtpVideoTransferService' })`; job cycles wrapped in `runWithTrace({ traceId, jobId, camera })` |
 | Purpose | Uploads ISS video segments to a configured FTP/FTPS server |
 
-### autoUSBImageTransferService.js
+### autoUSBImageTransferService.js  _(retired from PM2 — 2026-06-24)_
 
 | Attribute | Value |
 |---|---|
-| PM2 name | `autoUSBImageTransferService` |
-| Dependencies | ConfigStateServiceRedis, monitorConnectedExternalDrivesMicroservice |
-| DB reads | `files` |
-| DB writes | `transfer_queue_job`, `transfer_queue`; UPDATE `files.is_auto_transferred` |
-| Key services | `services/image-transfer/state/ImageJobManager.js`, `transfer/ImageTransferManager.js` |
-| Logging | `utils/logger.js` `createLogger({ service: 'autoUSBImageTransferService' })`; per-batch cycle wrapped in `runWithTrace({ traceId, jobId })` |
-| Purpose | Transfers ALPR plate images to a connected USB drive; picks up files where `file_size > 0` and `is_auto_transferred = false` |
+| PM2 name | ~~`autoUSBImageTransferService`~~ (removed from ecosystem.config.js) |
+| Status | **Retired 2026-06-24** — replaced by `autoUSBTransferService.js`. File retained on disk but no longer started by PM2. |
 
 ### autoFTPImageTransferService.js
 
@@ -201,9 +208,11 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | Queue table | `file_transfer_queue` (via `utils/FileTransferQueueService.js`) — **active consumer** in `startManualFileTransferProcess` |
 | Video queue table | `manual_video_group_queue` — one row per camera/group of `.issvd` segments; tracks conversion status (`pending` → `converting` → `converted` → `transferred`) |
 | Job tables | `transfer_job`, `transfer_job_log` — `transfer_job_log` is the **authoritative source** for image completion; `manual_video_group_queue` is authoritative for video completion |
-| Copy mechanism | Inline consumer loop: 10 files per tick, 1 s sleep, pause/cancel checked per file; `fs.copy` to USB |
+| Copy mechanism | Inline consumer loop: 10 files per tick, 1 s sleep, pause/cancel checked per file; `fs.copy` to USB (plain) or AES-256-CBC encryption when `encryption.enabled` is set |
+| Encryption | When `encryption.enabled: true` on the job: each file is AES-256-CBC encrypted (unique key/IV per file); key envelope RSA-OAEP wrapped using `certs/public_key.pem`; both plain and encrypted files go to the same path without extension; a companion `{name}_metadata.json` carries the RSA-encrypted key and AES-encrypted file-mapping |
 | Video conversion | `VideoProcessor` (FFmpeg) converts per-camera groups of `.issvd` → `.mp4`; runs as a **non-blocking background promise** (`activeConversionPromise`) so images copy concurrently during conversion |
-| USB folder structure | `transfer/{job_id}/images/` and `transfer/{job_id}/videos/` |
+| USB folder structure | `transfer/{job_id}/images/` and `transfer/{job_id}/videos/`; decrypted output: `transfer/{job_id}/images_dec/` and `transfer/{job_id}/videos_dec/` |
+| Decrypt route | `POST /manual-transfer/decrypt` — takes `{ jobId, driveLetter }`; runs inline decryption using `certs/private_key.pem`; writes originals to `images_dec/` and `videos_dec/` |
 | Temp directory | `ISS_MEDIA_MANUAL_BUFFER_DIR` env var (default: `temp_video_manual_transfer/`) — isolated from auto-transfer temp dir |
 | Recovery phase | Runs **once per job** on server start (guarded by `lastRecoveryJobId`): (1) resets `converting` groups stuck mid-crash to `pending`; (2) re-queues `converted` groups whose `file_transfer_queue` entry was lost |
 | Progress tracking | `refreshImageCounters()` and `refreshVideoGroupCounters()` query DB before every WebSocket emit; `sendFileTransferStatus()` emits on a 3 s timer; copy phase emits immediately after each batch |
@@ -254,7 +263,7 @@ Located in `scripts/maintenance/`. Run manually, not via PM2.
 |---|---|
 | `DatabaseMigration.js` | Creates/migrates all tables in `tahakom_transfer` |
 | `generateRSAKeys.js` | Generates RSA key pair into `certs/` |
-| `decryptUSBFiles.js` | Decrypts AES-encrypted files from USB using the private key |
+| `decryptUSBFiles.js` | Decrypts encrypted manual transfer job folders; scans `images/` and `videos/` for `*_metadata.json` (RSA+AES envelope); outputs to `images_dec/` and `videos_dec/`; CLI: `node decryptUSBFiles.js <jobRoot> [outputRoot] [privateKeyPath]` |
 | `setup-env.js` | Initial environment setup |
 | `cleanup_corrupted_system.js` | Repairs corrupted state (queue stuck jobs, etc.) |
 | `transferQueueMonitor.js` | Ad-hoc queue health diagnostic |

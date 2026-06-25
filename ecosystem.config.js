@@ -65,15 +65,16 @@ module.exports = {
       dependencies: ["ConfigStateServiceRedis", "DriveStateServiceRedis", "monitorConnectedExternalDrivesMicroservice"],
       ...commonConfig,
     },
-    {
-      name: "autoVideoTransferEDAMicroservice",
-      script: SCRIPT_PATH + "refactored_autoVideoTransferEDAMicroservice.js",
-      watch: [SCRIPT_PATH + "refactored_autoVideoTransferEDAMicroservice.js"],
-      out_file: SCRIPT_PATH + "logs\\refactored_autoVideoTransferEDAMicroservice-out.log",
-      error_file: SCRIPT_PATH + "logs\\refactored_autoVideoTransferEDAMicroservice-error.log",
-      dependencies: ["ConfigStateServiceRedis", "monitorISSMediaFilesOptimizedMicroservice"],
-      ...commonConfig,
-    },
+    // autoVideoTransferEDAMicroservice retired 2026-06-24 — replaced by autoUSBTransferService
+    // {
+    //   name: "autoVideoTransferEDAMicroservice",
+    //   script: SCRIPT_PATH + "refactored_autoVideoTransferEDAMicroservice.js",
+    //   watch: [SCRIPT_PATH + "refactored_autoVideoTransferEDAMicroservice.js"],
+    //   out_file: SCRIPT_PATH + "logs\\refactored_autoVideoTransferEDAMicroservice-out.log",
+    //   error_file: SCRIPT_PATH + "logs\\refactored_autoVideoTransferEDAMicroservice-error.log",
+    //   dependencies: ["ConfigStateServiceRedis", "monitorISSMediaFilesOptimizedMicroservice"],
+    //   ...commonConfig,
+    // },
     {
       name: "autoFtpVideoTransferService",
       script: SCRIPT_PATH + "autoFtpVideoTransferService.js",
@@ -92,13 +93,29 @@ module.exports = {
     //   dependencies: ["autoVideoTransferMicroservice","monitorISSMediaFilesOptimizedMicroservice","ConfigStateServiceRedis", "DriveStateServiceRedis", "monitorConnectedExternalDrivesMicroservice"],
     //   ...commonConfig,
     // },
+    // autoUSBImageTransferService retired 2026-06-24 — replaced by autoUSBTransferService
+    // {
+    //   name: "autoUSBImageTransferService",
+    //   script: SCRIPT_PATH + "autoUSBImageTransferService.js",
+    //   watch: [SCRIPT_PATH + "autoUSBImageTransferService.js"],
+    //   out_file: SCRIPT_PATH + "logs\\autoUSBImageTransferService-out.log",
+    //   error_file: SCRIPT_PATH + "logs\\autoUSBImageTransferService-error.log",
+    //   dependencies: ["autoVideoTransferMicroservice","monitorISSMediaFilesOptimizedMicroservice","ConfigStateServiceRedis", "DriveStateServiceRedis", "monitorConnectedExternalDrivesMicroservice"],
+    //   ...commonConfig,
+    // },
+
+    // Unified time-cursor USB transfer service (images + videos in 5-min windows)
     {
-      name: "autoUSBImageTransferService",
-      script: SCRIPT_PATH + "autoUSBImageTransferService.js",
-      watch: [SCRIPT_PATH + "autoUSBImageTransferService.js"],
-      out_file: SCRIPT_PATH + "logs\\autoUSBImageTransferService-out.log",
-      error_file: SCRIPT_PATH + "logs\\autoUSBImageTransferService-error.log",
-      dependencies: ["autoVideoTransferMicroservice","monitorISSMediaFilesOptimizedMicroservice","ConfigStateServiceRedis", "DriveStateServiceRedis", "monitorConnectedExternalDrivesMicroservice"],
+      name: "autoUSBTransferService",
+      script: SCRIPT_PATH + "autoUSBTransferService.js",
+      watch: [SCRIPT_PATH + "autoUSBTransferService.js"],
+      out_file: SCRIPT_PATH + "logs\\autoUSBTransferService-out.log",
+      error_file: SCRIPT_PATH + "logs\\autoUSBTransferService-error.log",
+      dependencies: [
+        "ConfigStateServiceRedis",
+        "monitorISSMediaFilesOptimizedMicroservice",
+        "monitorConnectedExternalDrivesMicroservice",
+      ],
       ...commonConfig,
     },
     {

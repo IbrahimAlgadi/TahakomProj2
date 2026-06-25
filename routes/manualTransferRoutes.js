@@ -5,6 +5,7 @@ const fileTransferQueue = require('../utils/FileTransferQueueService');
 const { getDriveInfo } = require('../utils/driveUtils');
 const envConfig = require('../utils/envConfig');
 const VideoProcessor = require('../services/video-transfer/processors/VideoProcessor');
+const encryptionService = require('../utils/encryptionService');
 
 // Lazy-init VideoProcessor (needs no event emitter for manual use).
 const videoProcessor = new VideoProcessor(null, {
@@ -166,7 +167,7 @@ function createManualTransferRouter({ logger, pool, redis, readConfig, writeConf
             const totalSize = imageRows.reduce((s, f) => s + parseInt(f.file_size || 0), 0);
             const encryptionConfig = encryption || { enabled: false };
             if (encryptionConfig.enabled) {
-                logger.warn(`Manual transfer job ${transferJobId}: encryption requested but not implemented — files will be copied unencrypted`);
+                logger.info(`Manual transfer job ${transferJobId}: encryption enabled — files will be AES-256-CBC encrypted with RSA-wrapped keys`);
             }
 
             let config = readConfig();
@@ -469,6 +470,132 @@ function createManualTransferRouter({ logger, pool, redis, readConfig, writeConf
         } catch (error) {
             logger.error('Error fetching transfer history:', error);
             res.status(500).json({ success: false, error: 'Failed to fetch transfer history' });
+        }
+    });
+
+    /**
+     * POST /manual-transfer/decrypt
+     * Decrypts a completed encrypted transfer job into images_dec/ and videos_dec/ sub-folders.
+     *
+     * Body: { jobId: number, driveLetter: string }
+     *
+     * The job root is resolved as {driveLetter}:\transfer\{jobId}.
+     * Decrypted output lands in {jobRoot}\images_dec and {jobRoot}\videos_dec.
+     * The private RSA key is read from the path in dataTransferConfig.json → certificates.
+     */
+    router.post('/manual-transfer/decrypt', async (req, res) => {
+        const { jobId, driveLetter } = req.body;
+
+        if (!jobId || !driveLetter) {
+            return res.status(400).json({ success: false, error: 'jobId and driveLetter are required' });
+        }
+
+        try {
+            // ROOT_DIR points to data_transfer_v2/; certs live at the app root (one level up).
+            const APP_ROOT_DECRYPT = path.join(__dirname, '..');
+            const config = readConfig();
+            const certsRelDir  = (config.certificates && config.certificates.directory)        || 'certs';
+            const certFile     = (config.certificates && config.certificates.privateKeyFilename) || 'private_key.pem';
+            const privateKeyPath = path.join(APP_ROOT_DECRYPT, certsRelDir, certFile);
+
+            if (!(await fs.pathExists(privateKeyPath))) {
+                return res.status(400).json({ success: false, error: `Private key not found at: ${privateKeyPath}` });
+            }
+
+            // Normalise drive letter: strip any trailing : or \
+            const driveLtr = String(driveLetter).replace(/[:\\\/]+$/, '').toUpperCase();
+            const jobRoot  = path.join(`${driveLtr}:\\`, 'transfer', String(jobId));
+
+            if (!(await fs.pathExists(jobRoot))) {
+                return res.status(404).json({ success: false, error: `Job folder not found: ${jobRoot}` });
+            }
+
+            logger.info(`[MANUAL_DECRYPT] Starting decryption of job ${jobId} from ${jobRoot}`);
+
+            const startTime = Date.now();
+            const stats = {
+                images: { processed: 0, errors: 0 },
+                videos: { processed: 0, errors: 0 },
+            };
+
+            /**
+             * Decrypt all *_metadata.json files found in a given encrypted directory.
+             * Decrypted files are written to outputDir preserving original filenames.
+             */
+            async function decryptSection(encDir, outputDir, statsKey) {
+                if (!(await fs.pathExists(encDir))) {
+                    logger.info(`[MANUAL_DECRYPT] ${encDir} does not exist — skipping`);
+                    return;
+                }
+
+                const items = await fs.readdir(encDir);
+                const metaFiles = items.filter(f => f.endsWith('_metadata.json'));
+
+                if (metaFiles.length === 0) {
+                    logger.info(`[MANUAL_DECRYPT] No *_metadata.json found in ${encDir}`);
+                    return;
+                }
+
+                await fs.ensureDir(outputDir);
+
+                for (const metaFile of metaFiles) {
+                    const metaPath = path.join(encDir, metaFile);
+                    try {
+                        const metaRaw = JSON.parse(await fs.readFile(metaPath, 'utf8'));
+
+                        // RSA-decrypt the key envelope
+                        const keysBuffer = Buffer.from(metaRaw.keys);
+                        const keysJson   = await encryptionService.decryptWithRSAPrivateKey(keysBuffer, privateKeyPath);
+                        const { aesKey: aesKeyHex, iv: aesIvHex } = JSON.parse(keysJson);
+                        const aesKey = Buffer.from(aesKeyHex, 'hex');
+                        const aesIv  = Buffer.from(aesIvHex, 'hex');
+
+                        // AES-decrypt the file-mapping array
+                        const filesBuffer  = Buffer.from(metaRaw.files);
+                        const filesDecBuf  = encryptionService.decryptDataAES(filesBuffer, aesKey, aesIv);
+                        const filesMapping = JSON.parse(filesDecBuf.toString('utf8'));
+
+                        for (const mapping of filesMapping) {
+                            const encFile = path.join(encDir, mapping.new);
+                            const decFile = path.join(outputDir, mapping.original);
+
+                            if (!(await fs.pathExists(encFile))) {
+                                logger.warn(`[MANUAL_DECRYPT] Encrypted file not found: ${encFile}`);
+                                stats[statsKey].errors++;
+                                continue;
+                            }
+
+                            await encryptionService.decryptFileAES(encFile, decFile, aesKey, aesIv);
+                            stats[statsKey].processed++;
+                            logger.info(`[MANUAL_DECRYPT] ${mapping.new} → ${mapping.original}`);
+                        }
+                    } catch (err) {
+                        logger.error(`[MANUAL_DECRYPT] Failed to process ${metaFile}: ${err.message}`);
+                        stats[statsKey].errors++;
+                    }
+                }
+            }
+
+            const imagesEncDir = path.join(jobRoot, 'images');
+            const videosEncDir = path.join(jobRoot, 'videos');
+            const imagesDecDir = path.join(jobRoot, 'images_dec');
+            const videosDecDir = path.join(jobRoot, 'videos_dec');
+
+            await decryptSection(imagesEncDir, imagesDecDir, 'images');
+            await decryptSection(videosEncDir, videosDecDir, 'videos');
+
+            const durationMs = Date.now() - startTime;
+            logger.info(`[MANUAL_DECRYPT] Job ${jobId} decryption complete in ${durationMs}ms`, stats);
+
+            res.json({
+                success: true,
+                stats,
+                durationMs,
+                outputPaths: { images: imagesDecDir, videos: videosDecDir },
+            });
+        } catch (error) {
+            logger.error('[MANUAL_DECRYPT] Decryption failed:', error);
+            res.status(500).json({ success: false, error: error.message });
         }
     });
 
@@ -935,6 +1062,23 @@ async function startManualFileTransferProcess({ logger, pool, emitEventToClients
                 await fileTransferQueue.markFilesAsProcessing(batchIds);
                 const ensuredDirs = new Set();
 
+                // Resolve encryption settings once for the whole batch
+                // ROOT_DIR points to data_transfer_v2/; certs live at the app root (one level up).
+                const APP_ROOT = path.join(__dirname, '..');
+                const batchCfg = readConfig();
+                const encCfg = batchCfg.manualTransfer && batchCfg.manualTransfer.encryption;
+                const encryptionEnabled = !!(encCfg && encCfg.enabled);
+                let publicKeyPath = null;
+                if (encryptionEnabled) {
+                    const certsRelDir = (batchCfg.certificates && batchCfg.certificates.directory) || 'certs';
+                    const certFile = (batchCfg.certificates && batchCfg.certificates.publicKeyFilename) || 'public_key.pem';
+                    publicKeyPath = path.join(APP_ROOT, certsRelDir, certFile);
+                    if (!(await fs.pathExists(publicKeyPath))) {
+                        logger.warn(`[MANUAL_ENC] Public key not found at ${publicKeyPath} — falling back to plain copy`);
+                        publicKeyPath = null;
+                    }
+                }
+
                 for (const file of jobPendingFiles) {
                     const liveConfig = readConfig();
                     if (!liveConfig.manualTransfer ||
@@ -951,7 +1095,28 @@ async function startManualFileTransferProcess({ logger, pool, emitEventToClients
                             await fs.ensureDir(destDir);
                             ensuredDirs.add(destDir);
                         }
-                        await fs.copy(file.file_path, dest);
+
+                        if (encryptionEnabled && publicKeyPath) {
+                            // AES-256-CBC encrypt the file; write a companion _metadata.json
+                            // with RSA-wrapped key/IV so the decryptor can recover it.
+                            const fileNameNoExt = path.basename(file.file_name, path.extname(file.file_name));
+                            const encryptedDest = path.join(destDir, fileNameNoExt);
+                            const metadataPath  = path.join(destDir, `${fileNameNoExt}_metadata.json`);
+
+                            const { key: aesKey, iv: aesIv } = encryptionService.generateAESKey();
+                            await encryptionService.encryptFileAES(file.file_path, encryptedDest, aesKey, aesIv);
+
+                            const filesData = [{ original: file.file_name, new: fileNameNoExt }];
+                            const keysData  = { aesKey: aesKey.toString('hex'), iv: aesIv.toString('hex') };
+                            const filesDataEncrypted = encryptionService.encryptDataAES(JSON.stringify(filesData), aesKey, aesIv);
+                            const keysDataEncrypted  = await encryptionService.encryptWithRSAPublicKey(JSON.stringify(keysData), publicKeyPath);
+
+                            await fs.writeFile(metadataPath, JSON.stringify({ files: filesDataEncrypted, keys: keysDataEncrypted }, null, 2));
+                            logger.info(`[MANUAL_ENC] Encrypted ${file.file_name} → ${encryptedDest}`);
+                        } else {
+                            await fs.copy(file.file_path, dest);
+                        }
+
                         await fileTransferQueue.markFilesAsTransferred([file.id]);
 
                         // If this was a video group entry, mark group as transferred
@@ -970,10 +1135,10 @@ async function startManualFileTransferProcess({ logger, pool, emitEventToClients
                             }
                         }
 
-                        logger.info(`Copied ${file.file_name} -> ${dest}`);
+                        logger.info(`${encryptionEnabled ? 'Encrypted' : 'Copied'} ${file.file_name} -> ${destDir}`);
                     } catch (copyErr) {
                         await fileTransferQueue.markFilesAsFailed([file.id], copyErr.message);
-                        logger.error(`Failed to copy ${file.file_name}: ${copyErr.message}`);
+                        logger.error(`Failed to ${encryptionEnabled ? 'encrypt' : 'copy'} ${file.file_name}: ${copyErr.message}`);
                     }
                 }
 

@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-24 (ISS_MEDIA monitor: replaced chokidar with 3-tier polling loop (1/5/30 min); manual USB transfer: concurrent image+video pipeline, background FFmpeg conversion, USB folder structure transfer/{job_id}/videos|images, in-place UI progress, recovery phase — all MI-A–MI-P and MV-A–MV-C resolved)
+Last updated: 2026-06-25 (manual USB transfer encryption implemented end-to-end: AES-256-CBC per-file encryption with RSA-OAEP key envelope in manualTransferRoutes.js; POST /manual-transfer/decrypt route with UI card in manual_usb.njk; decryptUSBFiles.js rewritten to handle current *_metadata.json format for both images and videos)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 

@@ -1,319 +1,205 @@
+'use strict';
+
 const fs = require('fs-extra');
 const path = require('path');
-const crypto = require('crypto');
 const encryptionService = require('../../utils/encryptionService');
 
+/**
+ * Decrypts a manual USB transfer job folder produced by manualTransferRoutes.js.
+ *
+ * Expected on-disk layout (written by the encryption-enabled copy phase):
+ *
+ *   {jobRoot}/images/
+ *     <encryptedName>              — AES-256-CBC encrypted bytes (no extension)
+ *     <encryptedName>_metadata.json — { files: <Buffer>, keys: <Buffer> }
+ *
+ *   {jobRoot}/videos/
+ *     <encryptedName>              — AES-256-CBC encrypted bytes (no extension)
+ *     <encryptedName>_metadata.json — { files: <Buffer>, keys: <Buffer> }
+ *
+ * metadata.json fields:
+ *   keys  — RSA-OAEP encrypted JSON string: { aesKey: "hex", iv: "hex" }
+ *   files — AES-256-CBC encrypted JSON string: [{ original: "orig.jpg", new: "encName" }]
+ *
+ * Output:
+ *   {outputRoot}/images/<original_filename>
+ *   {outputRoot}/videos/<original_filename>
+ */
 class FileDecryptor {
-    constructor(usbRootPath, outputPath, privateKeyPath, options = {}) {
-        this.usbRootPath = usbRootPath;
-        this.outputPath = outputPath || path.join(process.cwd(), 'decrypted_files');
-        this.privateKeyPath = privateKeyPath || path.join(__dirname, '..', '..', 'certs', 'private_key.pem');
+    /**
+     * @param {string} jobRoot      - Root of the encrypted job folder (contains images/ and videos/)
+     * @param {string} outputRoot   - Root for decrypted output (images_dec/ and videos_dec/ created here)
+     * @param {string} privateKeyPath - Path to RSA private key PEM file
+     * @param {object} options
+     */
+    constructor(jobRoot, outputRoot, privateKeyPath, options = {}) {
+        this.jobRoot = jobRoot;
+        this.outputRoot = outputRoot || path.join(path.dirname(jobRoot), path.basename(jobRoot) + '_decrypted');
+        this.privateKeyPath = privateKeyPath || path.join(process.cwd(), 'certs', 'private_key.pem');
         this.options = {
-            preserveOriginal: true,  // Always preserve original encrypted files
-            overwriteExisting: false, // Don't overwrite existing decrypted files
-            ...options
+            overwriteExisting: false,
+            ...options,
         };
         this.stats = {
-            totalGroups: 0,
-            processedGroups: 0,
-            totalFiles: 0,
-            processedFiles: 0,
-            skippedFiles: 0,
-            errors: 0,
+            images:  { processed: 0, skipped: 0, errors: 0 },
+            videos:  { processed: 0, skipped: 0, errors: 0 },
             startTime: null,
             endTime: null,
-            totalTime: null
         };
     }
 
     async initialize() {
-        try {
-            // Ensure output directory exists
-            await fs.ensureDir(this.outputPath);
-            
-            // Check if private key exists
-            if (!await fs.pathExists(this.privateKeyPath)) {
-                throw new Error(`Private key not found at: ${this.privateKeyPath}`);
+        if (!(await fs.pathExists(this.privateKeyPath))) {
+            throw new Error(`Private key not found at: ${this.privateKeyPath}`);
+        }
+        if (!(await fs.pathExists(this.jobRoot))) {
+            throw new Error(`Job root not found: ${this.jobRoot}`);
+        }
+        console.log(`File Decryptor initialised`);
+        console.log(`  Source : ${this.jobRoot}`);
+        console.log(`  Output : ${this.outputRoot}`);
+        console.log(`  Key    : ${this.privateKeyPath}`);
+    }
+
+    /**
+     * Decrypt a single metadata file + its encrypted payload.
+     * Returns the number of files decrypted.
+     */
+    async decryptGroup(metadataPath, outputDir) {
+        const encDir = path.dirname(metadataPath);
+
+        const metaRaw = JSON.parse(await fs.readFile(metadataPath, 'utf8'));
+
+        // Recover AES key/IV: RSA-decrypt the "keys" buffer
+        const keysBuffer = Buffer.from(metaRaw.keys);
+        const keysJson   = await encryptionService.decryptWithRSAPrivateKey(keysBuffer, this.privateKeyPath);
+        const { aesKey: aesKeyHex, iv: aesIvHex } = JSON.parse(keysJson);
+        const aesKey = Buffer.from(aesKeyHex, 'hex');
+        const aesIv  = Buffer.from(aesIvHex, 'hex');
+
+        // Recover file mapping: AES-decrypt the "files" buffer
+        const filesBuffer = Buffer.from(metaRaw.files);
+        const filesJson   = encryptionService.decryptDataAES(filesBuffer, aesKey, aesIv);
+        const filesMapping = JSON.parse(filesJson.toString('utf8'));
+
+        await fs.ensureDir(outputDir);
+
+        let count = 0;
+        for (const mapping of filesMapping) {
+            const encryptedFile = path.join(encDir, mapping.new);
+            const decryptedFile = path.join(outputDir, mapping.original);
+
+            if (!(await fs.pathExists(encryptedFile))) {
+                console.warn(`  [SKIP] Encrypted file not found: ${mapping.new}`);
+                continue;
             }
-            
-            console.log(`🔓 File Decryptor initialized`);
-            console.log(`📁 USB Root: ${this.usbRootPath}`);
-            console.log(`📂 Output: ${this.outputPath}`);
-            console.log(`🔑 Private Key: ${this.privateKeyPath}`);
-            console.log('─'.repeat(60));
-            
-        } catch (error) {
-            console.error('❌ Initialization failed:', error.message);
-            throw error;
-        }
-    }
 
-    async findEncryptedGroups() {
-        const groups = [];
-        
-        try {
-            console.log(' Scanning USB drive for encrypted file groups...');
-            await this.scanDirectoryRecursively(this.usbRootPath, groups);
-            
-            this.stats.totalGroups = groups.length;
-            console.log(`📊 Found ${groups.length} encrypted file groups`);
-            
-        } catch (error) {
-            console.error('❌ Error scanning USB drive:', error.message);
-            throw error;
-        }
-        
-        return groups;
-    }
-
-    async scanDirectoryRecursively(currentPath, groups) {
-        try {
-            const items = await fs.readdir(currentPath);
-            
-            for (const item of items) {
-                const itemPath = path.join(currentPath, item);
-                
-                try {
-                    const stat = await fs.stat(itemPath);
-                    
-                    if (stat.isDirectory()) {
-                        // Check if this directory contains metadata.dat
-                        const metadataPath = path.join(itemPath, 'metadata.dat');
-                        const hasMetadata = await fs.pathExists(metadataPath);
-                        
-                        if (hasMetadata) {
-                            // Check if this directory has encrypted files
-                            const hasEncryptedFiles = await this.hasEncryptedFiles(itemPath);
-                            
-                            if (hasEncryptedFiles) {
-                                // Calculate relative path from USB root for group name
-                                const relativePath = path.relative(this.usbRootPath, itemPath);
-                                const groupName = relativePath.replace(/\\/g, '_').replace(/\//g, '_');
-                                
-                                groups.push({
-                                    name: groupName,
-                                    path: itemPath,
-                                    metadataPath: metadataPath,
-                                    relativePath: relativePath
-                                });
-                                
-                                console.log(`   📁 Found encrypted group: ${relativePath}`);
-                            }
-                        } else {
-                            // Continue scanning subdirectories
-                            await this.scanDirectoryRecursively(itemPath, groups);
-                        }
-                    }
-                } catch (error) {
-                    // Skip items that can't be accessed (permissions, etc.)
-                    console.log(`   ⚠️  Skipping ${item}: ${error.message}`);
-                }
+            if ((await fs.pathExists(decryptedFile)) && !this.options.overwriteExisting) {
+                console.log(`  [SKIP] Already exists: ${mapping.original}`);
+                count++;
+                continue;
             }
-        } catch (error) {
-            // Handle directory access errors
-            console.log(`   ⚠️  Cannot access directory ${currentPath}: ${error.message}`);
+
+            await encryptionService.decryptFileAES(encryptedFile, decryptedFile, aesKey, aesIv);
+            console.log(`  [OK]   ${mapping.new} → ${mapping.original}`);
+            count++;
         }
+        return count;
     }
 
-    async hasEncryptedFiles(dirPath) {
-        try {
-            const files = await fs.readdir(dirPath);
-            return files.some(file => {
-                const filePath = path.join(dirPath, file);
-                try {
-                    const stat = fs.statSync(filePath);
-                    return stat.isFile() && !file.includes('.') && file !== 'metadata.dat';
-                } catch (error) {
-                    return false;
-                }
-            });
-        } catch (error) {
-            return false;
+    async decryptSection(section, outputDir) {
+        const encDir = path.join(this.jobRoot, section);
+        if (!(await fs.pathExists(encDir))) {
+            console.log(`  [INFO] No ${section}/ folder found — skipping`);
+            return;
         }
-    }
 
-    async decryptMetadata(metadataPath) {
-        try {
-            const encryptedMetadata = await fs.readFile(metadataPath);
-            const decryptedJson = await encryptionService.decryptWithRSAPrivateKey(encryptedMetadata, this.privateKeyPath);
-            return JSON.parse(decryptedJson);
-        } catch (error) {
-            console.error(`❌ Failed to decrypt metadata from ${metadataPath}:`, error.message);
-            throw error;
+        const items = await fs.readdir(encDir);
+        const metadataFiles = items.filter(f => f.endsWith('_metadata.json'));
+
+        if (metadataFiles.length === 0) {
+            console.log(`  [INFO] No *_metadata.json files found in ${section}/ — folder may be unencrypted or already decrypted`);
+            return;
         }
-    }
 
-    async decryptFileGroup(group) {
-        try {
-            console.log(`\n🔓 Processing group: ${group.relativePath || group.name}`);
-            
-            // Decrypt metadata
-            const metadata = await this.decryptMetadata(group.metadataPath);
-            console.log(`    Metadata decrypted successfully`);
-            
-            // Create output directory structure matching the original path
-            let groupOutputPath;
-            if (group.relativePath) {
-                groupOutputPath = path.join(this.outputPath, group.relativePath);
-            } else {
-                groupOutputPath = path.join(this.outputPath, group.name);
+        console.log(`\n[${section.toUpperCase()}] Found ${metadataFiles.length} encrypted group(s) in ${encDir}`);
+        const statsKey = section === 'images' ? 'images' : 'videos';
+
+        for (const metaFile of metadataFiles) {
+            const metaPath = path.join(encDir, metaFile);
+            try {
+                const count = await this.decryptGroup(metaPath, outputDir);
+                this.stats[statsKey].processed += count;
+            } catch (err) {
+                console.error(`  [ERR]  Failed to process ${metaFile}: ${err.message}`);
+                this.stats[statsKey].errors++;
             }
-            await fs.ensureDir(groupOutputPath);
-            
-            // Decrypt each file
-            for (const fileMapping of metadata.files) {
-                try {
-                    const encryptedFilePath = path.join(group.path, fileMapping.new);
-                    const decryptedFilePath = path.join(groupOutputPath, fileMapping.original);
-                    
-                    // Check if decrypted file already exists
-                    if (await fs.pathExists(decryptedFilePath) && !this.options.overwriteExisting) {
-                        console.log(`   ⏭️  Skipping ${fileMapping.original} (already exists)`);
-                        this.stats.skippedFiles++;
-                        continue;
-                    }
-                    
-                    // Convert hex strings back to buffers
-                    const aesKey = Buffer.from(metadata.aesKey, 'hex');
-                    const aesIv = Buffer.from(metadata.iv, 'hex');
-                    
-                    console.log(`    Decrypting: ${fileMapping.new} → ${fileMapping.original}`);
-                    await encryptionService.decryptFileAES(encryptedFilePath, decryptedFilePath, aesKey, aesIv);
-                    
-                    this.stats.processedFiles++;
-                    console.log(`   ✅ Decrypted: ${fileMapping.original}`);
-                    
-                } catch (error) {
-                    console.error(`   ❌ Failed to decrypt ${fileMapping.original}:`, error.message);
-                    this.stats.errors++;
-                }
-            }
-            
-            this.stats.processedGroups++;
-            console.log(`   ✅ Group completed: ${group.relativePath || group.name}`);
-            console.log(`    Original encrypted files preserved on USB drive`);
-            
-        } catch (error) {
-            console.error(`❌ Failed to process group ${group.relativePath || group.name}:`, error.message);
-            this.stats.errors++;
         }
     }
 
     async decryptAll() {
-        try {
-            // Start timing
-            this.stats.startTime = new Date();
-            console.log(`🚀 Starting decryption process at ${this.stats.startTime.toLocaleTimeString()}`);
-            
-            await this.initialize();
-            
-            const groups = await this.findEncryptedGroups();
-            
-            if (groups.length === 0) {
-                console.log('ℹ️  No encrypted file groups found on USB drive');
-                return;
-            }
-            
-            console.log(`\n🚀 Starting decryption process...\n`);
-            
-            for (const group of groups) {
-                await this.decryptFileGroup(group);
-            }
-            
-            // End timing
-            this.stats.endTime = new Date();
-            this.stats.totalTime = this.stats.endTime - this.stats.startTime;
-            
-            this.printSummary();
-            
-        } catch (error) {
-            console.error('❌ Decryption process failed:', error.message);
-            process.exit(1);
-        }
-    }
+        this.stats.startTime = new Date();
+        console.log(`\nDecryption started at ${this.stats.startTime.toLocaleTimeString()}`);
 
-    formatDuration(milliseconds) {
-        const seconds = Math.floor(milliseconds / 1000);
-        const minutes = Math.floor(seconds / 60);
-        const hours = Math.floor(minutes / 60);
-        
-        if (hours > 0) {
-            return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
-        } else if (minutes > 0) {
-            return `${minutes}m ${seconds % 60}s`;
-        } else {
-            return `${seconds}s`;
-        }
-    }
+        await this.initialize();
 
-    printSummary() {
-        console.log('\n' + '─'.repeat(60));
-        console.log(' DECRYPTION SUMMARY');
-        console.log('─'.repeat(60));
-        console.log(`📁 Total Groups: ${this.stats.totalGroups}`);
-        console.log(`✅ Processed Groups: ${this.stats.processedGroups}`);
-        console.log(`📄 Total Files: ${this.stats.totalFiles}`);
-        console.log(`✅ Processed Files: ${this.stats.processedFiles}`);
-        console.log(`⏭️  Skipped Files: ${this.stats.skippedFiles}`);
-        console.log(`❌ Errors: ${this.stats.errors}`);
-        console.log(`📂 Output Location: ${this.outputPath}`);
-        console.log(` Original encrypted files preserved on USB drive`);
-        
-        if (this.stats.totalTime !== null) {
-            console.log(`⏱️  Total Time: ${this.formatDuration(this.stats.totalTime)}`);
-            console.log(`🕐 Started: ${this.stats.startTime.toLocaleTimeString()}`);
-            console.log(`🕐 Finished: ${this.stats.endTime.toLocaleTimeString()}`);
-            
-            if (this.stats.processedFiles > 0) {
-                const avgTimePerFile = this.stats.totalTime / this.stats.processedFiles;
-                console.log(`⚡ Average time per file: ${this.formatDuration(avgTimePerFile)}`);
-            }
-        }
-        
-        console.log('─'.repeat(60));
+        const imagesOut = path.join(this.outputRoot, 'images_dec');
+        const videosOut = path.join(this.outputRoot, 'videos_dec');
+
+        await this.decryptSection('images', imagesOut);
+        await this.decryptSection('videos', videosOut);
+
+        this.stats.endTime = new Date();
+        const elapsed = ((this.stats.endTime - this.stats.startTime) / 1000).toFixed(1);
+
+        console.log('\n─────────────────────────────────────────────');
+        console.log('DECRYPTION SUMMARY');
+        console.log('─────────────────────────────────────────────');
+        console.log(`Images  : ${this.stats.images.processed} decrypted, ${this.stats.images.errors} errors`);
+        console.log(`Videos  : ${this.stats.videos.processed} decrypted, ${this.stats.videos.errors} errors`);
+        console.log(`Duration: ${elapsed}s`);
+        console.log(`Output  : ${this.outputRoot}`);
+        console.log('─────────────────────────────────────────────');
+
+        return this.stats;
     }
 }
 
-// CLI Interface
+// ── CLI interface ─────────────────────────────────────────────────────────────
 async function main() {
     const args = process.argv.slice(2);
-    
+
     if (args.length === 0) {
-        console.log(' File Decryptor');
-        console.log('Usage: node decryptFiles.js <usb_root_path> [output_path] [private_key_path]');
+        console.log('Usage: node decryptUSBFiles.js <jobRoot> [outputRoot] [privateKeyPath]');
         console.log('');
-        console.log('Arguments:');
-        console.log('  usb_root_path     Path to the root directory of the USB drive');
-        console.log('  output_path       (Optional) Output directory for decrypted files');
-        console.log('  private_key_path  (Optional) Path to the RSA private key');
+        console.log('  jobRoot        Path containing images/ and videos/ encrypted folders');
+        console.log('                 e.g. G:\\transfer\\123');
+        console.log('  outputRoot     (Optional) Where to write decrypted files.');
+        console.log('                 Defaults to <jobRoot> — images_dec/ and videos_dec/ created inside.');
+        console.log('  privateKeyPath (Optional) Path to RSA private key. Defaults to certs/private_key.pem');
         console.log('');
         console.log('Examples:');
-        console.log('  node decryptFiles.js E:\\');
-        console.log('  node decryptFiles.js E:\\ C:\\decrypted');
-        console.log('  node decryptFiles.js E:\\ C:\\decrypted C:\\keys\\private_key.pem');
+        console.log('  node decryptUSBFiles.js G:\\transfer\\123');
+        console.log('  node decryptUSBFiles.js G:\\transfer\\123 G:\\transfer\\123 C:\\keys\\private_key.pem');
         process.exit(0);
     }
-    
-    const usbRootPath = args[0];
-    const outputPath = args[1];
-    const privateKeyPath = args[2];
-    
-    // Validate USB path exists
-    if (!await fs.pathExists(usbRootPath)) {
-        console.error(`❌ USB path does not exist: ${usbRootPath}`);
+
+    const [jobRoot, outputRoot, privateKeyPath] = args;
+
+    if (!(await fs.pathExists(jobRoot))) {
+        console.error(`Job root does not exist: ${jobRoot}`);
         process.exit(1);
     }
-    
-    const decryptor = new FileDecryptor(usbRootPath, outputPath, privateKeyPath);
+
+    const decryptor = new FileDecryptor(jobRoot, outputRoot || jobRoot, privateKeyPath);
     await decryptor.decryptAll();
 }
 
-// Run if called directly
 if (require.main === module) {
-    main().catch(error => {
-        console.error('❌ Fatal error:', error.message);
+    main().catch(err => {
+        console.error('Fatal error:', err.message);
         process.exit(1);
     });
 }
 
-module.exports = FileDecryptor; 
+module.exports = FileDecryptor;

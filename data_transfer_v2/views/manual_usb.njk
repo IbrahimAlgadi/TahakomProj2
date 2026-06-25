@@ -184,6 +184,69 @@
             </div>
         </div>
 
+        <!-- Decrypt Transfer Job Card -->
+        <div class="card mb-4" id="decryptJobCard">
+            <div class="card-header bg-transparent border-0">
+                <h5 class="card-title mb-0">
+                    <i class="fas fa-unlock-alt me-2"></i>Decrypt Transfer Job
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Decrypt a previously encrypted transfer job. The decrypted files will be written
+                    alongside the encrypted files in <strong>images_dec\</strong> and <strong>videos_dec\</strong> sub-folders.
+                </p>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label">Drive</label>
+                        <input type="text" class="form-control" id="decryptDrive" placeholder="G" maxlength="1" style="text-transform:uppercase;">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Job ID</label>
+                        <input type="number" class="form-control" id="decryptJobId" placeholder="e.g. 42" min="1">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Output paths</label>
+                        <div class="form-control bg-light text-muted small" id="decryptOutputPaths" style="height:auto; min-height:38px; white-space:pre-wrap;">
+                            Enter drive &amp; Job ID above
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-warning" id="decryptBtn" disabled>
+                            <i class="fas fa-unlock me-2"></i>Decrypt Files
+                        </button>
+                        <span class="ms-3 text-muted small" id="decryptStatus"></span>
+                    </div>
+                </div>
+
+                <!-- Result panel (hidden until decryption runs) -->
+                <div class="mt-3" id="decryptResult" style="display:none;">
+                    <hr>
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="text-center p-2 border rounded">
+                                <div class="h4 mb-0 text-success" id="decryptImgCount">0</div>
+                                <small class="text-muted">Images decrypted</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-2 border rounded">
+                                <div class="h4 mb-0 text-info" id="decryptVidCount">0</div>
+                                <small class="text-muted">Videos decrypted</small>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="text-center p-2 border rounded">
+                                <div class="h4 mb-0 text-danger" id="decryptErrCount">0</div>
+                                <small class="text-muted">Errors</small>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="alert mt-2 mb-0" id="decryptAlert"></div>
+                </div>
+            </div>
+        </div>
+
         <!-- Transfer History -->
         <div class="card">
             <div class="card-header bg-transparent border-0">
@@ -945,6 +1008,11 @@
                         if (data.success) {
                             currentJobId = data.jobId;
                             showToast('Transfer job created successfully', 'success');
+                            // Pre-fill the decrypt card with this job's ID and drive
+                            if (window._decryptPrefill) {
+                                const selectedDrive = document.getElementById('driveSelect').value;
+                                window._decryptPrefill(data.jobId, selectedDrive);
+                            }
                             // Keep disabled while the job is active — button stays locked until
                             // the WebSocket clears the active job (job finalization).
                             createBtn.innerHTML = origCreateHtml;
@@ -1167,5 +1235,114 @@
                 });
             });
         });
+    </script>
+
+    <!-- ── Decrypt Transfer Job ──────────────────────────────────────────── -->
+    <script>
+        (function () {
+            const $drive      = $('#decryptDrive');
+            const $jobId      = $('#decryptJobId');
+            const $outputPaths = $('#decryptOutputPaths');
+            const $btn        = $('#decryptBtn');
+            const $status     = $('#decryptStatus');
+            const $result     = $('#decryptResult');
+
+            function updateOutputPaths() {
+                const d = $drive.val().replace(/[^a-zA-Z]/g, '').toUpperCase();
+                const j = $jobId.val();
+                if (d && j) {
+                    $outputPaths.text(
+                        `${d}:\\transfer\\${j}\\images_dec\n` +
+                        `${d}:\\transfer\\${j}\\videos_dec`
+                    );
+                    $btn.prop('disabled', false);
+                } else {
+                    $outputPaths.text('Enter drive & Job ID above');
+                    $btn.prop('disabled', true);
+                }
+            }
+
+            $drive.on('input', updateOutputPaths);
+            $jobId.on('input', updateOutputPaths);
+
+            // Pre-fill from active job if available
+            function prefillFromActiveJob(jobId, drive) {
+                if (jobId && !$jobId.val()) $jobId.val(jobId);
+                if (drive && !$drive.val()) {
+                    // drive may be "G:" or "G:\" — extract letter only
+                    $drive.val(String(drive).replace(/[^a-zA-Z]/g, '').toUpperCase().charAt(0));
+                }
+                updateOutputPaths();
+            }
+
+            // Expose so the WS handler can call it after a job is created
+            window._decryptPrefill = prefillFromActiveJob;
+
+            $btn.on('click', async function () {
+                const driveLetter = $drive.val().replace(/[^a-zA-Z]/g, '').toUpperCase();
+                const jobId = parseInt($jobId.val(), 10);
+
+                if (!driveLetter || !jobId) {
+                    $status.text('Enter both drive letter and Job ID.');
+                    return;
+                }
+
+                $btn.prop('disabled', true);
+                $status.html('<i class="fas fa-spinner fa-spin me-1"></i>Decrypting…');
+                $result.hide();
+
+                try {
+                    const resp = await fetch(`${MANUAL_TRANSFER_SERVICE_URL}/manual-transfer/decrypt`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ jobId, driveLetter }),
+                    });
+                    const data = await resp.json();
+
+                    $result.show();
+
+                    if (data.success) {
+                        const imgOk  = data.stats.images.processed;
+                        const vidOk  = data.stats.videos.processed;
+                        const errors = data.stats.images.errors + data.stats.videos.errors;
+                        const secs   = (data.durationMs / 1000).toFixed(1);
+
+                        $('#decryptImgCount').text(imgOk);
+                        $('#decryptVidCount').text(vidOk);
+                        $('#decryptErrCount').text(errors);
+
+                        const cls = errors > 0 ? 'alert-warning' : 'alert-success';
+                        $('#decryptAlert')
+                            .removeClass('alert-success alert-warning alert-danger')
+                            .addClass(cls)
+                            .html(
+                                `<i class="fas fa-check-circle me-1"></i>` +
+                                `Decryption complete in ${secs}s. ` +
+                                `Files written to <strong>${data.outputPaths.images}</strong> ` +
+                                `and <strong>${data.outputPaths.videos}</strong>.`
+                            );
+                        $status.text('');
+                    } else {
+                        $('#decryptImgCount').text(0);
+                        $('#decryptVidCount').text(0);
+                        $('#decryptErrCount').text('?');
+                        $('#decryptAlert')
+                            .removeClass('alert-success alert-warning')
+                            .addClass('alert-danger')
+                            .html(`<i class="fas fa-times-circle me-1"></i>${data.error}`);
+                        $status.text('');
+                    }
+                } catch (err) {
+                    $result.show();
+                    $('#decryptAlert')
+                        .removeClass('alert-success alert-warning')
+                        .addClass('alert-danger')
+                        .html(`<i class="fas fa-times-circle me-1"></i>Request failed: ${err.message}`);
+                    $status.text('');
+                } finally {
+                    $btn.prop('disabled', false);
+                }
+            });
+        })();
     </script>
 {% endblock %}

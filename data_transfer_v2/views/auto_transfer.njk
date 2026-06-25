@@ -400,6 +400,26 @@
                             <span id="connectedDriveStatusText" class="badge bg-secondary">Waiting</span>
                         </div>
 
+                        <!-- Cursor State Panel (time-cursor transfer tracking) -->
+                        <div class="p-3 bg-light rounded mb-3">
+                            <h6 class="mb-2">
+                                <i class="fas fa-history me-2 text-info"></i>
+                                Transfer Cursor State
+                            </h6>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="text-muted small"><i class="fas fa-image me-1"></i> Image Cursor</span>
+                                <span class="badge bg-primary text-white" id="cursorLastImageTransferredAt">Never</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <span class="text-muted small"><i class="fas fa-video me-1"></i> Video Cursor</span>
+                                <span class="badge bg-info text-white" id="cursorLastVideoTransferredAt">Never</span>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="text-muted small"><i class="fas fa-plug me-1"></i> Last USB Connected</span>
+                                <span class="badge bg-secondary text-white" id="cursorLastConnectedAt">Never</span>
+                            </div>
+                        </div>
+
                         <div class="p-3 bg-light rounded mb-3">
                             <div class="d-flex justify-content-between align-items-center mb-2">
                                 <div class="text-muted">Current Transfer</div>
@@ -565,6 +585,37 @@
             const i = Math.floor(Math.log(bytes) / Math.log(1024));
             const value = (bytes / Math.pow(1024, i)).toFixed(2);
             return `${value} ${sizes[i]}`;
+        }
+
+        function formatTimestamp(isoStr) {
+            if (!isoStr) return 'Never';
+            try {
+                return new Date(isoStr).toLocaleString();
+            } catch (e) {
+                return isoStr;
+            }
+        }
+
+        function updateCursorDisplay(cfg) {
+            const imgEl = document.getElementById('cursorLastImageTransferredAt');
+            const vidEl = document.getElementById('cursorLastVideoTransferredAt');
+            const lcaEl = document.getElementById('cursorLastConnectedAt');
+            // Support both old single-cursor config and new split-cursor config
+            const imgTs = cfg.lastImageTransferredAt || cfg.lastTransferredAt;
+            const vidTs = cfg.lastVideoTransferredAt || cfg.lastTransferredAt;
+            const lcaTs = cfg.lastConnectedAt;
+            if (imgEl) {
+                imgEl.textContent = formatTimestamp(imgTs);
+                imgEl.className = imgTs ? 'badge bg-primary text-white' : 'badge bg-secondary text-white';
+            }
+            if (vidEl) {
+                vidEl.textContent = formatTimestamp(vidTs);
+                vidEl.className = vidTs ? 'badge bg-info text-white' : 'badge bg-secondary text-white';
+            }
+            if (lcaEl) {
+                lcaEl.textContent = formatTimestamp(lcaTs);
+                lcaEl.className = lcaTs ? 'badge bg-success text-white' : 'badge bg-secondary text-white';
+            }
         }
 
         // Toast notification function
@@ -1018,17 +1069,46 @@
                 }
             }
             else if (type === 'camera_progress') {
-                const cameraStatus = document.getElementById(`camera${data.cameraId}Status`);
+                // Self-initialize the grid if job_start was missed (e.g., page loaded mid-transfer)
+                if (!document.getElementById(`camera${data.cameraId}Status`) && data.totalCameras) {
+                    videoCameraGrid.innerHTML = '';
+                    for (let i = 1; i <= data.totalCameras; i++) {
+                        videoCameraGrid.innerHTML += `
+                            <div class="col-md-6">
+                                <div class="p-2 bg-light rounded">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <span class="small fw-medium">Camera ${i}</span>
+                                        <span class="badge bg-secondary" id="camera${i}Status">Waiting</span>
+                                    </div>
+                                    <div class="progress mt-1" style="height: 4px;">
+                                        <div class="progress-bar bg-success" id="camera${i}Progress" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                            </div>`;
+                    }
+                    // Also set the job section to active state
+                    document.getElementById('currentJobId').textContent = 'active';
+                    const transferSummary = document.getElementById('transferSummary');
+                    if (transferSummary) {
+                        transferSummary.className = 'alert alert-info mb-0';
+                        document.getElementById('transferSummaryText').textContent = `Processing videos for ${data.totalCameras} cameras...`;
+                    }
+                }
+
+                const cameraStatus   = document.getElementById(`camera${data.cameraId}Status`);
                 const cameraProgress = document.getElementById(`camera${data.cameraId}Progress`);
-                
+
                 if (cameraStatus && cameraProgress) {
                     cameraStatus.textContent = `${data.convertedGroupedCount}/${data.targetCount}`;
-                    cameraStatus.className = `badge ${data.progressPercentage >= 100 ? 'bg-success' : 'bg-info'}`;
+                    cameraStatus.className   = `badge ${data.progressPercentage >= 100 ? 'bg-success' : 'bg-info'}`;
                     cameraProgress.style.width = data.progressPercentage + '%';
                 }
-                
+
                 document.getElementById('videoCameraStatus').textContent = `Camera ${data.cameraId}: ${data.convertedGroupedCount}/${data.targetCount} files`;
                 document.getElementById('videoCurrentFile').textContent = `Processing camera ${data.cameraId}...`;
+
+                // Update overall video progress bar proportionally
+                document.getElementById('videoProgressBar').style.width = data.progressPercentage + '%';
             }
             else if (type === 'video_created') {
                 document.getElementById('videoCameraStatus').textContent = `Camera ${data.cameraId}: Video created`;
@@ -1127,6 +1207,10 @@
                     console.log('Connected devices updated:', data.devices);
                     updateConnectedDrives(data.devices);
                     evaluateDriveStatus();
+                } else if (data.event === "autoTransferConfigChanged") {
+                    // Real-time cursor state update pushed by the backend
+                    const cfg = data.data || data;
+                    updateCursorDisplay(cfg);
                 } else if (data.event === "imageTransferMetrics") {
                     console.log('Image transfer metrics:', data);
                     updateImageTransferMetrics(data);
@@ -1279,6 +1363,9 @@
                 const isActive = config.isActive || false;
                 document.getElementById('transferActiveToggle').checked = isActive;
                 toggleFormControls(isActive);
+
+                // Update cursor state display (new time-cursor fields)
+                updateCursorDisplay(config);
             }
 
             // Load initial configuration

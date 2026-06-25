@@ -90,29 +90,61 @@ ExportDirectoryControlV3.js  [continuous governance loop]
   └─ Preserves directories listed in storage.preserveRootDirs
 ```
 
-### 2. Image Transfer Pipeline (PostgreSQL → USB / FTP)
+### 2. USB Auto-Transfer Pipeline — Images + Videos (time-cursor)
 
 ```
-autoUSBImageTransferService.js
-  ├─ ImageJobManager: SELECT files WHERE file_size > 0
-  │                            AND is_auto_transferred = false
-  │                            AND deleted = false
-  ├─ Creates transfer_queue_job (batch_origin='auto')
-  ├─ Populates transfer_queue (per file)
-  ├─ ImageTransferManager: copies files to USB drive (config: autoTransfer.drive)
-  └─ UPDATE files.is_auto_transferred = true  (via TransferUtils)
+autoUSBTransferService.js  (replaces autoUSBImageTransferService + autoVideoTransferEDAMicroservice — 2026-06-24)
+  ┌─ Cursor resolution at startup:
+  │    lastTransferredAt in config ≤ 7 days old → resume from that timestamp
+  │    otherwise                                → fresh start at now − 1 hour
+  │
+  ├─ 5-minute window loop:
+  │    while cursor + 5min ≤ now:
+  │      ── IMAGE PHASE ──────────────────────────────────────────────
+  │      ImageJobManager.getImagesInWindow(cursor, cursor+5min)
+  │        SELECT files WHERE is_auto_transferred=false AND ts ∈ [cursor, cursor+5min)
+  │        ORDER BY ts ASC  LIMIT 1000
+  │      copyWithRetry → {drive}:\images\{relative-export-path}\{filename}
+  │      ImageJobManager.markImagesTransferred(successIds)
+  │        UPDATE files SET is_auto_transferred = true
+  │
+  │      ── VIDEO PHASE  (per camera) ──────────────────────────────────
+  │      for each camera in ISS_MEDIA_CAMERAS:
+  │        JobManager.getVideoSegmentsInWindow(cursor, cursor+5min, cameraId)
+  │          SELECT iss_media_files WHERE is_auto_transferred=false
+  │                 AND ts ∈ [cursor, cursor+5min)  ORDER BY recording_date, precise_time
+  │          (files missing on disk → deleted=true)
+  │        VideoProcessor.convertToMp4(seg.file_path → temp .mp4) per segment
+  │        VideoProcessor.concatenateMp4Files → cam_{id}_{date}_{HHmm}--{HHmm}.mp4
+  │        copyWithRetry → {drive}:\videos\{camera_id}\{finalName}
+  │        JobManager.markVideoSegmentsTransferred(ids)
+  │          UPDATE iss_media_files SET is_auto_transferred = true
+  │
+  │      cursor = cursor + 5min
+  │      saveCursor → dataTransferConfig.json  autoTransfer.lastTransferredAt
+  │
+  └─ When cursor ≥ now: idle 5 min then re-check
 
-autoFTPImageTransferService.js
-  ├─ FtpImageJobManager: SELECT files WHERE file_size > 0
-  │                               AND is_ftp_transferred = false
-  │                               AND deleted = false
-  ├─ Creates ftp_image_transfer_queue_job
-  ├─ Populates ftp_image_transfer_queue
+  Drive / config gating (Redis Pub/Sub same pattern as retired services):
+    connected_drive_list_update → updateDriveInfo()
+    config_state_update         → reload IS_TRANSFER_ACTIVE, dataType, drive
+
+  USB path structure:
+    images: {drive}:\images\{site_id}\{YYYY-MM-DD}\{HH-mm}\{filename}
+    videos: {drive}:\videos\{camera_id}\cam_{id}_{date}_{wStart}--{wEnd}.mp4
+
+  Cursor config fields added to dataTransferConfig.json → autoTransfer:
+    lastTransferredAt: ISO timestamp of last completed window  (null = never)
+    lastConnectedAt:   ISO timestamp of last USB connect event (null = never)
+
+autoFTPImageTransferService.js  (unchanged — FTP only)
+  ├─ FtpImageJobManager: SELECT files WHERE is_ftp_transferred = false
+  ├─ Creates ftp_image_transfer_queue_job / ftp_image_transfer_queue
   ├─ FtpImageTransferManager: uploads files via FTP (config: ftpTransfer)
   └─ UPDATE files.is_ftp_transferred = true
 ```
 
-### 3. Video Monitoring & Transfer Pipeline
+### 3. Video Monitoring & FTP Video Pipeline
 
 ```
 ISS Media NVR Directories  (disk paths from config)
@@ -127,14 +159,9 @@ monitorISSMediaFilesOptimizedMicroservice.js  (tiered polling indexer — chokid
      file_size, recording_date, recording_time, precise_time,
      is_auto_transferred=false, is_ftp_transferred=false)
 
-  ┌──► refactored_autoVideoTransferEDAMicroservice.js  [USB]
-  │    ├─ JobManager: selects untransferred iss_media_files by camera batch
-  │    ├─ CompleteBufferManager → video_converted_buffer (per-camera staging)
-  │    ├─ FileTransferManager: copies MP4 segments to USB drive
-  │    ├─ QueueProcessor: manages video_transfer_queue / video_transfer_queue_job
-  │    └─ UPDATE iss_media_files.is_auto_transferred = true
-  │
-  └──► autoFtpVideoTransferService.js  [FTP]
+  Note: USB video transfer now handled by autoUSBTransferService (§2 above).
+
+  └──► autoFtpVideoTransferService.js  [FTP — unchanged]
        ├─ FtpJobManager + FtpCompleteBufferManager
        ├─ FtpTransferManager: uploads MP4 to FTP server
        ├─ Manages ftp_video_transfer_queue_job / ftp_video_transfer_queue
@@ -207,10 +234,11 @@ ClusterStatusMonitorScript.js  [SecurOS, runs every 10 minutes]
 │  monitorSpecialProcessesMicro  ◄──► Redis (PROCESS_MONITOR)        │
 │  monitorISSMediaFiles          → iss_media_files                   │
 │                                                                     │
-│  autoVideoTransferEDAMicroservice → video_transfer_queue_*          │
+│  autoUSBTransferService        → files + iss_media_files (cursor)  │
 │  autoFtpVideoTransferService   → ftp_video_transfer_queue_*        │
-│  autoUSBImageTransferService   → transfer_queue_*                  │
 │  autoFTPImageTransferService   → ftp_image_transfer_queue_*        │
+│  ~~autoVideoTransferEDAMicroservice~~ (retired 2026-06-24)         │
+│  ~~autoUSBImageTransferService~~ (retired 2026-06-24)              │
 │                                                                     │
 │  DashboardReportingBackend     → :8454  (Express + WS + Nunjucks)  │
 └─────────────────────────────────────────────────────────────────────┘
@@ -224,10 +252,11 @@ ClusterStatusMonitorScript.js  [SecurOS, runs every 10 minutes]
 | monitorConnectedExternalDrivesMicroservice | monitorConnectedExternalDrivesMicroservice.js | — | logs/monitorConnectedExternalDrivesMicroservice-{out,error}.log |
 | monitorSpecialProcessesMicroservice | monitorSpecialProcessesMicroservice.js | — | logs/monitorSpecialProcessesMicroservice-{out,error}.log |
 | monitorISSMediaFilesOptimizedMicroservice | monitorISSMediaFilesOptimizedMicroservice.js | ConfigStateServiceRedis, monitorConnectedExternalDrives | logs/monitorISSMediaFilesOptimizedMicroservice-{out,error}.log |
-| autoVideoTransferEDAMicroservice | refactored_autoVideoTransferEDAMicroservice.js | ConfigStateServiceRedis, monitorISSMediaFiles | logs/refactored_autoVideoTransferEDAMicroservice-{out,error}.log |
+| autoUSBTransferService | autoUSBTransferService.js | ConfigStateServiceRedis, monitorISSMediaFiles, monitorConnectedExternalDrives | logs/autoUSBTransferService-{out,error}.log |
 | autoFtpVideoTransferService | autoFtpVideoTransferService.js | ConfigStateServiceRedis, monitorISSMediaFiles | logs/autoFtpVideoTransferService-{out,error}.log |
-| autoUSBImageTransferService | autoUSBImageTransferService.js | ConfigStateServiceRedis, monitorConnectedExternalDrives | logs/autoUSBImageTransferService-{out,error}.log |
 | autoFTPImageTransferService | autoFTPImageTransferService.js | ConfigStateServiceRedis, monitorConnectedExternalDrives | logs/autoFTPImageTransferService-{out,error}.log |
+| ~~autoVideoTransferEDAMicroservice~~ | ~~refactored_autoVideoTransferEDAMicroservice.js~~ | retired 2026-06-24 | replaced by autoUSBTransferService |
+| ~~autoUSBImageTransferService~~ | ~~autoUSBImageTransferService.js~~ | retired 2026-06-24 | replaced by autoUSBTransferService |
 | DashboardReportingBackend | DashboardReportingBackend.js | monitorConnectedExternalDrives | logs/DashboardReportingBackend-{out,error}.log |
 
 ### SecurOS Scripts (run inside SecurOS, not PM2)
@@ -380,7 +409,8 @@ npm run test:coverage # Coverage report
 | Item | Reason | Path |
 |---|---|---|
 | SecurOS scripts | Cannot run without the SecurOS runtime injected `securos` module | `securos-scripts/` |
-| `autoUSBImageTransferService.js` entry | Self-executes at module load (opens real Redis/PG); tests target `ImageTransferManager` directly | — |
+| `autoUSBImageTransferService.js` entry | Retired 2026-06-24 — replaced by `autoUSBTransferService.js` | — |
+| `autoUSBTransferService.js` entry | Self-executes at module load; unit tests should target `ImageJobManager.getImagesInWindow` and `JobManager.getVideoSegmentsInWindow` directly | — |
 | FTP transfer managers | No FTP test suite yet | `services/*/transfer/Ftp*.js` |
 | `JobManager`, `ProcessingStateManager`, `CompleteBufferManager` | Complex state machines; integration tests planned (T-5) | `services/video-transfer/state/`, `processors/` |
 | Dashboard routes | No API test suite yet | `routes/` |
@@ -398,6 +428,8 @@ npm run test:coverage # Coverage report
 | `FileTransferRedisService` | `archived/FileTransferRedisService.js` | Commented out in `ecosystem.config.js`; superseded by `ImageJobManager` |
 | `autoVideoTransferMicroservice` | `archived/autoVideoTransferMicroservice.js` | Replaced by `refactored_autoVideoTransferEDAMicroservice.js` |
 | `autoVideoTransferEDAMicroservice` | `archived/autoVideoTransferEDAMicroservice.js` | Replaced by the refactored variant |
+| `refactored_autoVideoTransferEDAMicroservice.js` | File retained for FTP helper class sharing | PM2 entry retired 2026-06-24 — USB transfer now in `autoUSBTransferService.js` |
+| `autoUSBImageTransferService.js` | File retained (not deleted) | PM2 entry retired 2026-06-24 — replaced by `autoUSBTransferService.js` |
 | `FileVideoTransferRedisService` | `archived/FileVideoTransferRedisService.js` | Archived — not referenced anywhere active |
 | Legacy docs (`docs/`, `development-guides/`, `user-stories/`) | `archived/legacy-docs/` | **Consolidated 2026-06-17** — unique content folded into `product/`; redundant/legacy files moved to `archived/legacy-docs/`; original folders removed. See `product/README.md` for full index. |
 

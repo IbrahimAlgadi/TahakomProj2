@@ -285,6 +285,41 @@ class ImageJobManager {
     }
 
     /**
+     * Get image files within a specific time window (used by time-cursor service)
+     * Returns files from the `files` table whose `ts` falls in [windowStart, windowEnd).
+     */
+    async getImagesInWindow(windowStart, windowEnd) {
+        const result = await this.pool.query(`
+            SELECT id, file_path, file_size, ts, plate_num, site_id
+            FROM public.${this.sourceFilesTable}
+            WHERE deleted = false
+              AND is_auto_transferred IS NOT TRUE
+              AND ts >= $1
+              AND ts  < $2
+            ORDER BY ts ASC
+            LIMIT 1000
+        `, [windowStart, windowEnd]);
+
+        logger.info(`[IMAGE_JOB] getImagesInWindow: Found ${result.rows.length} images in window [${windowStart.toISOString()} – ${windowEnd.toISOString()}]`);
+        return result.rows;
+    }
+
+    /**
+     * Mark an array of file IDs as auto-transferred in the `files` table.
+     */
+    async markImagesTransferred(ids) {
+        if (!ids || ids.length === 0) return;
+
+        await this.pool.query(`
+            UPDATE public.${this.sourceFilesTable}
+            SET is_auto_transferred = true
+            WHERE id = ANY($1)
+        `, [ids]);
+
+        logger.info(`[IMAGE_JOB] markImagesTransferred: Marked ${ids.length} images as transferred`);
+    }
+
+    /**
      * Pause active jobs (when auto transfer is disabled)
      */
     async pauseActiveJobs(reason = 'Auto transfer disabled') {

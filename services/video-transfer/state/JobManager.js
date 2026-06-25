@@ -639,6 +639,65 @@ class JobManager {
     }
 
     /**
+     * Get video segments from iss_media_files within a specific time window for a camera.
+     * Used by the time-cursor unified USB transfer service.
+     * Files that do not exist on disk are marked deleted and excluded.
+     */
+    async getVideoSegmentsInWindow(windowStart, windowEnd, cameraId) {
+        const numericCameraId = parseInt(String(cameraId).replace('CAM_', ''), 10);
+
+        const result = await this.pool.query(`
+            SELECT id, file_path, file_name, file_size,
+                   camera_id, recording_date, recording_time, precise_time
+            FROM iss_media_files
+            WHERE camera_id = $1
+              AND deleted = false
+              AND is_auto_transferred = false
+              AND (recording_date::text || ' ' || precise_time::text)::timestamptz >= $2
+              AND (recording_date::text || ' ' || precise_time::text)::timestamptz  < $3
+            ORDER BY recording_date ASC, precise_time ASC
+        `, [numericCameraId, windowStart, windowEnd]);
+
+        const valid = [];
+        const missingIds = [];
+
+        for (const f of result.rows) {
+            const exists = await require('fs-extra').pathExists(f.file_path);
+            if (exists) {
+                valid.push(f);
+            } else {
+                missingIds.push(f.id);
+                logger.warn(`[JOB] getVideoSegmentsInWindow: File not on disk, marking deleted: ${f.file_path}`);
+            }
+        }
+
+        if (missingIds.length > 0) {
+            await this.pool.query(
+                `UPDATE iss_media_files SET deleted = true, updated_at = CURRENT_TIMESTAMP WHERE id = ANY($1)`,
+                [missingIds]
+            );
+        }
+
+        logger.info(`[JOB] getVideoSegmentsInWindow: cam=${numericCameraId} window=[${windowStart.toISOString()} – ${windowEnd.toISOString()}] valid=${valid.length} missing=${missingIds.length}`);
+        return valid;
+    }
+
+    /**
+     * Mark an array of iss_media_files IDs as auto-transferred (used by time-cursor service).
+     */
+    async markVideoSegmentsTransferred(ids) {
+        if (!ids || ids.length === 0) return;
+
+        await this.pool.query(`
+            UPDATE iss_media_files
+            SET is_auto_transferred = true, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ANY($1)
+        `, [ids]);
+
+        logger.info(`[JOB] markVideoSegmentsTransferred: Marked ${ids.length} segments as transferred`);
+    }
+
+    /**
      * Delete a job completely from the database
      */
     async deleteJob(jobId) {
