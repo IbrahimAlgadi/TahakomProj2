@@ -2,9 +2,28 @@
 
 **Database: `tahakom_transfer`** (localhost:5432)  
 **Schema source**: `scripts/migration/DatabaseMigration.js`  
-Last updated: 2026-06-18
+Last updated: 2026-06-25
 
 > The `auto` database (also on localhost:5432) is accessed only by the `postgresql-securos_auto-mcp` Cursor tool. No application code connects to it. Its schema is not documented here — inspect via MCP if needed.
+
+---
+
+## Running the migration
+
+```powershell
+# Create-only / idempotent (default) — safe to run on a live DB with existing data.
+# Uses CREATE TABLE IF NOT EXISTS / CREATE INDEX IF NOT EXISTS / DROP TRIGGER IF EXISTS + CREATE TRIGGER.
+# NOTE: the CREATE MATERIALIZED VIEW IF NOT EXISTS statements need a momentary exclusive lock on `files`;
+# stop PM2 services first to avoid lock contention.
+node scripts/migration/DatabaseMigration.js
+
+# Clean from-scratch rebuild — DESTROYS ALL DATA.
+# Runs DROP SCHEMA public CASCADE, then recreates all objects.
+# Also wipes any unmanaged tables (e.g. config_* orphans).
+node scripts/migration/DatabaseMigration.js --drop
+```
+
+> **Warning**: `--drop` is irreversible. The current dev DB holds ~252 k `files` rows, ~85 k `iss_media_files` rows, and ~38 k `file_transfer_queue` rows. Stop all PM2 services before running either mode.
 
 ---
 
@@ -12,23 +31,28 @@ Last updated: 2026-06-18
 
 | Table | Lines (migration) | Owner (writes) | Primary consumers |
 |---|---|---|---|
-| `files` | L86–107 | SecurOS scripts | All transfer services, dashboard |
-| `device_connections` | L109–178 | monitorConnectedExternalDrives | connectedDevicesRoutes |
-| `transfer_job` | L125–136 | mainControlRoutes (legacy manual) | manualTransferRoutes |
-| `transfer_job_log` | L138–149 | mainControlRoutes | manualTransferRoutes |
-| `auto_transfer_device` | L151–160 | Migration only — **ORPHAN** | None |
-| `auto_transfer_job` | L162–167 | Migration only — **ORPHAN** | None |
-| `iss_media_files` | L400–445 | monitorISSMediaFiles | Video transfer services |
-| `transfer_queue_job` | L209–223 | autoUSBImageTransferService | ImageJobManager, autoTransferRoutes |
-| `transfer_queue` | L226–253 | autoUSBImageTransferService | ImageJobManager |
-| `ftp_image_transfer_queue_job` | L478–493 | autoFTPImageTransferService | FtpImageJobManager |
-| `ftp_image_transfer_queue` | L496–527 | autoFTPImageTransferService | FtpImageJobManager |
-| `video_transfer_queue_job` | L319–338 | autoVideoTransferEDA | JobManager |
-| `video_converted_buffer` | L341–370 | autoVideoTransferEDA | CompleteBufferManager |
-| `video_transfer_queue` | L373–397 | autoVideoTransferEDA | QueueProcessor |
-| `ftp_video_transfer_queue_job` | L532–552 | autoFtpVideoTransferService | FtpJobManager |
-| `ftp_video_converted_buffer` | L555–584 | autoFtpVideoTransferService | FtpCompleteBufferManager |
-| `ftp_video_transfer_queue` | L587–615 | autoFtpVideoTransferService | FtpJobManager |
+| `files` | L86–107 + ALTER L180 | SecurOS scripts | All transfer services, dashboard |
+| `device_connections` | L109–123 + ALTER L170 | monitorConnectedExternalDrives | connectedDevicesRoutes |
+| `transfer_job` | L125–136 + ALTER L854 | mainControlRoutes / manualTransferRoutes | manualTransferRoutes |
+| `transfer_job_log` | L138–149 + ALTER L849 | mainControlRoutes / manualTransferRoutes | manualTransferRoutes |
+| `auto_transfer_device` | L151–155 | Migration only — **ORPHAN** | None |
+| `auto_transfer_job` | L157–167 | Migration only — **ORPHAN** | None |
+| `iss_media_files` | L305–321 | monitorISSMediaFilesOptimized | Video transfer services |
+| `transfer_queue_job` | L218–232 | autoUSBImageTransferService | ImageJobManager, autoTransferRoutes |
+| `transfer_queue` | L235–262 | autoUSBImageTransferService | ImageJobManager |
+| `video_transfer_queue_job` | L328–347 | autoVideoTransferEDA | JobManager |
+| `video_converted_buffer` | L350–379 | autoVideoTransferEDA | CompleteBufferManager |
+| `video_transfer_queue` | L382–406 | autoVideoTransferEDA | QueueProcessor |
+| `ftp_image_transfer_queue_job` | L487–502 | autoFTPImageTransferService | FtpImageJobManager |
+| `ftp_image_transfer_queue` | L505–536 | autoFTPImageTransferService | FtpImageJobManager |
+| `ftp_video_transfer_queue_job` | L541–561 | autoFtpVideoTransferService | FtpJobManager |
+| `ftp_video_converted_buffer` | L564–593 | autoFtpVideoTransferService | FtpCompleteBufferManager |
+| `ftp_video_transfer_queue` | L596–624 | autoFtpVideoTransferService | FtpJobManager |
+| `manual_video_group_queue` | L858–873 | manualTransferRoutes | manualTransferRoutes |
+| `file_transfer_queue` | L876–903 | FileTransferQueueService | manualTransferRoutes |
+
+**Unmanaged tables** (exist in live DB, not created by this migration — removed by `--drop`):  
+`config_audit_log`, `config_backup_snapshots`, `config_conflict_log`, `config_lock_history`, `config_performance_metrics`, `config_schema_versions`, `config_validation_errors` — zero references in application code; created by an external/legacy tool.
 
 ---
 
@@ -133,30 +157,50 @@ CREATE INDEX idx_device_connections_status_connected
 
 ---
 
-## `transfer_job` / `transfer_job_log` (Legacy Manual Flow)
+## `transfer_job` / `transfer_job_log` / `manual_video_group_queue` (Manual Flow)
 
-Used by the manual transfer UI (`routes/mainControlRoutes.js`, `routes/manualTransferRoutes.js`). May be superseded by `transfer_queue_job` — see tech debt T-4.
+Used by `routes/mainControlRoutes.js` and `routes/manualTransferRoutes.js` for both image and video manual USB transfers.
 
 ```sql
 CREATE TABLE transfer_job (
-  id          SERIAL PRIMARY KEY,
-  start_date  TEXT,
-  start_time  TEXT,
-  end_date    TEXT,
-  end_time    TEXT,
-  car_plate   TEXT,
-  usb_path    TEXT,
-  status      TEXT,       -- 'pending' | 'running' | 'done' | 'failed'
-  date        DATE,
-  time        TIME
+  id         SERIAL PRIMARY KEY,
+  start_date DATE,  start_time TIME,
+  end_date   DATE,  end_time   TIME,
+  car_plate  TEXT,
+  usb_path   TEXT,
+  status     TEXT,                        -- 'pending' | 'running' | 'done' | 'failed'
+  date       DATE,  time TIME,
+  data_type  VARCHAR(10) DEFAULT 'images' -- ALTER L854: 'images' | 'videos' | 'both'
 );
 
 CREATE TABLE transfer_job_log (
-  id               SERIAL PRIMARY KEY,
-  file_id          INTEGER REFERENCES files(id),
-  transfer_job_id  INTEGER REFERENCES transfer_job(id),
-  transferred      BOOLEAN
+  id              SERIAL PRIMARY KEY,
+  file_id         INT,                    -- nullable (ALTER L849); NULL for video rows
+  transfer_job_id INT NOT NULL REFERENCES transfer_job(id),
+  transferred     BOOLEAN DEFAULT false,
+  media_file_id   INT REFERENCES iss_media_files(id), -- ALTER L850; set for video rows
+  CONSTRAINT fk_file FOREIGN KEY (file_id) REFERENCES files(id)
 );
+
+-- One row per camera batch for manual video transfers (N segments → 1 .mp4).
+CREATE TABLE manual_video_group_queue (
+  id                   SERIAL PRIMARY KEY,
+  transfer_job_id      INT NOT NULL REFERENCES transfer_job(id),
+  camera_id            INT NOT NULL,
+  group_key            TEXT NOT NULL,
+  source_file_ids      INT[] NOT NULL,
+  segment_count        INT NOT NULL,
+  status               VARCHAR(20) NOT NULL DEFAULT 'pending',
+  -- status lifecycle: pending → converting → converted → copying → transferred | failed
+  converted_video_path TEXT,
+  converted_video_name TEXT,
+  error_message        TEXT,
+  created_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at           TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_mvgq_job_status
+  ON manual_video_group_queue(transfer_job_id, status);
 ```
 
 ---
@@ -167,32 +211,75 @@ Created in migration (L151–167) but **no runtime JavaScript reads or writes th
 
 ---
 
+## `file_transfer_queue`
+
+Unified low-level copy queue for all manual and auto USB transfers. Written and read exclusively by [`utils/FileTransferQueueService.js`](../../utils/FileTransferQueueService.js); consumed by `routes/manualTransferRoutes.js`.
+
+**No FK constraints by design**: video rows carry `file_id = NULL` (their source is `iss_media_files`, not `files`). The service sets `updated_at` in code — no trigger needed.
+
+```sql
+CREATE TABLE file_transfer_queue (
+  id               SERIAL PRIMARY KEY,
+  service_type     VARCHAR(20) NOT NULL,          -- 'auto' | 'manual' | 'video'
+  file_id          INTEGER,                       -- NULL for video rows
+  file_path        TEXT NOT NULL,
+  file_size        BIGINT DEFAULT 0,
+  file_name        TEXT,
+  destination_path TEXT NOT NULL,
+  priority         INTEGER NOT NULL,              -- 1=image auto, 2=video, 3=manual
+  batch_id         VARCHAR(36) NOT NULL,          -- UUID v4 per batch
+  transfer_job_id  INTEGER,                       -- soft reference to transfer_job.id
+  metadata         JSONB,
+  -- image rows: {plate_num, site_id, date_folder, time_folder, cam_id}
+  -- video rows: {video_group_id, camera_id}
+  status           VARCHAR(20) DEFAULT 'pending', -- pending|processing|transferred|failed|cancelled
+  created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  transferred_at   TIMESTAMP,
+  error_message    TEXT,
+  retry_count      INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_status          ON file_transfer_queue(status);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_priority        ON file_transfer_queue(priority DESC);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_batch_id        ON file_transfer_queue(batch_id);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_service_type    ON file_transfer_queue(service_type);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_transfer_job_id ON file_transfer_queue(transfer_job_id);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_created_at      ON file_transfer_queue(created_at);
+```
+
+---
+
 ## `iss_media_files`
 
 Index of ISS NVR video MP4 segments. Written by `monitorISSMediaFilesOptimizedMicroservice`.
 
 ```sql
 CREATE TABLE iss_media_files (
-  id               SERIAL PRIMARY KEY,
-  file_path        TEXT UNIQUE NOT NULL,
-  file_name        TEXT,
-  site_id          TEXT,
-  file_size        BIGINT NOT NULL,
-  camera_id        INTEGER NOT NULL,
-  recording_date   DATE,
-  recording_time   TIME,
-  precise_time     TEXT,           -- High-precision timestamp string
-  timezone_offset  TEXT,
-  is_auto_transferred  BOOLEAN DEFAULT FALSE,
-  is_ftp_transferred   BOOLEAN DEFAULT FALSE,
-  deleted              BOOLEAN DEFAULT FALSE,
-  created_at           TIMESTAMP DEFAULT NOW(),
-  updated_at           TIMESTAMP DEFAULT NOW()
+  id                  SERIAL PRIMARY KEY,
+  file_path           TEXT UNIQUE NOT NULL,
+  file_name           TEXT NOT NULL,
+  file_size           BIGINT NOT NULL,
+  camera_id           INTEGER NOT NULL,
+  site_id             TEXT,
+  recording_date      DATE NOT NULL,
+  recording_time      TIME NOT NULL,
+  timezone_offset     TEXT,
+  precise_time        TIME NOT NULL,
+  is_auto_transferred BOOLEAN DEFAULT FALSE,
+  is_ftp_transferred  BOOLEAN DEFAULT FALSE,
+  deleted             BOOLEAN DEFAULT FALSE,
+  created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX idx_iss_media_files_auto_transferred ON iss_media_files(is_auto_transferred);
-CREATE INDEX idx_iss_media_files_camera_date      ON iss_media_files(camera_id, recording_date);
-CREATE INDEX idx_iss_media_files_deleted          ON iss_media_files(deleted);
+-- Partial indexes — fast scans for transfer services and cleanup
+CREATE INDEX IF NOT EXISTS idx_iss_media_files_auto_transferred
+  ON iss_media_files(is_auto_transferred) WHERE is_auto_transferred = false;
+CREATE INDEX IF NOT EXISTS idx_iss_media_files_camera_date
+  ON iss_media_files(camera_id, recording_date);
+CREATE INDEX IF NOT EXISTS idx_iss_media_files_deleted
+  ON iss_media_files(deleted) WHERE deleted = false;
 ```
 
 ---
@@ -322,19 +409,38 @@ Each adds `ftp_server_config JSONB` (on the job table) and `ftp_remote_path`, `f
 
 ---
 
-## Database Functions
+## Database Functions and Triggers
+
+**4 functions:**
 
 ```sql
--- Human-readable uptime from minutes (L191-206)
-CREATE FUNCTION get_readable_uptime(minutes INTEGER) RETURNS TEXT ...
+-- Human-readable uptime from minutes (L200-215)
+CREATE OR REPLACE FUNCTION get_readable_uptime(minutes INTEGER) RETURNS TEXT ...
 
--- Generic updated_at trigger (L448-454)
-CREATE FUNCTION update_updated_at_column() RETURNS TRIGGER ...
+-- Generic updated_at setter reused by all video + FTP triggers (L457-463)
+CREATE OR REPLACE FUNCTION update_updated_at_column() RETURNS TRIGGER ...
 
--- Queue-specific updated_at triggers (L267-282)
-CREATE FUNCTION update_transfer_queue_updated_at() RETURNS TRIGGER ...
-CREATE FUNCTION update_transfer_queue_job_updated_at() RETURNS TRIGGER ...
+-- USB image queue-specific updated_at setters (L276-291)
+CREATE OR REPLACE FUNCTION update_transfer_queue_updated_at() RETURNS TRIGGER ...
+CREATE OR REPLACE FUNCTION update_transfer_queue_job_updated_at() RETURNS TRIGGER ...
 ```
+
+**10 triggers** (all `BEFORE UPDATE ... FOR EACH ROW`; all guarded with `DROP TRIGGER IF EXISTS` for idempotency):
+
+| Trigger | Table |
+|---|---|
+| `trigger_transfer_queue_updated_at` | `transfer_queue` |
+| `trigger_transfer_queue_job_updated_at` | `transfer_queue_job` |
+| `update_video_converted_buffer_updated_at` | `video_converted_buffer` |
+| `update_video_transfer_queue_job_updated_at` | `video_transfer_queue_job` |
+| `update_video_transfer_queue_updated_at` | `video_transfer_queue` |
+| `update_ftp_image_transfer_queue_job_updated_at` | `ftp_image_transfer_queue_job` |
+| `update_ftp_image_transfer_queue_updated_at` | `ftp_image_transfer_queue` |
+| `update_ftp_video_converted_buffer_updated_at` | `ftp_video_converted_buffer` |
+| `update_ftp_video_transfer_queue_job_updated_at` | `ftp_video_transfer_queue_job` |
+| `update_ftp_video_transfer_queue_updated_at` | `ftp_video_transfer_queue` |
+
+> `file_transfer_queue` has no trigger — `FileTransferQueueService.js` sets `updated_at` in every UPDATE query directly.
 
 ---
 

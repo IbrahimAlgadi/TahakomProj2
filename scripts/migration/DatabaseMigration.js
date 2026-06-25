@@ -1,7 +1,7 @@
 const { Client } = require('pg');
 
-const CREATE_DB = true;
-const DROP_SCHEMA = true;  // Set to true to drop all tables before recreating
+const DROP_SCHEMA = process.argv.includes('--drop'); // pass --drop for a clean from-scratch rebuild
+const CREATE_DB = true;                              // always ensure the database exists (idempotent)
 
 class AppDatabase {
   DB_USER = "postgres";
@@ -291,11 +291,13 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Triggers to automatically update updated_at
+DROP TRIGGER IF EXISTS trigger_transfer_queue_updated_at ON transfer_queue;
 CREATE TRIGGER trigger_transfer_queue_updated_at
     BEFORE UPDATE ON transfer_queue
     FOR EACH ROW
     EXECUTE FUNCTION update_transfer_queue_updated_at();
 
+DROP TRIGGER IF EXISTS trigger_transfer_queue_job_updated_at ON transfer_queue_job;
 CREATE TRIGGER trigger_transfer_queue_job_updated_at
     BEFORE UPDATE ON transfer_queue_job
     FOR EACH ROW
@@ -873,6 +875,36 @@ CREATE INDEX IF NOT EXISTS idx_mvgq_job_status
     ON manual_video_group_queue(transfer_job_id, status);
 
 
+-- Manual / auto unified transfer queue (owned by FileTransferQueueService.js)
+-- No FK constraints by design: video rows carry file_id = NULL (source is iss_media_files).
+CREATE TABLE IF NOT EXISTS file_transfer_queue (
+    id               SERIAL PRIMARY KEY,
+    service_type     VARCHAR(20) NOT NULL,
+    file_id          INTEGER,
+    file_path        TEXT NOT NULL,
+    file_size        BIGINT DEFAULT 0,
+    file_name        TEXT,
+    destination_path TEXT NOT NULL,
+    priority         INTEGER NOT NULL,
+    batch_id         VARCHAR(36) NOT NULL,
+    transfer_job_id  INTEGER,
+    metadata         JSONB,
+    status           VARCHAR(20) DEFAULT 'pending',
+    created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    transferred_at   TIMESTAMP,
+    error_message    TEXT,
+    retry_count      INTEGER DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_status          ON file_transfer_queue(status);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_priority        ON file_transfer_queue(priority DESC);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_batch_id        ON file_transfer_queue(batch_id);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_service_type    ON file_transfer_queue(service_type);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_transfer_job_id ON file_transfer_queue(transfer_job_id);
+CREATE INDEX IF NOT EXISTS idx_file_transfer_queue_created_at      ON file_transfer_queue(created_at);
+
+
     `);
       console.log('   ✅ All tables, indexes, and functions created successfully');
 
@@ -884,85 +916,56 @@ CREATE INDEX IF NOT EXISTS idx_mvgq_job_status
     }
   }
 
-  async dropTables() {
-    const client = new Client({
+  async dropSchema() {
+    // Use a postgres-database connection to terminate all other connections
+    // to tahakom_transfer before dropping. This prevents deadlocks from PM2
+    // services that hold AccessShareLocks on tables we need to drop.
+    const adminClient = new Client({
       user: this.DB_USER,
       host: this.DB_HOST,
-      database: this.DB_APP, // Connect to the new database
+      database: 'postgres',
+      password: this.DB_PASSWORD,
+      port: 5432,
+    });
+
+    const appClient = new Client({
+      user: this.DB_USER,
+      host: this.DB_HOST,
+      database: this.DB_APP,
       password: this.DB_PASSWORD,
       port: 5432,
     });
 
     try {
-      await client.connect();
+      await adminClient.connect();
 
-      console.log('   🔄 Dropping triggers and functions...');
-      // Drop triggers first
-      await client.query(`
-        -- Drop triggers
-        DROP TRIGGER IF EXISTS update_video_converted_buffer_updated_at ON video_converted_buffer;
-        DROP TRIGGER IF EXISTS update_video_transfer_queue_job_updated_at ON video_transfer_queue_job;
-        DROP TRIGGER IF EXISTS update_video_transfer_queue_updated_at ON video_transfer_queue;
-        DROP TRIGGER IF EXISTS update_ftp_video_converted_buffer_updated_at ON ftp_video_converted_buffer;
-        DROP TRIGGER IF EXISTS update_ftp_video_transfer_queue_job_updated_at ON ftp_video_transfer_queue_job;
-        DROP TRIGGER IF EXISTS update_ftp_video_transfer_queue_updated_at ON ftp_video_transfer_queue;
-        DROP TRIGGER IF EXISTS update_ftp_image_transfer_queue_job_updated_at ON ftp_image_transfer_queue_job;
-        DROP TRIGGER IF EXISTS update_ftp_image_transfer_queue_updated_at ON ftp_image_transfer_queue;
-        DROP TRIGGER IF EXISTS trigger_transfer_queue_updated_at ON transfer_queue;
-        DROP TRIGGER IF EXISTS trigger_transfer_queue_job_updated_at ON transfer_queue_job;
-        
-        -- Drop functions
-        DROP FUNCTION IF EXISTS get_readable_uptime(INTEGER);
-        DROP FUNCTION IF EXISTS update_transfer_queue_updated_at();
-        DROP FUNCTION IF EXISTS update_transfer_queue_job_updated_at();
-        DROP FUNCTION IF EXISTS update_video_transfer_queue_updated_at();
-        DROP FUNCTION IF EXISTS update_video_transfer_queue_job_updated_at();
-        DROP FUNCTION IF EXISTS update_iss_media_files_updated_at();
-        DROP FUNCTION IF EXISTS update_video_converted_buffer_updated_at();
-        DROP FUNCTION IF EXISTS update_updated_at_column();
-      `);
+      console.log('   🔌 Terminating all other connections to the database...');
+      const result = await adminClient.query(`
+        SELECT pg_terminate_backend(pid)
+        FROM pg_stat_activity
+        WHERE datname = $1
+          AND pid <> pg_backend_pid()
+          AND state IS NOT NULL
+      `, [this.DB_APP]);
+      console.log(`   ✅ Terminated ${result.rowCount} connection(s)`);
 
-      console.log('   🔄 Dropping tables in dependency order...');
-      // Drop tables in correct order (child tables first, then parent tables)
-      await client.query(`
-        -- Drop dashboard rollup materialized views
-        DROP MATERIALIZED VIEW IF EXISTS mv_files_yearly_agg CASCADE;
-        DROP MATERIALIZED VIEW IF EXISTS mv_files_monthly_agg CASCADE;
-        DROP MATERIALIZED VIEW IF EXISTS mv_files_daily_agg CASCADE;
-        DROP MATERIALIZED VIEW IF EXISTS mv_files_yearly CASCADE;
-        DROP MATERIALIZED VIEW IF EXISTS mv_files_monthly CASCADE;
-        DROP MATERIALIZED VIEW IF EXISTS mv_files_daily CASCADE;
+      await adminClient.end();
 
-        -- Drop child tables first (those with foreign keys)
-        DROP TABLE IF EXISTS transfer_queue CASCADE;
-        DROP TABLE IF EXISTS video_transfer_queue CASCADE;
-        DROP TABLE IF EXISTS video_converted_buffer CASCADE;
-        DROP TABLE IF EXISTS ftp_video_transfer_queue CASCADE;
-        DROP TABLE IF EXISTS ftp_video_converted_buffer CASCADE;
-        DROP TABLE IF EXISTS ftp_image_transfer_queue CASCADE;
-        DROP TABLE IF EXISTS manual_video_group_queue CASCADE;
-        DROP TABLE IF EXISTS transfer_job_log CASCADE;
-        DROP TABLE IF EXISTS auto_transfer_job CASCADE;
-        
-        -- Drop parent tables
-        DROP TABLE IF EXISTS transfer_queue_job CASCADE;
-        DROP TABLE IF EXISTS video_transfer_queue_job CASCADE;
-        DROP TABLE IF EXISTS ftp_video_transfer_queue_job CASCADE;
-        DROP TABLE IF EXISTS ftp_image_transfer_queue_job CASCADE;
-        DROP TABLE IF EXISTS transfer_job CASCADE;
-        DROP TABLE IF EXISTS auto_transfer_device CASCADE;
-        DROP TABLE IF EXISTS device_connections CASCADE;
-        DROP TABLE IF EXISTS iss_media_files CASCADE;
-        DROP TABLE IF EXISTS files CASCADE;
-      `);
+      await appClient.connect();
 
-      console.log('   ✅ All tables and functions dropped successfully');
+      console.log('   🔄 Dropping ALL objects (DROP SCHEMA public CASCADE)...');
+      await appClient.query(`DROP SCHEMA public CASCADE`);
+      await appClient.query(`CREATE SCHEMA public`);
+      await appClient.query(`GRANT ALL ON SCHEMA public TO postgres`);
+      await appClient.query(`GRANT ALL ON SCHEMA public TO public`);
+      console.log('   ✅ Schema dropped and recreated (clean slate)');
 
     } catch (err) {
-      console.error('❌ Error dropping tables:', err);
+      console.error('❌ Error dropping schema:', err);
       throw err;
     } finally {
-      await client.end();
+      try { await adminClient.end(); } catch (_) {}
+      try { await appClient.end(); } catch (_) {}
     }
   }
 
@@ -1004,41 +1007,35 @@ ADD COLUMN export_params JSONB DEFAULT NULL;
 
 }
 (async () => {
+  const appDb = new AppDatabase();
 
-  if (CREATE_DB) {
-    const appDb = new AppDatabase();
-    
-    try {
-      console.log('🚀 Starting database migration...');
-      
-      // Create database if it doesn't exist (uncomment if needed)
-      await appDb.createDatabase();
-      
-      if (DROP_SCHEMA) {
-        console.log('🗑️  Dropping existing schema...');
-        await appDb.dropTables();
-        console.log('✅ Schema dropped successfully');
-      }
+  try {
+    console.log('🚀 Starting database migration...');
 
-      console.log('🏗️  Creating tables...');
-      await appDb.createTables();
-      console.log('✅ Tables created successfully');
+    await appDb.createDatabase(); // idempotent — ignores "already exists"
 
-      // Grant privileges after creating tables
-      console.log('🔐 Granting privileges...');
-      await appDb.grantPrivileges();
-      console.log('✅ Privileges granted successfully');
-
-      console.log('🎉 Database migration completed successfully!');
-      
-    } catch (error) {
-      console.error('❌ Database migration failed:', error);
-      process.exit(1);
+    if (DROP_SCHEMA) {
+      console.log('🗑️  --drop passed: wiping schema for a clean rebuild (ALL data will be lost)...');
+      await appDb.dropSchema();
+      console.log('✅ Schema wiped successfully');
+    } else {
+      console.log('ℹ️  No --drop flag: running create-only/idempotent migration (existing data preserved).');
     }
-  } else {
-    console.log('⏭️  Database migration skipped (CREATE_DB = false)');
-  }
 
+    console.log('🏗️  Creating tables...');
+    await appDb.createTables();
+    console.log('✅ Tables created successfully');
+
+    console.log('🔐 Granting privileges...');
+    await appDb.grantPrivileges();
+    console.log('✅ Privileges granted successfully');
+
+    console.log('🎉 Database migration completed successfully!');
+
+  } catch (error) {
+    console.error('❌ Database migration failed:', error);
+    process.exit(1);
+  }
 })()
 
 
