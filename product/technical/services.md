@@ -1,7 +1,7 @@
 # Service Reference
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-25 (manual USB transfer: AES-256-CBC encryption implemented for images and videos; POST /manual-transfer/decrypt route added; decryptUSBFiles.js rewritten for current metadata format)
+Last updated: 2026-06-25 (autoUSBTransferService: redesigned to split-cursor parallel architecture — independent imgCursor / vidCursor; manual USB transfer: AES-256-CBC per-file encryption + RSA key envelope; POST /manual-transfer/decrypt route; cert path resolved to app root; decryptUSBFiles.js rewritten for _metadata.json format)
 
 > Summary view. For data-flow diagrams, see [architecture.md](architecture.md).  
 > For full table definitions, see [database/schema.md](database/schema.md).
@@ -127,22 +127,23 @@ All PM2 services use the SecurOS-bundled Node.js interpreter (`C:\Program Files 
 | In-memory cache | `Map<folderPath, Set<fileName>>` — last known file set per folder. Each tier diffs current disk listing against the cache: new files → INSERT; removed files (slow tier only) → `deleted=true`. O(n) per folder where n = files in that folder. |
 | Windows reliability | Replaces chokidar which had blind spots for new hourly folder creation and missed SecuROS individual-file purges on Windows. Polling is deterministic and folder-scoped. |
 
-### autoUSBTransferService.js  _(new — unified time-cursor USB transfer)_
+### autoUSBTransferService.js  _(unified split-cursor USB transfer)_
 
 | Attribute | Value |
 |---|---|
 | PM2 name | `autoUSBTransferService` |
 | Dependencies | ConfigStateServiceRedis, monitorISSMediaFilesOptimizedMicroservice, monitorConnectedExternalDrivesMicroservice |
-| DB reads | `files` (images), `iss_media_files` (video segments) |
+| DB reads | `files` (images, queried with `IS NOT TRUE` to handle NULL rows); `iss_media_files` (video segments, filtered by `precise_time`) |
 | DB writes | UPDATE `files.is_auto_transferred = true` (images); UPDATE `iss_media_files.is_auto_transferred = true` (videos) |
-| Config state | `dataTransferConfig.json` → `autoTransfer.lastTransferredAt`, `autoTransfer.lastConnectedAt` |
-| Key services | `services/image-transfer/state/ImageJobManager.js` (`getImagesInWindow`, `markImagesTransferred`); `services/video-transfer/state/JobManager.js` (`getVideoSegmentsInWindow`, `markVideoSegmentsTransferred`); `services/video-transfer/processors/VideoProcessor.js` (FFmpeg) |
+|| Config state | `dataTransferConfig.json` -> `autoTransfer.lastImageTransferredAt`, `autoTransfer.lastVideoTransferredAt`, `autoTransfer.lastConnectedAt` |
+|| Key services | `services/image-transfer/state/ImageJobManager.js` (`getImagesInWindow` -- IS NOT TRUE guard, `markImagesTransferred`); `services/video-transfer/state/JobManager.js` (`getVideoSegmentsInWindow` -- uses `precise_time`, `markVideoSegmentsTransferred`); `services/video-transfer/processors/VideoProcessor.js` (FFmpeg) |
 | Logging | `utils/logger.js` `createLogger({ service: 'autoUSBTransferService' })`; logFile `auto-usb-transfer` |
-| Purpose | Single service that transfers both ALPR images and ISS video segments to a connected USB drive using a persistent 5-minute time-cursor. Resumes across restarts and USB reconnects. Images copied first per window, then `.issvd` segments converted (FFmpeg) and concatenated per camera and transferred. |
-| Cursor logic | On start: reads `autoTransfer.lastTransferredAt` from config. If set and age ≤ 7 days → resume from that timestamp; else → fresh start at now − 1 hour. On each completed window → writes `lastTransferredAt = windowEnd` back to config file. |
-| USB folder structure | images: `{drive}:\images\{relative-export-path}\{filename}`; videos: `{drive}:\videos\{camera_id}\cam_{id}_{date}_{wStart}--{wEnd}.mp4` |
+| Purpose | Single service that transfers both ALPR images and ISS video segments to a connected USB drive using **two independent time-cursors** (`imgCursor` / `vidCursor`) advancing in parallel 5-minute windows. Image loop runs continuously and is never blocked waiting for video; video loop tries to catch up with the image cursor. Both loops run concurrently via `Promise.all([runImageLoop(), runVideoLoop()])`. Resumes both cursors independently across restarts and USB reconnects. |
+|| Cursor logic | **Image loop** (`runImageLoop`): reads `autoTransfer.lastImageTransferredAt`. If age <= 7 days -> resume; else -> fresh start at now - 1 hour. Writes `lastImageTransferredAt = windowEnd` after each window. **Video loop** (`runVideoLoop`): same using `lastVideoTransferredAt`. Both cursors persisted independently so video conversion never stalls image transfer. |
+| USB folder structure | images: `{drive}:\images\{site_id}\{YYYY-MM-DD}\{HH-mm}\{filename}`; videos: `{drive}:\videos\{camera_id}\cam_{id}_{date}_{wStart}--{wEnd}.mp4` |
 | Error handling | ENOSPC → halts loop (cursor not advanced); missing segments on disk → marked `deleted=true`, skipped; FFmpeg failure per camera → skipped, retried next window; image copy failure → skipped (file remains `is_auto_transferred=false`, retried next window) |
-| Idle behaviour | When cursor ≥ now: sleeps 5 minutes then rechecks for new data |
+|| Idle behaviour | Each loop independently sleeps 5 minutes when its cursor >= now, then rechecks for new data |
+| Redis metrics | `publishMetric` publishes `job_start`, `batch_start`, `camera_progress`, `batch_complete` for the `auto_transfer.njk` UI (split cursor badges + camera-by-camera video progress) |
 
 ### refactored_autoVideoTransferEDAMicroservice.js  _(retired from PM2 — 2026-06-24)_
 

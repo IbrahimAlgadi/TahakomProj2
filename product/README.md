@@ -1,7 +1,7 @@
 # Product Knowledge Base
 
 **Tahakom Data Transfer System**  
-Last updated: 2026-06-25 (manual USB transfer encryption implemented end-to-end: AES-256-CBC per-file encryption with RSA-OAEP key envelope in manualTransferRoutes.js; POST /manual-transfer/decrypt route with UI card in manual_usb.njk; decryptUSBFiles.js rewritten to handle current *_metadata.json format for both images and videos)
+Last updated: 2026-06-25 (autoUSBTransferService: split-cursor parallel architecture — independent imgCursor/vidCursor, IS NOT TRUE SQL fix, precise_time fix; manual USB: AES-256-CBC+RSA-OAEP encryption with cert path fix, POST /manual-transfer/decrypt route + Decrypt card UI, decryptUSBFiles.js rewritten)
 
 This folder is the **single source of truth** for product decisions, requirements, technical architecture, and the agent team for the Tahakom Data Transfer System.
 
